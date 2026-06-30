@@ -1,0 +1,1671 @@
+{
+  "dimensions": [
+    {
+      "dimension": "A (infra): object creation/lifetime + reusable parent-child tree (A1, A2, C5)",
+      "summary": "This engine is a hand-rolled UObject/GC clone of UE. Objects are created via UObjectManager::Get().CreateObject<T>(Outer) (there is NO NewObject<> — that token only appears once in a property helper), and destroyed via a two-phase deferred GC (DestroyObject -> BeginDestroy + RF_PendingKill, then a mark/sweep that purges). Liveness is tracked through a global GUObjectSet and per-object SerialNumber; the discipline a UI tree must follow is: a GC root (a Singleton FGCObject or a rooted UObject) must own the tree and report every node from AddReferencedObjects(), otherwise nodes get swept. There IS an existing, battle-tested N-level parent/child tree to mirror: USceneComponent's attachment hierarchy (ParentComponent: TWeakObjectPtr + ChildComponents: TArray, with SetParent/AddChild/RemoveChild/GetChildren/IsDescendantOf and cycle rejection). It also already demonstrates the exact pattern the design needs: a parent-relative transform cached lazily and propagated to children via a dirty-flag (MarkTransformDirty recurses into ChildComponents) — directly analogous to GlobalScale/RectTransform recomputation. For C5, USceneComponent fuses transform onto the node (logic lives in subclasses/sibling UPrimitiveComponent, transform lives on USceneComponent itself); it does NOT use a separate Slot object. So the recommendation is to put RectTransform as a value-struct member ON the Element node, mirroring how FTransform RelativeTransform is a member of USceneComponent — a separate Slot/Transform object would be over-engineering inconsistent with this engine's patterns. The new model should be a SEPARATE lightweight UObject tree (Canvas/Group/Element : UObject), NOT built on the RmlUi UUserWidget path (which wraps Rml::ElementDocument HTML/CSS and has no pivot/anchor/px-rect concept), though it should reuse the same GC-keepalive idiom UUIManager already uses (UUIManager is an FGCObject that keeps widgets alive via AddReferencedObjects).",
+      "findings": [
+        {
+          "checklistItem": "A1",
+          "conclusion": "Objects derive from UObject and are created with UObjectManager::Get().CreateObject<T>(InOuter), which news the T, sets its Outer (logical scope, NOT ownership), and auto-names it. There is NO NewObject<> free function in this engine (the only 'NewObject' grep hit is an unrelated identifier in ObjectProperty.cpp); CreateObject<> is the real factory, used in 30+ files. The Canvas/Group/Element nodes should be UObjects created the same way.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/Object/Object.h",
+              "line": "248-261",
+              "note": "UObjectManager::CreateObject<T>(UObject* InOuter): static_assert derives-from-UObject, new T(), SetOuter, auto-name via NameCounters"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Object/Object.h",
+              "line": "56-58",
+              "note": "Outer is 'logical scope (not ownership)', excluded from serialization — so Outer is NOT what keeps a child alive"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Object/ObjectProperty.cpp",
+              "line": "1",
+              "note": "only file matching 'NewObject' — confirms no NewObject<> factory exists; CreateObject<> is the idiom"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": false
+        },
+        {
+          "checklistItem": "A1",
+          "conclusion": "Lifetime is a two-phase deferred GC, NOT immediate delete or refcounting. DestroyObject() only runs BeginDestroy()+MarkPendingKill() and requests a collection; actual delete happens in FGarbageCollector sweep. Reachability is computed by walking AddReferencedObjects() from roots (RF_RootSet UObjects + registered FGCObject external roots). DISCIPLINE FOR UI TREE: every node must be reachable from a root each GC pass or it is purged. The practical pattern is a Singleton manager that is an FGCObject and reports the root(s) in AddReferencedObjects; children are kept alive by their parent's AddReferencedObjects (as AActor does for components).",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/Object/Object.h",
+              "line": "266-285",
+              "note": "DestroyObject: BeginDestroy + MarkPendingKill + RequestGarbageCollection; no synchronous free. DestroyObjectImmediate just forwards to DestroyObject"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Object/GarbageCollection.h",
+              "line": "79-92",
+              "note": "FGCObject: abstract external root; subclass overrides AddReferencedObjects + GetReferencerName to keep objects alive"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Object/GarbageCollection.h",
+              "line": "108-110",
+              "note": "MarkObject / AddExternalRoot / RemoveExternalRoot — how a manager registers as a GC root"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": true
+        },
+        {
+          "checklistItem": "A1",
+          "conclusion": "Three smart-pointer flavors exist. TObjectPtr<T> = thin owning-intent raw wrapper (used in UPROPERTY(Instanced) lists; it is what AddReferencedObjects walks to keep things alive). TWeakObjectPtr<T> = serial-number-validated non-owning back-reference (rejects PendingKill/Garbage). TSubclassOf<T> = type-checked UClass* for 'spawn of class X'. UI tree should use: TObjectPtr (or TArray<TObjectPtr>) reported via AddReferencedObjects for parent->child (owning, keepalive), and TWeakObjectPtr for child->parent (back-ref, no keepalive, no cycle).",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/Object/Ptr/ObjectPtr.h",
+              "line": "8-46",
+              "note": "TObjectPtr<T>: thin raw-pointer wrapper, GetValid() filters via ::IsValid; this is the owning-edge type"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Object/Ptr/WeakObjectPtr.h",
+              "line": "45-59",
+              "note": "TWeakObjectPtr::Get() validates SerialNumber + rejects RF_PendingKill|RF_Garbage — safe back-reference, does not keep alive"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Object/Ptr/SubclassOf.h",
+              "line": "12-39",
+              "note": "TSubclassOf<T>: type-guarded UClass* slot, used for class-typed spawn fields"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": false
+        },
+        {
+          "checklistItem": "A1",
+          "conclusion": "No pools/arenas/freelists for UObjects: operator new/delete just std::malloc/free with MemoryStats accounting. So the UI tree gets no special allocator benefit from being UObjects; the only reason to make nodes UObjects is GC + reflection/serialization + the existing TObjectPtr/WeakObjectPtr machinery.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/Object/Object.h",
+              "line": "140-157",
+              "note": "UObject::operator new/delete = std::malloc/std::free + MemoryStats — no pool/arena/freelist"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": false
+        },
+        {
+          "checklistItem": "A2",
+          "conclusion": "YES — USceneComponent is a ready-made N-level parent/child node tree the Canvas->Group->Element tree should mirror almost 1:1. Exact API: add child = AddChild(child) (forwards to child->SetParent(this)) or AttachToComponent(parent, socket); set/change parent = SetParent(newParent); iterate children = GetChildren() (const TArray<USceneComponent*>&) or GetChildComponents() (copy); get parent = GetParent(). It already enforces no-cycle (SetParent rejects if newParent IsDescendantOf this) and self-attach. Storage: ChildComponents = TArray<USceneComponent*> (raw, parent->child), ParentComponent = TWeakObjectPtr<USceneComponent> (child->parent back-ref). This is exactly the owning-list + weak-backref shape recommended in A1.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/Component/SceneComponent.h",
+              "line": "26-45",
+              "note": "Hierarchy API: AttachToComponent/SetParent/GetParent/AddChild/RemoveChild/ContainsChild/IsDescendantOf/GetChildComponents/GetChildren"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Component/SceneComponent.h",
+              "line": "145-146",
+              "note": "ParentComponent = TWeakObjectPtr<USceneComponent>; ChildComponents = TArray<USceneComponent*> — the storage to mirror"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Component/SceneComponent.cpp",
+              "line": "249-286",
+              "note": "SetParent: cycle check (IsDescendantOf), detach from old parent, push_back into new parent's ChildComponents, MarkTransformDirty; AddChild forwards to child->SetParent(this)"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": true
+        },
+        {
+          "checklistItem": "A2",
+          "conclusion": "AActor is the other tree shape but is the WRONG mirror for Canvas->Group->Element: it is a flat owner of a component LIST (OwnedComponents: TArray<TObjectPtr<UActorComponent>> + a single RootComponent), not a recursive node. It does, however, demonstrate the GC-keepalive contract precisely: AActor::AddReferencedObjects reports RootComponent + OwnedComponents so the whole component set survives sweep. The Canvas (root) should likewise report its child Groups, and each node its children, from AddReferencedObjects.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/GameFramework/AActor.h",
+              "line": "179-199",
+              "note": "RootComponent: TObjectPtr<USceneComponent> (Transient,Instanced) + OwnedComponents: TArray<TObjectPtr<UActorComponent>> — flat list, not recursive"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/GameFramework/AActor.cpp",
+              "line": "874-880",
+              "note": "AActor::AddReferencedObjects reports RootComponent + OwnedComponents to keep the tree alive through GC — the exact pattern UI nodes must follow"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Component/SceneComponent.cpp",
+              "line": "241-245",
+              "note": "USceneComponent::AddReferencedObjects reports ChildComponents — recursive keepalive already implemented per-node; copy this for Element->children"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": false
+        },
+        {
+          "checklistItem": "A2",
+          "conclusion": "The existing RmlUi widget tree (UUserWidget/UUIManager) is NOT a usable parent/child node tree for this model. UUserWidget is a flat wrapper around a single Rml::ElementDocument (HTML/CSS); the actual element tree lives inside RmlUi (Rml::Element), addressed by string IDs via SetText/SetProperty — there is no pivot/anchor/px-RectTransform concept and no UObject-level child list. UUIManager just holds flat TArrays of widgets. So the new simple model should be a SEPARATE lightweight UObject tree, reusing the SceneComponent hierarchy pattern, not built on RmlUi.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/UI/UserWidget.h",
+              "line": "55-87",
+              "note": "UUserWidget wraps one Rml::ElementDocument*; element access is by string id (SetText/SetProperty) — no rect/anchor/pivot, no UObject child tree"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/UI/UIManager.h",
+              "line": "96-145",
+              "note": "UUIManager is a Singleton+FGCObject holding flat TArray<UUserWidget*> lists; RmlUi (Rml::Context) does the real layout via CSS"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/UI/UIManager.cpp",
+              "line": "606-619",
+              "note": "CreateWidget uses CreateObject<UUserWidget>(); UUIManager::AddReferencedObjects keeps widgets alive — reuse this FGCObject manager idiom for the new Canvas root"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": false
+        },
+        {
+          "checklistItem": "C5",
+          "conclusion": "Put RectTransform ON the Element node as a value-struct member (FUIRectTransform RectTransform { pivot, anchor, position, size }), mirroring how USceneComponent stores FTransform RelativeTransform directly as a member rather than in a separate Slot object. This engine's precedent FUSES coords onto the node: USceneComponent IS the transform node, and differing logic is expressed by subclassing/sibling components, not by a Slot. Crucially, SceneComponent also already gives the lazy-cache + dirty-propagation recipe the layout math needs: a cached world matrix recomputed on demand and a MarkTransformDirty that recurses into all children — the Element should cache its computed FinalPos/scaled rect and invalidate children the same way when its RectTransform or the Canvas GlobalScale changes. A separate Slot/Transform object (UE FSlateChildSize / UMG Slot style) would be over-engineering against this codebase's grain and is explicitly the kind of Unreal-copying the brief warns against.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/Component/SceneComponent.h",
+              "line": "152-154",
+              "note": "FTransform RelativeTransform is a direct member of USceneComponent (with per-field UPROPERTY) — transform fused onto the node, no separate Slot object. Mirror this with FUIRectTransform on Element"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Component/SceneComponent.cpp",
+              "line": "543-557",
+              "note": "MarkTransformDirty: early-out if already dirty, then recurse into every Child — exact dirty-propagation pattern for GlobalScale/RectTransform recompute"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Component/SceneComponent.cpp",
+              "line": "346-409",
+              "note": "UpdateWorldMatrix: child world = relativeMatrix * parent world, computed lazily on dirty — analogous to FinalPos = ParentOrigin + AnchorPx + position - size*pivot composed down the tree"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": true
+        }
+      ],
+      "openQuestions": [
+        "Does the engine's reflection/serialization (UPROPERTY Save, .Scene save path) need the UI tree to be serializable, or is the in-game editor purely runtime? SceneComponent excludes Parent/Child from serialization and rebuilds topology explicitly (OnPostLoad note at SceneComponent.cpp:163-170) — the UI model would need the same explicit topology-rebuild if it is to be saved.",
+        "Who owns/roots the Canvas at runtime? Options seen: (a) a new Singleton FGCObject manager like UUIManager, (b) attach under a PlayerController/HUD, or (c) AddToRoot the Canvas. This choice determines the GC keepalive wiring and was not fully resolved here.",
+        "Should the UI node tree literally subclass USceneComponent (reusing SetParent/AddChild/GetChildren/IsDescendantOf for free, ignoring the 3D FTransform), or be a parallel minimal UObject tree that copies just the hierarchy methods? Subclassing reuses cycle-checking + GC code but drags in unused 3D transform/socket machinery."
+      ],
+      "verdicts": [
+        {
+          "claim": "[A1] Lifetime is a two-phase deferred GC: DestroyObject runs BeginDestroy()+MarkPendingKill()+RequestGarbageCollection() with no synchronous free; DestroyObjectImmediate forwards to DestroyObject. FGCObject is an abstract external root with AddReferencedObjects/GetReferencerName. Reachability walks AddReferencedObjects from roots (RF_RootSet UObjects + registered FGCObjects); children kept alive by parent's AddReferencedObjects as AActor does for components.",
+          "status": "confirmed",
+          "note": "Object.h:266-285 confirms DestroyObject does BeginDestroy()+MarkPendingKill()+RequestGarbageCollection() with no delete; DestroyObjectImmediate (289-292) forwards to DestroyObject. GarbageCollection.h:79-92 confirms FGCObject abstract (pure virtual AddReferencedObjects) + GetReferencerName. Lines 108-110 confirm MarkObject/AddExternalRoot/RemoveExternalRoot. GarbageCollection.cpp:213-256 MarkRoots confirms it iterates GUObjectArray for IsRooted()==RF_RootSet roots AND walks ExternalRoots->AddReferencedObjects. AActor.cpp:874-880 confirms AActor::AddReferencedObjects keeps RootComponent+OwnedComponents alive (AActor.h:197 comment explicitly says so). Minor caveat: MarkObject(line 108) marks an object reachable, not strictly 'registers a manager as root' (that is AddExternalRoot), but all three exist as cited."
+        },
+        {
+          "claim": "[A2] USceneComponent is an N-level parent/child tree with AddChild (forwards to child->SetParent(this)), AttachToComponent, SetParent, GetChildren()/GetChildComponents(), GetParent(); enforces no-cycle via IsDescendantOf and self-attach rejection; storage ChildComponents=TArray<USceneComponent*> (raw owning), ParentComponent=TWeakObjectPtr<USceneComponent> (weak back-ref); SetParent detaches old parent, push_back into new parent, MarkTransformDirty.",
+          "status": "confirmed",
+          "note": "SceneComponent.h:26-45 confirms full hierarchy API including AddChild/RemoveChild/ContainsChild/IsDescendantOf/GetChildComponents()(copy)/GetChildren()(const ref). Lines 145-146 confirm ParentComponent=TWeakObjectPtr<USceneComponent>, ChildComponents=TArray<USceneComponent*>. SceneComponent.cpp:249-286 confirms SetParent: self-check (NewParent==this) and cycle check (NewParent->IsDescendantOf(this)) reject, OldParent->RemoveChild(this), ParentComponent.Reset(NewParent), Parent->ChildComponents.push_back(this), MarkTransformDirty(); AddChild(278-286) forwards to NewChild->SetParent(this). All specifics verified."
+        },
+        {
+          "claim": "[C5] RectTransform should be a value-struct member on Element mirroring USceneComponent storing FTransform RelativeTransform as a direct member (per-field UPROPERTY) rather than a separate Slot; MarkTransformDirty early-outs if already dirty then recurses into every child; UpdateWorldMatrix computes child world = relativeMatrix * parent world lazily on dirty.",
+          "status": "confirmed",
+          "note": "SceneComponent.h:152-154 confirms FTransform RelativeTransform is a direct member with per-field UPROPERTY (Location line 152, Scale line 153, Rotation line 155) — transform fused onto node, no Slot. SceneComponent.cpp:543-557 confirms MarkTransformDirty early-outs (if bTransformDirty && bInverseWorldDirty return) then loops all ChildComponents calling Child->MarkTransformDirty() — exact dirty-propagation recursion. SceneComponent.cpp:346-409 confirms UpdateWorldMatrix early-outs unless bTransformDirty, computes CachedWorldMatrix = RelativeMatrix * Parent->GetWorldMatrix() (lines 387/399) lazily, sets bTransformDirty=false. Architectural/recommendation framing is opinion but the cited engine-precedent facts are accurate."
+        }
+      ]
+    },
+    {
+      "dimension": "A3 + C1: per-frame loop entry points, tick ordering, and UI Layout Pass insertion candidates",
+      "summary": "The per-frame chain is fully synchronous and single-threaded on the game thread: Launch -> FEngineLoop::Run loop -> GEngine->Tick (UGameEngine::Tick) -> UEngine::TickFrameStart (watcher/notifications/input poll) then UEngine::TickFrameBody, which runs Audio->WorldTick->Render IN THAT ORDER. WorldTick iterates every FWorldContext and calls UWorld::Tick, which dispatches actor & component ticks through FTickManager in 4 fixed TickGroups (PrePhysics, DuringPhysics[+physics submit], PostPhysics, PostUpdateWork) then TickPlayerCamera. Render() then runs the render pipeline, and the existing RmlUi UI is NOT ticked anywhere in the game-tick path — its only per-frame work (RmlContext->Update() + Render()) is driven from INSIDE the render pass FUIPass::Execute -> UUIManager::Render (UIManager.cpp:831/833), i.e. UI \"layout/update\" is currently conflated with UI rendering and happens after the whole 3D pass chain, late in the frame. For C1, the cleanest insertion point for a NEW simple UI Layout Pass is a dedicated step in UEngine::TickFrameBody AFTER WorldTick(DeltaTime) and BEFORE Render(DeltaTime) (Engine.cpp:174-179) — game-thread, post-gameplay, pre-submission. A second viable hook is at the end of UWorld::Tick. Folding it into the render pass (mirroring the RmlUi pattern at UIPass.cpp:27) is possible but mixes layout with GPU submission and is the weaker option.",
+      "findings": [
+        {
+          "checklistItem": "A3",
+          "conclusion": "Per-frame loop entry: WinMain-style Launch() calls GuardedMain which constructs FEngineLoop and calls EngineLoop.Run(). Run() is the frame loop: while(!exit){ PumpMessages; Timer.Tick(); GEngine->Tick(dt); }. GEngine is the concrete UGameEngine (standalone) / UEditorEngine / UObjViewerEngine, chosen by the CreateConcreteEngine factory injected from Launch.cpp.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/Runtime/Launch.cpp",
+              "line": "50",
+              "note": "GuardedMain: const int ExitCode = EngineLoop.Run();"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Runtime/EngineLoop.cpp",
+              "line": "60-76",
+              "note": "FEngineLoop::Run() frame loop: PumpMessages, Timer.Tick(), GEngine->Tick(Timer.GetDeltaTime()) at line 72"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Runtime/Launch.cpp",
+              "line": "22-33",
+              "note": "CreateConcreteEngine factory picks UGameEngine (WITH_STANDALONE) / UEditorEngine / UObjViewerEngine"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": false
+        },
+        {
+          "checklistItem": "A3",
+          "conclusion": "GEngine->Tick resolves to UGameEngine::Tick: TickFrameStart(dt) -> input snapshot + viewport ProcessInput + player input + ESC -> TickFrameBody(dt) -> ProcessPendingTransition. The base UEngine::Tick is simpler (TickFrameStart + TickFrameBody only). The shared body is UEngine::TickFrameBody which runs, strictly in order: FAudioManager::Tick(), WorldTick(dt), Render(dt). This ordering (gameplay world tick, THEN render) is the key fact for inserting a layout pass.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/Runtime/GameEngine.cpp",
+              "line": "66-93",
+              "note": "UGameEngine::Tick: TickFrameStart, viewport ProcessInput, TickFrameBody(dt) at line 88, ProcessPendingTransition"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Runtime/Engine.cpp",
+              "line": "174-179",
+              "note": "UEngine::TickFrameBody: Audio Tick; WorldTick(DeltaTime); Render(DeltaTime) in this exact order"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Runtime/Engine.cpp",
+              "line": "198-202",
+              "note": "Base UEngine::Tick = TickFrameStart + TickFrameBody"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": false
+        },
+        {
+          "checklistItem": "A3",
+          "conclusion": "Actor/component Tick ordering: UEngine::WorldTick loops every FWorldContext and calls UWorld::Tick(dt, TickType). UWorld::Tick gathers tick functions (FTickManager::GatherTickFunctions queues each actor's PrimaryActorTick then iterates its components queuing PrimaryComponentTick), then runs FOUR ordered TickGroups: TG_PrePhysics -> physics submit -> TG_DuringPhysics -> physics wait/apply -> TG_PostPhysics -> TG_PostUpdateWork, finishing with TickPlayerCamera(). Within a group, order is the gather order: for each actor, the actor tick is queued before its components. ExecuteTick dispatches to AActor::TickActor and UActorComponent::TickComponent.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/Runtime/Engine.cpp",
+              "line": "229-271",
+              "note": "UEngine::WorldTick: loops WorldList, ToLevelTickType, World->Tick(DeltaTime, TickType) at line 269"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/GameFramework/World.cpp",
+              "line": "635-672",
+              "note": "UWorld::Tick: GatherTickFunctions then TickGroup(TG_PrePhysics/DuringPhysics/PostPhysics/PostUpdateWork) then TickPlayerCamera"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Core/TickFunction.cpp",
+              "line": "98-116",
+              "note": "GatherTickFunctions: per actor queue PrimaryActorTick (105) then each component's PrimaryComponentTick (114)"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Core/TickFunction.cpp",
+              "line": "142-147",
+              "note": "FActorComponentTickFunction::ExecuteTick -> Target->TickComponent(DeltaTime, TickType, *this)"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": false
+        },
+        {
+          "checklistItem": "A3",
+          "conclusion": "The existing RmlUi UIManager is NOT ticked relative to the game tick at all. There is no UUIManager::Get().Tick()/Update() call anywhere in Runtime (grep for UIManager::Get() in Runtime returns only Initialize at Engine.cpp:102 and Shutdown at Engine.cpp:120). The only per-frame UI work — RmlContext->Update() and RmlContext->Render() — runs INSIDE the render pass chain, in FUIPass::Execute -> UUIManager::Render. So UI update happens AFTER WorldTick and AFTER all 3D passes, late in Render(), and layout is conflated with rendering. UI also pulls input directly inside Render via UUIManager::ProcessInput(Frame), not from the game-thread input stage.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/Render/RenderPass/UIPass.cpp",
+              "line": "25-28",
+              "note": "FUIPass::Execute calls UUIManager::Get().Render(Ctx) — the ONLY per-frame UI driver"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/UI/UIManager.cpp",
+              "line": "811-835",
+              "note": "UUIManager::Render: SetDimensions, ProcessInput(Frame) at 824, RmlContext->Update() at 831, RmlContext->Render() at 833 — update+render together in the render pass"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Runtime/Engine.cpp",
+              "line": "102",
+              "note": "Only Runtime references to UIManager are Initialize (102) and Shutdown (120); no per-frame Tick"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": true
+        },
+        {
+          "checklistItem": "A3",
+          "conclusion": "UIPass actually executes within the game render path: UEngine::Render -> RenderPipeline->Execute (FGameRenderPipeline::Execute) -> Renderer.Render(Frame, World, Scene) -> FRenderPassPipeline::Execute, which loops all registered passes in ERenderPass enum order calling BeginPass/Execute/EndPass. UI is the second-to-last pass (after OverlayFont, before GammaCorrection) per RenderPassMap, so it draws on top of the 3D scene into the viewport RTV. FUIPass::BeginPass gates on Ctx.Frame.ViewportRTV && UUIManager::HasViewportWidgets(), so with zero widgets the pass is skipped entirely.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/Runtime/GameRenderPipeline.cpp",
+              "line": "44-82",
+              "note": "FGameRenderPipeline::Execute: BuildFrame, CollectCommands, Renderer.Render(Frame, World, *Scene) at 77, then Blit/EndFrame"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Render/Pipeline/Renderer.cpp",
+              "line": "124-125",
+              "note": "FRenderer::Render builds FPassContext and calls Pipeline.Execute(PassCtx)"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Render/RenderPass/RenderPassPipeline.cpp",
+              "line": "24-48",
+              "note": "FRenderPassPipeline::Execute loops Passes in order calling BeginPass/Execute/EndPass"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Render/Types/RenderTypes.h",
+              "line": "140-142",
+              "note": "Pass order: OverlayFont, UI, GammaCorrection — UI is the last content pass before gamma"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": false
+        },
+        {
+          "checklistItem": "C1",
+          "conclusion": "PRIMARY candidate insertion point for a NEW simple UI Layout Pass: a dedicated call inside UEngine::TickFrameBody between WorldTick(DeltaTime) and Render(DeltaTime) at Engine.cpp:177-178. This runs on the game thread, after all gameplay/actor/component ticks have settled transforms and game state, and before any render submission — exactly where 'recompute RectTransform layout from CurrentRes/GlobalScale and parent->child rects' belongs. Add e.g. UIManager/UI-layout-system->LayoutTick(dt) as a new line at Engine.cpp:178. This also lets in-game drag (which only mutates Element.position) feed the same pass each frame. Because TickFrameBody is the shared base used by both UEngine::Tick and UGameEngine::Tick, one hook covers game + base paths; the editor engine would need the analogous spot in its own tick body.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/Runtime/Engine.cpp",
+              "line": "174-179",
+              "note": "TickFrameBody: insert UI LayoutTick on a new line between WorldTick(DeltaTime) (177) and Render(DeltaTime) (178)"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Runtime/GameEngine.cpp",
+              "line": "88",
+              "note": "UGameEngine::Tick calls TickFrameBody(dt), so the same hook serves the standalone game path"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": true
+        },
+        {
+          "checklistItem": "C1",
+          "conclusion": "SECONDARY candidate: hook the layout pass at the tail of UWorld::Tick (after TickPlayerCamera, World.cpp:672) so it runs per-world inside the existing world tick. Weaker than the TickFrameBody hook because (a) the new UI model is Canvas/Group/Element, a screen-space singleton, not naturally per-world; (b) it runs once per FWorldContext (multiple worlds in editor/PIE) which is wrong for a single screen-space canvas; and (c) UWorld::Tick early-returns when bPaused (World.cpp:624-628), which would freeze UI layout while paused — undesirable for menus. Prefer the engine-level TickFrameBody hook.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/GameFramework/World.cpp",
+              "line": "672",
+              "note": "End of UWorld::Tick after TickPlayerCamera() — per-world, runs once per FWorldContext"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/GameFramework/World.cpp",
+              "line": "624-628",
+              "note": "UWorld::Tick early-returns on bPaused, which would freeze any UI layout placed after this point"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": false
+        },
+        {
+          "checklistItem": "C1",
+          "conclusion": "TERTIARY candidate (NOT recommended as the layout home): fold layout into the render pass, mirroring how RmlUi does its update at UIManager.cpp:831 / UIPass.cpp:27. A new FRenderPass (e.g. inserted at ERenderPass::UI order in RenderTypes.h) could call the simple UI system's layout+draw. This works and matches the existing pattern, but conflates layout (CPU, game-state-dependent) with GPU submission, runs after the frame's transforms are already consumed by 3D passes, and makes the layout result unavailable to game logic in the same frame. Recommend: compute layout in TickFrameBody (primary), and add only a thin DRAW-only render pass alongside/after FUIPass for the new model. Decision for the design doc: the NEW simple model should be a SEPARATE lightweight system with its own game-thread LayoutTick + its own draw pass, coexisting with (not reusing) the RmlUi update-in-render path.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/Render/RenderPass/UIPass.cpp",
+              "line": "8-28",
+              "note": "REGISTER_RENDER_PASS(FUIPass); Execute calls UUIManager::Render — the existing render-pass-driven UI pattern to optionally mirror for DRAW only"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Render/Types/RenderTypes.h",
+              "line": "141",
+              "note": "ERenderPass::UI slot; a new simple-UI draw pass would register near here in enum order"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/UI/UIManager.cpp",
+              "line": "831-833",
+              "note": "Existing conflation of Update()+Render() inside a render pass — the anti-pattern to avoid for the new model's layout"
+            }
+          ],
+          "confidence": "med",
+          "loadBearing": false
+        }
+      ],
+      "openQuestions": [
+        "Editor path: UEditorEngine likely has its own tick body (EditorEngine.cpp references UUIManager::Get().ClearViewport() at line 500) — confirm whether it routes through UEngine::TickFrameBody or a separate editor tick, so the layout hook covers in-editor UI authoring too.",
+        "FGameRenderPipeline::Execute renders the world into a viewport SRV and then BlitToBackBuffer — confirm whether UIPass draws into the viewport RTV (pre-blit, so UI gets scaled/letterboxed with the world) or should instead draw post-blit at native back-buffer resolution; this affects whether GlobalScale = CurrentRes.Y/1080 must account for the viewport-vs-backbuffer resolution.",
+        "Verify whether the new simple UI's input (mouse drag) should read from the game-thread input stage (TickFrameStart / GameViewportClient->ProcessInput) rather than the render-time UUIManager::ProcessInput(Frame) path the RmlUi UI currently uses, to keep drag-to-move on the game thread."
+      ],
+      "verdicts": [
+        {
+          "claim": "[A3] RmlUi UIManager is not ticked relative to game tick; no per-frame Tick/Update in Runtime (only Initialize at Engine.cpp:102, Shutdown at Engine.cpp:120). Only per-frame UI driver is FUIPass::Execute -> UUIManager::Render inside the render pass (UIPass.cpp:25-28), where SetDimensions/ProcessInput(Frame)/RmlContext->Update()/RmlContext->Render() all run together (UIManager.cpp:811-835). Input pulled directly inside Render via ProcessInput(Frame), not from game-thread input stage.",
+          "status": "confirmed",
+          "note": "All evidence verified exactly. UIPass.cpp:25-28: FUIPass::Execute calls UUIManager::Get().Render(Ctx) (line 27). UIManager.cpp:811-835: UUIManager::Render does SetDimensions (819-822), ProcessInput(Ctx.Frame) at 824, RmlContext->Update() at 831, RmlContext->Render() at 833 -- update+render conflated in render pass. Engine.cpp:102 Initialize, 120 Shutdown. Grep for UUIManager::Get() in Runtime returns ONLY those two lines (102, 120) -- no per-frame Tick. Grep for UUIManager::Get().(Render|Update|Tick|ProcessInput) engine-wide returns ONLY UIPass.cpp:27 -- confirming Render is the sole per-frame UI driver and runs late in the render pass. ProcessInput(Frame) confirmed at UIManager.cpp:837 reading directly from InputSystem inside Render path, not from a game-thread input stage."
+        },
+        {
+          "claim": "[C1] Primary insertion point for a new UI Layout Pass is inside UEngine::TickFrameBody between WorldTick(DeltaTime) (Engine.cpp:177) and Render(DeltaTime) (Engine.cpp:178), i.e. a new line at Engine.cpp:178. Runs on game thread after gameplay ticks settle and before render submission. TickFrameBody is shared base for both UEngine::Tick and UGameEngine::Tick (GameEngine.cpp:88 calls TickFrameBody(dt)), so one hook covers game+base paths; editor engine needs analogous spot in its own tick body.",
+          "status": "confirmed",
+          "note": "Verified. Engine.cpp:174-179 TickFrameBody: FAudioManager::Get().Tick() (176), WorldTick(DeltaTime) (177), Render(DeltaTime) (178) -- inserting a LayoutTick on a new line between 177 and 178 is exactly between WorldTick and Render, on the game thread before render submission, as claimed. GameEngine.cpp:88: UGameEngine::Tick calls TickFrameBody(DeltaTime), confirming the standalone game path shares the same hook. UEngine::Tick (Engine.cpp:201) also calls TickFrameBody, confirming shared base. The 'editor engine needs analogous spot' caveat is supported: UObjViewerEngine::Tick (ObjViewerEngine.cpp:63-73) is a separate override that does its own pre-body work but also routes through TickFrameBody(DeltaTime) at line 72 -- so it would actually share the same hook, but the claim's caution about separate engine tick bodies is reasonable and not contradicted."
+        }
+      ]
+    },
+    {
+      "dimension": "A4 — math types available for the UI (Vec2 / Rect)",
+      "summary": "The engine has a usable 2D float vector (FVector2 in Engine/Math/Vector.h, line 222) and a single pos/size rectangle struct (FRect in Editor/Slate/SWindow.h, line 11), but there is NO integer 2D point type (no FIntPoint) and NO component-wise vector multiply. FVector2 supports X/Y members, +/- (vector and scalar), and *,/ by SCALAR only — the intended layout math AnchorPx = ParentSize*anchor and size*pivot are component-wise products and CANNOT be expressed with FVector2's existing operator*; they must be written manually as FVector2{A.X*B.X, A.Y*B.Y} (the codebase already does this ad hoc, e.g. ParticleVertexFactory.cpp:440, and has a local FVector(3D) ComponentMultiply helper in FbxAnimationImporter.cpp:891 but nothing for FVector2). The only FRect is in the Editor/Slate layer and is shape-compatible (X,Y,Width,Height = origin+size) with Element rects, but living under Editor/Slate makes it an awkward dependency for a runtime/Engine UI; a small Engine-side rect or just storing pos+size as two FVector2 is cleaner. Window/viewport resolution is carried as raw floats (e.g. UIManager Frame.ViewportWidth/Height are float), so GlobalScale = CurrentRes.Y/1080 has no native int-point source — float dimensions are the norm.",
+      "findings": [
+        {
+          "checklistItem": "A4-FVector2-exists",
+          "conclusion": "A 2D float vector FVector2 exists at Engine/Math/Vector.h:222. Members: X,Y (also aliased U,V and Data[2] via a union). Constructors: default (0,0) and (InX,InY). Methods: Length, Normalize, Normalized, Dot. This is sufficient as the Vec2 type for pivot/anchor/position/size in the new UI model.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/Math/Vector.h",
+              "line": "222-260",
+              "note": "struct FVector2 with union{X,Y / U,V / Data[2]}, ctors, Length/Normalize/Dot and operator declarations"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": false
+        },
+        {
+          "checklistItem": "A4-component-mul-missing",
+          "conclusion": "FVector2 has +,- with both another FVector2 and a scalar, and *,/ with a SCALAR ONLY. There is NO operator* taking an FVector2 (no component-wise/Hadamard product) and no member ComponentMul. Therefore AnchorPx=ParentSize*anchor and size*pivot (both component-wise) CANNOT use FVector2::operator* and must be done manually: FVector2{ParentSize.X*anchor.X, ParentSize.Y*anchor.Y}. The codebase already writes such per-component products inline (e.g. FVector2{P.Size.X*SizeScale.X, P.Size.Y*SizeScale.Y}) and has a free ComponentMultiply only for the 3D FVector, not FVector2.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/Math/Vector.h",
+              "line": "248-253",
+              "note": "operator+ / operator- have FVector2 and float overloads; operator* and operator/ take only float Scalar — no FVector2 overload"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Math/Vector.cpp",
+              "line": "386-398",
+              "note": "operator*(float) and operator/(float) implementations multiply/divide both X and Y by the scalar; confirms scalar-only"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Render/Particle/ParticleVertexFactory.cpp",
+              "line": "440",
+              "note": "existing manual component-wise FVector2 multiply: FVector2{ P.Size.X * SizeScale.X, P.Size.Y * SizeScale.Y } — precedent for how the UI must do it"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Mesh/Importer/Fbx/FbxAnimationImporter.cpp",
+              "line": "891-893",
+              "note": "static FVector ComponentMultiply(A,B) returns FVector(A.X*B.X,...) — a 3D helper exists but nothing equivalent for FVector2"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": true
+        },
+        {
+          "checklistItem": "A4-no-FIntPoint",
+          "conclusion": "There is NO integer 2D point type (no FIntPoint, no FIntVector2) in the engine source. Grep for FIntPoint returns no engine matches (only RmlUi thirdparty has its own MyIntVector2). Window/viewport/screen sizes are stored and passed as raw floats: UIManager's per-frame Frame.ViewportWidth/ViewportHeight are float, ObjViewerViewportClient.ViewportWidth is float (800.0f). So for the GlobalScale = CurrentRes.Y/1080 computation there is no native int point to read from — the resolution is already float-typed, which is fine for the divide.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/UI/UIManager.cpp",
+              "line": "52-53",
+              "note": "float ViewportWidth = 1.0f; float ViewportHeight = 1.0f; — viewport resolution stored as float, cast to int only when handing to Rml (lines 820-821)"
+            },
+            {
+              "file": "KraftonEngine/Source/ObjViewer/ObjViewerViewportClient.h",
+              "line": "57",
+              "note": "float ViewportWidth = 800.0f; — viewport dimensions are floats engine-wide"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": false
+        },
+        {
+          "checklistItem": "A4-FRect-real-definition",
+          "conclusion": "There is exactly ONE real FRect definition: Editor/Slate/SWindow.h:11, shape {float X, float Y, float Width, float Height} — i.e. origin+size (pos/size), NOT min/max. The forward-decls in OverlayStatSystem.h:7 and Slate/SWindow.h:11 and the use in GameViewportClient.h all resolve to this same struct (those .h/.cpp include Slate/SWindow.h). SWindow.h also defines a sibling FPoint{float X,Y}. The pos/size shape is directly reusable for an Element rect (origin = FinalPos, size = size), and FinalPos = ParentOrigin + AnchorPx + position - size*pivot maps cleanly onto X/Y/Width/Height. CAVEAT: FRect lives in the Editor/Slate layer (Slate window layout), so a runtime Engine-side UI reusing it would create an Engine->Editor/Slate dependency; cleaner to define a tiny Engine-side rect or just keep pos+size as two FVector2 in the Element.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Editor/Slate/SWindow.h",
+              "line": "11-17",
+              "note": "the only real FRect: struct FRect { float X,Y,Width,Height = 0 }; pos/size form, not min/max"
+            },
+            {
+              "file": "KraftonEngine/Source/Editor/Slate/SWindow.h",
+              "line": "5-9",
+              "note": "sibling struct FPoint { float X,Y }; used as a screen-space 2D point in Slate/viewport input"
+            },
+            {
+              "file": "KraftonEngine/Source/Editor/Subsystem/OverlayStatSystem.h",
+              "line": "7",
+              "note": "forward-decl 'struct FRect;' — resolved via Slate/SWindow.h include in OverlayStatSystem.cpp:16 to the same definition"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Viewport/GameViewportClient.h",
+              "line": "5,44",
+              "note": "#include \"Slate/SWindow.h\" then SetCursorClipRect(const FRect&) — Engine code already pulls Editor/Slate's FRect, showing the cross-layer dependency that reuse would entail"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": true
+        }
+      ],
+      "openQuestions": [
+        "The single FRect lives under Editor/Slate; the design must decide whether the runtime UI may depend on that layer or should introduce a small Engine-level rect (or store pos+size as two FVector2). Whether RmlUi's own Vector2/Rectangle types (ThirdParty/RmlUi) should be touched at all depends on the separate-vs-reuse decision for the RmlUi path (out of scope for A4).",
+        "No constexpr/aggregate-init niceties on FVector2 (it has user-defined ctors), so brace-init like FVector2{a,b} works but it is not a literal type — minor, only matters if compile-time constants are wanted for the 1920x1080 reference resolution."
+      ],
+      "verdicts": [
+        {
+          "claim": "[A4-component-mul-missing] FVector2 has +,- with FVector2 and scalar, *,/ scalar-only; no operator* taking FVector2 and no ComponentMul; component-wise products must be inline; precedent exists; ComponentMultiply only for 3D FVector.",
+          "status": "confirmed",
+          "note": "Vector.h:248-253 verified: operator+(const FVector2&), operator-(const FVector2&), operator+(float), operator-(float), operator*(float Scalar), operator/(float Scalar) — only scalar overloads for * and /. Compound ops (256-259) likewise scalar-only for *=,/=. Vector.cpp:386-398 confirms operator*(float)/operator/(float) scale both X and Y by the scalar. ParticleVertexFactory.cpp:440 is the exact inline precedent: FVector2{ P.Size.X*SizeScale.X, P.Size.Y*SizeScale.Y }. FbxAnimationImporter.cpp:891-893 is a static FVector (3D) ComponentMultiply. Grep across Source confirms ComponentMultiply appears ONLY in FbxAnimationImporter.cpp (def line 891, use line 1000) and no FVector2 variant; grep for 'FVector2 operator*(const FVector2' and 'operator\\* ... FVector2' in Math returns no matches. Negative assertion fully holds.",
+          "correctedEvidence": ""
+        },
+        {
+          "claim": "[A4-FRect-real-definition] Exactly one real FRect at Slate/SWindow.h:11, shape {float X,Y,Width,Height} = pos/size not min/max; forward-decls/uses resolve to it; sibling FPoint{X,Y}; FRect in Editor/Slate layer so Engine reuse creates Engine->Editor dependency (GameViewportClient already pulls it).",
+          "status": "confirmed",
+          "note": "SWindow.h:11-17 verified as the sole definition: struct FRect { float X=0; float Y=0; float Width=0; float Height=0; } — pos/size origin+size form, not min/max. SWindow.h:5-9 sibling struct FPoint { float X,Y }. OverlayStatSystem.h:7 is forward-decl 'struct FRect;'; OverlayStatSystem.cpp:16 includes \"Slate/SWindow.h\", resolving it. GameViewportClient.h:5 #include \"Slate/SWindow.h\" and line 44 SetCursorClipRect(const FRect& InViewportScreenRect) — Engine code pulling Editor/Slate FRect, confirming the cross-layer dependency. Grep shows 13 files reference FRect but only one struct definition (SWindow.h:11) plus one forward-decl (OverlayStatSystem.h:7); SSplitter.h merely uses FRect, no second definition. Cited line numbers all accurate.",
+          "correctedEvidence": ""
+        }
+      ]
+    },
+    {
+      "dimension": "A5 (mouse input path / coordinate space) + E3 (game-vs-editor input separation, mode/capture toggle)",
+      "summary": "Mouse input in this engine is POLLING-based, not message-dispatch-based. The Win32 message pump (FWindowsApplication::WndProc) only forwards WM_MOUSEWHEEL (scroll) and WM_INPUT (raw delta for FPS mouselook) into InputSystem; it never handles WM_MOUSEMOVE/WM_LBUTTONDOWN etc. Instead, InputSystem::Tick() polls GetCursorPos + GetAsyncKeyState every frame and exposes button down/held/released, mouse position, frame delta, and a built-in drag-tracker (start/dragging/end + drag vector with a 5px threshold). The single canonical place to read mouse position is InputSystem::Get().GetMouseClientPos() which returns CLIENT pixels, origin top-left (it calls Win32 ScreenToClient on the owner HWND) — this is the hit-test foundation. Crucially for the project: a full UI-vs-game input arbitration layer ALREADY EXISTS for the RmlUi UI. UUIManager::GetViewportInputCaptureState() aggregates per-widget flags (bWantsMouse/bWantsTextInput/bBlocksGameInput/bBlocksGameMouseLook/bBlocksGameKeyboard) into FUIInputCaptureState, and UGameViewportClient::ProcessInput consumes it to gate/strip the per-frame game snapshot before it reaches the PlayerController, plus there is an EGameInputMode {GameOnly,GameAndUI,UIOnly} enum and a PIE Possessed/Ejected toggle (F8). A UI-editor-mode toggle should reuse this exact pattern (set BlocksGameInput / a new EGameInputMode or a manager flag) rather than inventing a new capture path.",
+      "findings": [
+        {
+          "checklistItem": "A5-pump",
+          "conclusion": "Mouse input does NOT arrive via per-message WndProc handling of WM_MOUSEMOVE/WM_LBUTTONDOWN. The window proc (FWindowsApplication::WndProc) only handles WM_MOUSEWHEEL -> InputSystem::AddScrollDelta and WM_INPUT (raw mouse) -> InputSystem::AddRawMouseDelta. All other mouse messages fall through to ImGui's handler / DefWindowProc. Confirmed there is zero WM_LBUTTONDOWN/WM_MOUSEMOVE handling anywhere in engine source (only a doc comment in OverlayStatSystem.h).",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/Platform/WindowsApplication.cpp",
+              "line": "31-99",
+              "note": "WndProc switch: only WM_DESTROY, WM_MOUSEWHEEL (line 40-42), WM_INPUT (line 43-65), WM_SIZE/sizing. No mouse-move/button cases."
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Platform/WindowsApplication.cpp",
+              "line": "33",
+              "note": "ImGui_ImplWin32_WndProcHandler is called first; bImGuiHandled returned for wheel/raw so ImGui gets a chance, but engine button/pos state is independent of it."
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Platform/WindowsApplication.cpp",
+              "line": "144-158",
+              "note": "PumpMessages(): standard PeekMessage/TranslateMessage/DispatchMessage loop; sets bIsExitRequested on WM_QUIT."
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": true
+        },
+        {
+          "checklistItem": "A5-poll-source",
+          "conclusion": "Mouse position and button state are POLLED each frame, not event-driven. InputSystem::Tick() loops VK 0..255 calling GetAsyncKeyState (this is where LBUTTON/RBUTTON/MBUTTON down state comes from) and calls GetCursorPos for screen-space MousePos, computing FrameMouseDelta. So 'button down/pressed/released' = derived from GetAsyncKeyState edge detection (CurrentStates vs PrevStates), NOT from WM_*BUTTON* messages.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/Input/InputSystem.cpp",
+              "line": "16-19",
+              "note": "for i in 0..255: PrevStates[i]=CurrentStates[i]; CurrentStates[i]=(GetAsyncKeyState(i)&0x8000)!=0; — polls all keys incl. VK_LBUTTON."
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Input/InputSystem.cpp",
+              "line": "30-33",
+              "note": "PrevMousePos=MousePos; GetCursorPos(&MousePos); FrameMouseDeltaX/Y computed from screen-px delta."
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Runtime/Engine.cpp",
+              "line": "171",
+              "note": "InputSystem::Get().Tick() called once per frame in UEngine::TickFrameStart — the single poll point."
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": false
+        },
+        {
+          "checklistItem": "A5-read-api",
+          "conclusion": "Concrete read APIs available to consumers (all on InputSystem singleton via InputSystem::Get()): position GetMousePos() (screen px) and GetMouseClientPos() (client px, top-left origin); per-frame delta MouseDeltaX()/MouseDeltaY()/MouseMoved(); buttons GetKey(VK_LBUTTON)/GetKeyDown/GetKeyUp (down/held-vs-pressed-edge/released-edge); drag GetLeftDragStart()/GetLeftDragging()/GetLeftDragEnd()/GetLeftDragVector()/GetLeftDragDistance() (+Right variants) with a built-in DRAG_THRESHOLD=5px. Same data is also packaged into FInputSystemSnapshot (MousePos, MouseDeltaX/Y, bLeftMousePressed/Down/Released, bLeftDragStarted/Dragging/Ended, LeftDragVector) via MakeSnapshot(). For the in-game UI editor drag feature, GetLeftDragging()+GetLeftDragVector() (or snapshot bLeftDragging+LeftDragVector) is the ready-made drag-to-move primitive.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/Input/InputSystem.h",
+              "line": "85-97",
+              "note": "GetMousePos() (screen), GetMouseClientPos() (client), MouseDeltaX/Y(), MouseMoved()."
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Input/InputSystem.h",
+              "line": "80-82",
+              "note": "GetKeyDown/GetKey/GetKeyUp edge+held accessors; pass VK_LBUTTON/VK_RBUTTON for buttons."
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Input/InputSystem.h",
+              "line": "99-113",
+              "note": "Left/Right drag API: DragStart/Dragging/End + GetLeftDragVector/Distance."
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Input/InputSystem.cpp",
+              "line": "232-257",
+              "note": "FilterDragThreshold (DRAG_THRESHOLD 5px, DistSq>=25) + GetLeftDragVector = MousePos - LeftDragStartPos."
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Input/InputSystem.h",
+              "line": "12-58",
+              "note": "FInputSystemSnapshot: full per-frame mouse/button/drag snapshot consumed by gameplay."
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": false
+        },
+        {
+          "checklistItem": "A5-coord-space",
+          "conclusion": "Mouse coordinate space for hit-testing: GetMousePos() returns SCREEN/desktop pixels (raw GetCursorPos). GetMouseClientPos() returns CLIENT pixels with origin at window top-left (it applies ScreenToClient on OwnerHWnd). The existing RmlUi UI already hit-tests using exactly GetMouseClientPos() (UIManager.cpp:856). In STANDALONE game the viewport fills the client area, so client-px == viewport-px directly (GameRenderPipeline.cpp:203-210 feeds GetMouseClientPos straight into CursorViewportX/Y, origin top-left, after a >=0 / <ViewportWidth/Height bounds check). In the EDITOR the game view is a sub-rect, so a transform (subtract ViewportScreenRect origin) is required — done via VC->GetCursorViewportPosition (EditorRenderPipeline.cpp:361) and ImGui MousePos minus ViewportScreenRect in EditorViewportClient.cpp:590-592. For the new 1920x1080 reference-resolution UI, hit-testing must use client/viewport px then divide by GlobalScale (CurrentRes.Y/1080) to map into reference space.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/Input/InputSystem.h",
+              "line": "86-94",
+              "note": "GetMouseClientPos(): copies MousePos then ScreenToClient(OwnerHWnd) -> client px, top-left origin. OwnerHWnd set via SetOwnerWindow."
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/UI/UIManager.cpp",
+              "line": "856-858",
+              "note": "Existing RmlUi path: const POINT MousePos = Input.GetMouseClientPos(); MouseX/Y = MousePos.x/y — proof client-px is the established UI hit-test space."
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Runtime/GameRenderPipeline.cpp",
+              "line": "203-210",
+              "note": "Standalone: CursorViewportX/Y = GetMouseClientPos() directly when within [0,ViewportWidth/Height) — client px == viewport px, top-left origin."
+            },
+            {
+              "file": "KraftonEngine/Source/Editor/Viewport/EditorViewportClient.cpp",
+              "line": "590-592",
+              "note": "Editor sub-rect: LocalMouseX = ImGui MousePos.x - ViewportScreenRect.X — viewport-local coords require subtracting the panel origin."
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": true
+        },
+        {
+          "checklistItem": "E3-existing-arbitration",
+          "conclusion": "Game-vs-UI input separation ALREADY EXISTS and is the pattern the new UI-editor toggle must hook into. UUIManager::GetViewportInputCaptureState() aggregates (logical-OR) per-widget flags into FUIInputCaptureState {bWantsMouse, bWantsKeyboard, bWantsTextInput, bBlocksGameInput, bBlocksGameKeyboard, bBlocksGameMouseLook}. UGameViewportClient::ProcessInput pulls this every frame and: (a) early-returns (no game snapshot) if InputMode==UIOnly or bBlocksGameInput; (b) strips mouse keys from the snapshot if bWantsMouse||bBlocksGameMouseLook; (c) strips keyboard if bWantsTextInput||bBlocksGameKeyboard; (d) only the filtered GameSnapshot reaches PlayerController->ProcessPlayerInput. So 'stealing mouse from gameplay' is already implemented as: a UI widget sets WantsMouse/BlocksGameInput, and the viewport client withholds those inputs from the game.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/Viewport/GameViewportClient.cpp",
+              "line": "92-131",
+              "note": "ProcessInput: gets FUIInputCaptureState (109), ApplyGameCapturePolicy (110), UIOnly/bBlocksGameInput early-return (112-115), ClearMouseInput if bWantsMouse||bBlocksGameMouseLook (118/121-124), ClearKeyboardInput if bWantsTextInput||bBlocksGameKeyboard (119/125-128), then SetGameInputSnapshot (130)."
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/UI/UIManager.cpp",
+              "line": "642-660",
+              "note": "GetViewportInputCaptureState ORs each widget's WantsMouse/WantsTextInput/BlocksGameInput/BlocksGameKeyboard/BlocksGameMouseLook."
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/UI/UserWidget.h",
+              "line": "94-141",
+              "note": "Per-widget setters SetWantsMouse/SetBlocksGameInput/SetBlocksGameMouseLook etc. — the API a UI editor would call to steal input."
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Viewport/GameViewportClient.h",
+              "line": "19-24",
+              "note": "enum class EGameInputMode { GameOnly, GameAndUI, UIOnly } — existing input-mode concept; SetInputMode at .h:51."
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Runtime/Engine.cpp",
+              "line": "181-196",
+              "note": "ProcessActiveWorldPlayerInput -> PlayerController->ProcessPlayerInput consumes only the (already-filtered) GameInputSnapshot."
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": true
+        },
+        {
+          "checklistItem": "E3-imgui-capture",
+          "conclusion": "Editor/tool input vs game is separated via ImGui's WantCaptureMouse/WantCaptureKeyboard/WantTextInput, mirrored into InputSystem's FGuiInputState. ImGui_ImplWin32_WndProcHandler runs first in WndProc (consuming events for ImGui windows). Each frame the editor copies IO.WantCaptureMouse/Keyboard/TextInput into InputSystem::GetGuiInputState() and into FSlateApplication. Note: this GuiState mirror is NOT what gates the game snapshot (that's the UUIManager FUIInputCaptureState path above); GuiState/WantTextInput is used ad hoc by editor widgets to suppress their own shortcuts. So there are effectively TWO arbitration layers: ImGui (editor tools) and UUIManager (in-game RmlUi UI). The new simple UI model conceptually belongs with the latter.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Editor/UI/EditorMainPanel.cpp",
+              "line": "1152-1157",
+              "note": "Per-frame mirror: InputSystem GuiState.bUsingMouse=IO.WantCaptureMouse; .bUsingKeyboard=IO.WantCaptureKeyboard||overlay; .bUsingTextInput=IO.WantTextInput; FSlateApplication::SetTextInputActive."
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Input/InputSystem.h",
+              "line": "126-133",
+              "note": "FGuiInputState GetGuiInputState()/SetGuiMouseCapture/IsGuiUsingMouse — the ImGui mirror store."
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Platform/WindowsApplication.cpp",
+              "line": "33",
+              "note": "ImGui handler invoked first each message so ImGui windows capture before engine sees the message."
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": false
+        },
+        {
+          "checklistItem": "E3-mode-toggle-precedent",
+          "conclusion": "A precedent input-mode ON/OFF toggle already exists: PIE Possessed vs Ejected mode (EPIEControlMode), toggled by F8. UEditorEngine::TogglePIEControlMode -> EnterPIEPossessedMode/EnterPIEEjectedMode flips SetUseRawMouse, syncs viewport possess state, and resets transient input. This is the exact shape a 'UI-editor-mode' toggle should take: a single enum/bool, a toggle key, and on enter/exit it (a) flips whether the game viewport is possessed, (b) sets BlocksGameInput / EGameInputMode::UIOnly so gameplay stops receiving mouse, (c) releases raw-mouse capture and shows the cursor (UGameViewportClient::SetCursorCaptured/ReleaseGameCapture). The toggle logic would live next to UEditorEngine PIE-mode code or in UUIManager, and steal mouse input by routing it to the UI editor instead of the filtered GameInputSnapshot.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Editor/EditorEngine.cpp",
+              "line": "525-566",
+              "note": "TogglePIEControlMode + EnterPIEPossessedMode/EnterPIEEjectedMode: flip PIEControlMode, SyncGameViewportPIEControlState, SetUseRawMouse(true/false), ResetTransientState, ClearInputOwner."
+            },
+            {
+              "file": "KraftonEngine/Source/Editor/EditorEngine.cpp",
+              "line": "216-218",
+              "note": "F8 (VK_F8) in ProcessPIEInput calls TogglePIEControlMode — example of a mode hotkey."
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Viewport/GameViewportClient.cpp",
+              "line": "202-217",
+              "note": "ReleaseGameCapture/ApplyGameCapturePolicy: SetUseRawMouse(false)+SetCursorCaptured(false) shows cursor; this is how a UI-editor mode would free the mouse for dragging."
+            },
+            {
+              "file": "KraftonEngine/Source/Editor/EditorEngine.h",
+              "line": "113-121",
+              "note": "EPIEControlMode {Possessed,Ejected} enum + IsPIEPossessedMode/Ejected + TogglePIEControlMode declaration — template for a UI-edit-mode flag."
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": false
+        }
+      ],
+      "openQuestions": [
+        "The new simple UI model: does it render through the existing RmlUi UUIManager path (and thus get GetViewportInputCaptureState input arbitration for free), or is it a separate lightweight overlay? If separate, it must replicate the FUIInputCaptureState->UGameViewportClient::ProcessInput gating so it can steal the mouse from gameplay; GuiState (ImGui mirror) alone does NOT gate the game snapshot.",
+        "GetMouseClientPos() applies ScreenToClient on InputSystem's OwnerHWnd — confirm OwnerHWnd is set to the main game window in standalone (SetOwnerWindow caller not inspected here); if unset, GetMouseClientPos returns screen px unchanged.",
+        "Drag tracking (GetLeftDragVector) is in SCREEN px (LeftDragStartPos/MousePos are GetCursorPos values, not client-converted). For UI-editor drag-to-move in reference space, the delta must be divided by GlobalScale; raw screen-px and client-px deltas are numerically equal (translation cancels) so this is fine, but the absolute drag-start hit-test must use GetMouseClientPos."
+      ],
+      "verdicts": [
+        {
+          "claim": "[A5-pump] Mouse input does NOT arrive via per-message WndProc handling of WM_MOUSEMOVE/WM_LBUTTONDOWN. WndProc only handles WM_MOUSEWHEEL->AddScrollDelta and WM_INPUT->AddRawMouseDelta; all other mouse messages fall through to ImGui/DefWindowProc. Zero WM_LBUTTONDOWN/WM_MOUSEMOVE handling anywhere (only a doc comment in OverlayStatSystem.h). PumpMessages is a standard PeekMessage/Translate/Dispatch loop setting bIsExitRequested on WM_QUIT.",
+          "status": "confirmed",
+          "note": "All verified. WindowsApplication.cpp:31-100 WndProc switch handles only WM_DESTROY(37-39), WM_MOUSEWHEEL(40-42)->InputSystem::AddScrollDelta, WM_INPUT(43-65) raw mouse->AddRawMouseDelta, WM_SIZE/ENTERSIZEMOVE/EXITSIZEMOVE/SIZING. No WM_MOUSEMOVE/WM_LBUTTONDOWN cases; default->ImGui/DefWindowProc. Line 33: ImGui_ImplWin32_WndProcHandler called first, bImGuiHandled returned for wheel/raw. PumpMessages at 144-158 matches exactly. Grep across entire Source tree for WM_LBUTTONDOWN/WM_MOUSEMOVE/etc found ONLY OverlayStatSystem.h:80 (a comment), confirming zero handling. Note: cited line 31-99 should be 31-100 for the closing brace, but content is accurate."
+        },
+        {
+          "claim": "[A5-coord-space] GetMousePos returns screen px (raw GetCursorPos); GetMouseClientPos returns client px via ScreenToClient(OwnerHWnd). Existing RmlUi UI hit-tests using exactly GetMouseClientPos (UIManager.cpp:856). Standalone: client-px==viewport-px, GetMouseClientPos fed into CursorViewportX/Y after bounds check (GameRenderPipeline.cpp:203-210). Editor: sub-rect transform via ImGui MousePos minus ViewportScreenRect (EditorViewportClient.cpp:590-592).",
+          "status": "partial",
+          "note": "Coordinate-space mechanics fully confirmed. InputSystem.h:85 GetMousePos returns MousePos; 86-94 GetMouseClientPos applies ScreenToClient(OwnerHWnd). GameRenderPipeline.cpp:203-210 confirmed: GetMouseClientPos with >=0 and <ViewportWidth/Height bounds check into CursorViewportX/Y (else UINT32_MAX). EditorViewportClient.cpp:590-592 confirmed: LocalMouseX = ImGui MousePos.x - ViewportScreenRect.X. PARTIAL because the claim overstates UIManager: it says RmlUi 'hit-tests using exactly GetMouseClientPos() (UIManager.cpp:856).' In fact UIManager.cpp:849-859 PREFERS Frame.CursorViewportX/Y when valid (!=UINT32_MAX) and only FALLS BACK to GetMouseClientPos() at 856. Since CursorViewportX/Y is itself derived from GetMouseClientPos (GameRenderPipeline 208-209), the established hit-test space is still client/viewport px, so the conclusion holds, but 'exactly GetMouseClientPos' is the fallback branch, not the primary path. The GetMousePos==raw GetCursorPos detail and the GlobalScale (CurrentRes.Y/1080) prescription were not independently checked against source (the GlobalScale part is a forward-looking recommendation, not a code claim)."
+        },
+        {
+          "claim": "[E3-existing-arbitration] Game-vs-UI input separation already exists. GetViewportInputCaptureState ORs per-widget flags into FUIInputCaptureState{bWantsMouse,bWantsKeyboard,bWantsTextInput,bBlocksGameInput,bBlocksGameKeyboard,bBlocksGameMouseLook}. ProcessInput pulls it every frame: early-returns if UIOnly||bBlocksGameInput; strips mouse if bWantsMouse||bBlocksGameMouseLook; strips keyboard if bWantsTextInput||bBlocksGameKeyboard; only filtered GameSnapshot reaches PlayerController->ProcessPlayerInput. Per-widget setters exist; enum EGameInputMode{GameOnly,GameAndUI,UIOnly}.",
+          "status": "confirmed",
+          "note": "All verified. GameViewportClient.cpp:92-131 ProcessInput: gets UIState(109), ApplyGameCapturePolicy(110), UIOnly||bBlocksGameInput early-return(112-115), bBlockGameMouse=bWantsMouse||bBlocksGameMouseLook->ClearMouseInput(118/121-124), bBlockGameKeyboard=bWantsTextInput||bBlocksGameKeyboard->ClearKeyboardInput(119/125-128), SetGameInputSnapshot(GameSnapshot)(130). UIManager.cpp:642-660 ORs all six flags. UserWidget.h:94-141 has SetWantsMouse/SetWantsKeyboard/SetWantsTextInput/SetBlocksGameInput/SetBlocksGameKeyboard/SetBlocksGameMouseLook. GameViewportClient.h:19-24 enum EGameInputMode{GameOnly,GameAndUI,UIOnly}; SetInputMode at .h:51. Engine.cpp:181-196 ProcessActiveWorldPlayerInput->PlayerController->ProcessPlayerInput; and callers GameEngine.cpp:77 and EditorEngine.cpp:240 pass GameViewportClient->GetGameInputSnapshot() (the filtered snapshot set at GameViewportClient.cpp:130/275), confirming only the filtered snapshot reaches the PlayerController. Minor: claim lists bWantsKeyboard in the struct (true, present at UIManager.cpp:653) though it is not consumed by ProcessInput's filtering logic."
+        }
+      ]
+    },
+    {
+      "dimension": "B (render path): screen-space 2D draw path, coordinate conventions, scale application (B1, B2, B4, D3)",
+      "summary": "This engine already has a complete, production screen-space 2D quad draw path: the RmlUi D3D11 RenderInterface (KraftonEngine/Source/Engine/UI/UIManager.cpp) that compiles textured/colored vertex+index quads and draws them via DrawIndexed, plus a second simpler analog (FFontGeometry screen text). Both submit colored/textured triangle lists with NoDepth+AlphaBlend+SolidNoCull and do pixel->NDC entirely in the vertex shader using a top-left-origin, Y-down pixel convention (the engine's universal 2D convention, also used by the fullscreen-triangle helper). UI is submitted as a dedicated render pass (FUIPass, ERenderPass::UI) that runs late in the enum-ordered pass pipeline: after all 3D/postprocess/bloom/FXAA and after OverlayFont, and just before GammaCorrection. The pass executes against the viewport RTV with viewport TopLeftX/Y=0 and Width/Height = full viewport size. There is NO existing GlobalScale / reference-resolution / UI-scale concept anywhere. RECOMMENDATION (D3): apply GlobalScale at the layout stage (multiply final pixel rects) rather than baking it into the ortho/vertex transform, because the existing 2D path carries no projection matrix — pixel->NDC is a hardcoded divide-by-ViewportSize in the shader with only an optional per-call Translation and an identity-by-default Transform — and the simpler FFontGeometry path already scales geometry in pixel space (Scale multiplies CharW/CharH before pixel->clip). Either system the new UI model targets can drive this draw path directly by emitting scaled pixel rects.",
+      "findings": [
+        {
+          "checklistItem": "B1",
+          "conclusion": "Yes — the closest existing analog to a UI quad batch is the RmlUi D3D11 RenderInterface. FRmlRenderInterfaceD3D11::CompileGeometry builds an interleaved POSITION(float2)+COLOR(float4)+TEXCOORD(float2) vertex buffer + R32 index buffer, and RenderGeometry binds the 'Shaders/UI/RmlUi.hlsl' shader, sets NoDepth/AlphaBlend/SolidNoCull, binds the viewport RTV/DSV, and issues DrawIndexed for each batch. This is a fully generic textured/colored 2D quad submit and is exactly where a new UI quad batch would be drawn. A second, simpler analog is FFontGeometry::AddScreenText, which builds screen-space textured quads (4 verts/6 idx per char) directly in clip space. A new lightweight UI model can either reuse the RmlUi RenderInterface's quad-submit machinery or, more cleanly, mirror the FFontGeometry pattern (build pixel-rect quads -> upload VB/IB -> draw) without pulling in RmlUi.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/UI/UIManager.cpp",
+              "line": "200-262",
+              "note": "CompileGeometry: converts Rml vertices to FRmlVertexD3D11{X,Y,R,G,B,A,U,V}, creates VB+IB — the textured-quad batch builder"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/UI/UIManager.cpp",
+              "line": "264-315",
+              "note": "RenderGeometry: binds UI shader, NoDepth/AlphaBlend/SolidNoCull, OMSetRenderTargets(Cache.RTV/DSV), DrawIndexed — the actual 2D quad submit"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Render/Geometry/FontGeometry.cpp",
+              "line": "159-231",
+              "note": "AddScreenText: simpler screen-space quad builder, 4 verts/6 idx per glyph, an alternative analog without RmlUi"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": true
+        },
+        {
+          "checklistItem": "B2",
+          "conclusion": "Coordinate convention is top-left origin, Y-DOWN in pixels — matching the target model exactly. pixel->NDC conversion happens entirely in the vertex shader, not via a projection matrix. In Shaders/UI/RmlUi.hlsl VS: NdcPosition.x = (PixelPos.x/ViewportSize.x)*2-1; NdcPosition.y = 1 - (PixelPos.y/ViewportSize.y)*2 — i.e. pixel (0,0)=top-left maps to NDC (-1,+1)=top-left. The identical formula appears in FFontGeometry::AddScreenText (PixelToClipX/PixelToClipY lambdas), and the engine's FullscreenTriangleVS (Functions.hlsli) also uses Y-flip (uv*float2(2,-2)+float2(-1,1)), so uv.y=0 -> NDC +1 = top. The D3D11 swapchain/viewport is set TopLeftX/Y=0, Width/Height=full size, MinDepth0/MaxDepth1 (FD3DDevice::ViewportInfo and FRmlRenderInterfaceD3D11::BeginFrame), which is the standard D3D top-left raster origin. No ortho matrix is involved in the 2D path: the RmlUi CB carries ViewportSize, a per-draw Translation, and a Transform that defaults to identity.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Shaders/UI/RmlUi.hlsl",
+              "line": "28-34",
+              "note": "VS pixel->NDC: x=(px/W)*2-1, y=1-(py/H)*2 — top-left origin, Y-down pixels; no projection matrix"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Render/Geometry/FontGeometry.cpp",
+              "line": "187-195",
+              "note": "PixelToClipX/Y lambdas: identical Y-flip pixel->clip formula, confirming engine-wide top-left/Y-down 2D convention"
+            },
+            {
+              "file": "KraftonEngine/Shaders/Common/Functions.hlsli",
+              "line": "37-38",
+              "note": "FullscreenTriangleVS: position = uv*float2(2,-2)+float2(-1,1) — uv.y=0 maps to NDC top, same Y-down screen convention"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Render/Device/D3DDevice.cpp",
+              "line": "228",
+              "note": "ViewportInfo = {0,0,W,H,0,1} top-left origin D3D11 viewport"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/UI/UIManager.cpp",
+              "line": "180-187",
+              "note": "RmlUi BeginFrame sets D3D11_VIEWPORT TopLeftX/Y=0, full Width/Height"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": true
+        },
+        {
+          "checklistItem": "B4",
+          "conclusion": "UI is submitted as a dedicated render pass FUIPass (PassType = ERenderPass::UI), registered via REGISTER_RENDER_PASS and run by FRenderPassPipeline::Execute. Passes are sorted by ERenderPass enum value (RenderPassRegistry::CreateAll, std::sort), and in the enum UI sits near the very end: ...PostProcess, Bloom, FXAA, EditorIcon, GizmoOuter, GizmoInner, OverlayFont, UI, GammaCorrection. So UI draws AFTER all 3D geometry, after postprocess/bloom/FXAA, after the OverlayFont screen-space text, and immediately BEFORE final GammaCorrection — i.e. composited late onto the viewport RTV. The pass chain runs inside FRenderer::Render (Pipeline.Execute(PassCtx)), which is called before Renderer.EndFrame()->Device.Present(). FUIPass::BeginPass gates on Frame.ViewportRTV && UUIManager::Get().HasViewportWidgets(); Execute calls UUIManager::Get().Render(Ctx), which runs RmlContext->Update() then RenderInterface->BeginFrame/Render/EndFrame. A new UI model should hook in at this same site — either as a new ERenderPass entry adjacent to UI, or by extending FUIPass/UUIManager::Render. Note GammaCorrection runs AFTER UI, so UI colors are written in linear space and will be gamma-corrected with the scene (relevant for color matching, not for layout).",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/Render/RenderPass/UIPass.cpp",
+              "line": "17-28",
+              "note": "FUIPass::BeginPass gates on ViewportRTV+HasViewportWidgets; Execute -> UUIManager::Get().Render(Ctx)"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Render/Types/RenderTypes.h",
+              "line": "62-72",
+              "note": "ERenderPass enum order: PostProcess, Bloom, FXAA, EditorIcon, GizmoOuter, GizmoInner, OverlayFont, UI, GammaCorrection, MAX — UI is second-to-last"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Render/RenderPass/RenderPassRegistry.cpp",
+              "line": "27-31",
+              "note": "CreateAll sorts passes by ERenderPass value: 'enum 순서 = 실행 순서' (enum order == execution order)"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Render/RenderPass/RenderPassPipeline.cpp",
+              "line": "24-47",
+              "note": "Execute iterates passes in sorted order calling BeginPass/Execute/EndPass"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Render/Pipeline/Renderer.cpp",
+              "line": "124-151",
+              "note": "Pipeline.Execute(PassCtx) in Render(); EndFrame()->Device.Present() — UI is drawn before Present"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/UI/UIManager.cpp",
+              "line": "811-835",
+              "note": "UUIManager::Render: SetDimensions(viewport), Update, RenderInterface BeginFrame/Render/EndFrame"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": false
+        },
+        {
+          "checklistItem": "D3",
+          "conclusion": "Apply GlobalScale at the LAYOUT stage (multiply the final pixel rects / sizes / positions), NOT in an ortho projection or vertex transform. Rationale grounded in the existing path: (1) There is NO ortho matrix to scale — the 2D path converts pixels to NDC with a hardcoded divide-by-ViewportSize in the shader (RmlUi.hlsl VS, FontGeometry PixelToClip), so 'scaling the projection' would mean editing shader math, whereas pixel-space scaling needs no render changes. (2) The existing simpler 2D path already scales in pixel space: FFontGeometry::AddScreenText multiplies CharW/CharH = 23.0*Scale BEFORE the pixel->clip conversion — precedent for 'scale the geometry pixels, then convert.' (3) The RmlUi CB exposes a per-draw Transform (default identity) and Translation, but RmlUi computes its own pixel layout from context dimensions, so a global scale belongs in the layout computation (AnchorPx/FinalPos = ParentSize*anchor etc., all multiplied by GlobalScale = CurrentRes.Y/1080) feeding the same pixel->NDC shader unchanged. (4) Since pixel->NDC already divides by the live ViewportSize (Frame.ViewportWidth/Height), the shader auto-maps scaled pixels to the correct NDC at any resolution. CAVEAT: if you instead wanted a single multiply, you COULD pre-multiply CBData.Transform (RmlUi.hlsl applies Transform before the NDC divide), but that only works for the RmlUi path and not the FontGeometry path, and it hides the scale from layout/hit-testing — drag/hit-test (mouse in viewport pixels) needs the scaled pixel rects anyway, so layout-stage scaling keeps render and input consistent.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/Render/Geometry/FontGeometry.cpp",
+              "line": "167-168",
+              "note": "CharW = 23.0f*Scale, CharH = 23.0f*Scale — existing 2D path multiplies geometry in PIXEL space before pixel->clip"
+            },
+            {
+              "file": "KraftonEngine/Shaders/UI/RmlUi.hlsl",
+              "line": "28-33",
+              "note": "Transform applied to pixel pos BEFORE the /ViewportSize NDC divide; CB has ViewportSize+Translation but no projection — pixel-space is the natural scaling point"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/UI/UIManager.cpp",
+              "line": "292-299",
+              "note": "RmlPerFrameCB built per draw from Frame.ViewportWidth/Height + Translation + CurrentTransform (identity by default) — no ortho matrix exists to scale"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Render/Types/FrameContext.h",
+              "line": "60-63",
+              "note": "Frame carries only ViewportWidth/ViewportHeight; no GlobalScale/UIScale field exists — new field would feed layout math"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": false
+        }
+      ],
+      "openQuestions": [
+        "UI pass runs BEFORE GammaCorrection (ERenderPass order), so UI colors are gamma-corrected with the scene. Confirm whether the new simple UI is authored in linear or sRGB and whether it should move after GammaCorrection — affects color, not layout/scale.",
+        "RmlUi computes its own internal layout from RmlContext->SetDimensions(viewport). A separate lightweight UI model would NOT go through RmlUi layout; it would need its own pixel-rect builder feeding the same draw path (RmlUi.hlsl or a clone). Decide whether to reuse FRmlRenderInterfaceD3D11::CompileGeometry/RenderGeometry directly or add a parallel quad batcher modeled on FFontGeometry.",
+        "FUIPass::BeginPass gates on UUIManager::HasViewportWidgets(); a new system would need its own gate/has-content check and either a new ERenderPass slot or to be merged into FUIPass.",
+        "The in-game drag editor uses mouse-in-viewport pixel coords (Frame.CursorViewportX/Y already populated in GameRenderPipeline::BuildFrame, lines 203-215). Hit-testing must use the SAME GlobalScale-multiplied pixel rects used for draw — reinforces layout-stage scaling."
+      ],
+      "verdicts": [
+        {
+          "claim": "[B1] RmlUi D3D11 RenderInterface is the closest UI quad-batch analog: CompileGeometry builds interleaved POSITION(float2)+COLOR(float4)+TEXCOORD(float2) VB + R32 IB; RenderGeometry binds Shaders/UI/RmlUi.hlsl, NoDepth/AlphaBlend/SolidNoCull, OMSetRenderTargets(Cache.RTV/DSV), DrawIndexed; FFontGeometry::AddScreenText is a simpler screen-space quad builder (4 verts/6 idx per char).",
+          "status": "confirmed",
+          "note": "UIManager.cpp:200-262 CompileGeometry converts Rml::Vertex -> FRmlVertexD3D11 (struct at lines 31-36: float X,Y; R,G,B,A; U,V = POSITION float2 + COLOR float4 + TEXCOORD float2), creates VertexBuffer (D3D11_BIND_VERTEX_BUFFER, lines 233-245) and IndexBuffer of uint32 (lines 247-259). UIManager.cpp:264-315 RenderGeometry: GetOrCreate(UIShaderPath=='Shaders/UI/RmlUi.hlsl', confirmed line 64), SetDepthStencilState(NoDepth)/SetBlendState(AlphaBlend)/SetRasterizerState(SolidNoCull) lines 284-286, OMSetRenderTargets(1,&Ctx->Cache.RTV, Ctx->Cache.DSV) line 288, DrawIndexed line 314 with DXGI_FORMAT_R32_UINT index buffer line 313. FontGeometry.cpp:159-231 AddScreenText builds CharCount*4 verts and CharCount*6 indices (lines 175-176, 214-221). Every sub-claim verified.",
+          "correctedEvidence": ""
+        },
+        {
+          "claim": "[B2] Top-left origin / Y-DOWN pixel convention; pixel->NDC done in VS not via projection matrix. RmlUi.hlsl VS: x=(px/W)*2-1, y=1-(py/H)*2. FFontGeometry PixelToClipX/Y identical. FullscreenTriangleVS uses uv*float2(2,-2)+float2(-1,1). D3D viewport TopLeft 0,0 full W/H MinDepth0/MaxDepth1. CB carries ViewportSize, per-draw Translation, identity-default Transform; no ortho matrix.",
+          "status": "confirmed",
+          "note": "RmlUi.hlsl:30-33 NdcPosition = ((px/ViewportSize.x)*2-1, 1-(py/ViewportSize.y)*2) — exact top-left/Y-down formula, no projection matrix (conversion in VS). FontGeometry.cpp:187-195 PixelToClipX=(X/W)*2-1, PixelToClipY=1-(Y/H)*2 — identical. Functions.hlsli:37-38 FullscreenTriangleVS position=uv*float2(2,-2)+float2(-1,1). D3DDevice.cpp:228 ViewportInfo={0,0,W,H,0,1}. UIManager.cpp:180-187 BeginFrame sets D3D11_VIEWPORT TopLeftX/Y=0, Width/Height=Frame viewport, MinDepth0/MaxDepth1. FRmlPerFrameCB (lines 50-62) holds ViewportWidth/Height, TranslationX/Y, Transform[16] initialized to identity. Minor nuance (does not refute): VS applies Translation then mul(Transform, PixelPosition) in pixel space (lines 28-29) before NDC conversion; claim's description remains accurate.",
+          "correctedEvidence": ""
+        }
+      ]
+    },
+    {
+      "dimension": "B3 — text/label rendering means (HP bar value text etc.)",
+      "summary": "Three distinct text facilities exist, none of which is a ready-made game-HUD screen-label API. (1) A WORLD-space billboard text path (UTextRenderComponent -> FTextRenderSceneProxy -> FFontGeometry::AddWorldText) is fully wired and actively used; it draws strings as camera-facing quads in 3D, not at screen pixels. (2) A SCREEN-space path EXISTS in the same FFontGeometry (AddScreenText) that converts a pixel position+scale to clip space and emits an OverlayFont draw — but it is effectively DEAD: its only feeder FScene::AddOverlayText has zero callers (no C++, no Lua), it is gated behind ViewModeUtils::SuppressesEditorOverlays (editor-overlay class), and its shader hardcodes a cyan color, alpha-from-red, and a fixed-grid bitmap atlas (no proportional metrics/kerning). (3) RmlUi renders its OWN text internally: UIManager loads Maplestory Bold.ttf via Rml::LoadFontFace and rasterizes glyphs in RmlUi's FreeType font engine — the engine only supplies a generic D3D11 render interface (no engine-side glyph/atlas code is shared with RmlUi). CONCLUSION for the simple model: the cleanest reuse for screen labels is the existing FFontGeometry::AddScreenText screen-text plumbing (it already does pixel->clip and a dynamic VB/IB draw), but it needs (a) a real caller hook, (b) per-label color/size parameters instead of the hardcoded cyan/23px, and (c) ideally a better font atlas, since the current FFontResource is a fixed-cell monospaced bitmap grid. The RmlUi font atlas is NOT directly reusable by the simple renderer (it lives behind RmlUi's API). If the simple UI is allowed to mount RmlUi documents, RmlUi already gives high-quality TTF labels for free; if the simple UI is a separate lightweight renderer, AddScreenText is the thing to lean on / extend.",
+      "findings": [
+        {
+          "checklistItem": "B3-world-text",
+          "conclusion": "World-space text is a complete, active path: UTextRenderComponent creates FTextRenderSceneProxy (FontBatched flag), and the collector batches CachedText into FFontGeometry::AddWorldText, which builds camera-facing billboard quads (uses CamRight/CamUp, WorldPos, WorldScale). This draws a string in 3D world space, NOT at a screen pixel position. Drawn via BuildFontCommands -> ERenderPass::Transparent with EShaderPath::Font.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/Render/Geometry/FontGeometry.cpp",
+              "line": "98-157",
+              "note": "AddWorldText builds billboard quads from WorldPos/CamRight/CamUp/WorldScale"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Render/Proxy/TextRenderSceneProxy.cpp",
+              "line": "30-58",
+              "note": "UpdateMesh caches Text/FontScale/Font; sets FontBatched flag"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Render/Command/DrawCommandBuilder.cpp",
+              "line": "655-660,1269-1279",
+              "note": "AddWorldText feeds FontGeometry; BuildFontCommands emits world-text draw on Transparent pass with EShaderPath::Font"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": false
+        },
+        {
+          "checklistItem": "B3-screen-text-exists",
+          "conclusion": "A SCREEN-space text facility DOES exist: FFontGeometry::AddScreenText(Text, ScreenX, ScreenY, ViewportW, ViewportH, Scale) maps a pixel position to clip space (PixelToClipX/Y) and emits quads. It can draw a string at a chosen screen pixel position with a Scale multiplier. So the raw capability the simple-UI labels need already exists in code.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/Render/Geometry/FontGeometry.cpp",
+              "line": "159-231",
+              "note": "AddScreenText: pixel->clip mapping, CharW/CharH = 23*Scale, builds screen quads"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Render/Geometry/FontGeometry.h",
+              "line": "35-38,53-56",
+              "note": "AddScreenText signature + ScreenVB/IB getters"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": true
+        },
+        {
+          "checklistItem": "B3-screen-text-unused-and-constrained",
+          "conclusion": "The screen-text path is effectively DEAD and editor-scoped, not a game-HUD API. Its only data source FScene::AddOverlayText has ZERO callers anywhere (no C++ '.AddOverlayText(' / '->AddOverlayText(' match, no Lua match). BuildFontCommands (which emits the OverlayFont draw) early-returns under SuppressesEditorOverlays, marking it an editor-overlay debug facility. The OverlayFont pixel shader hardcodes the label color float4(0.6,1.0,1.0,col.r) (cyan) and derives alpha from the red channel only — no per-label color. AddScreenText hardcodes 23px cell size scaled by Scale and negative letter-spacing. So reusing it for HP-bar text needs new plumbing: a real caller, per-label color/size params, and removal of the editor-overlay gate.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/Render/Scene/FScene.cpp",
+              "line": "383-386",
+              "note": "AddOverlayText definition; grep found no call sites in Source or *.lua"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Render/Command/DrawCommandBuilder.cpp",
+              "line": "915-929,1259-1292",
+              "note": "OverlayText only fed from Scene->GetOverlayTexts(); BuildFontCommands gated by SuppressesEditorOverlays"
+            },
+            {
+              "file": "KraftonEngine/Shaders/UI/OverlayFont.hlsl",
+              "line": "14-22",
+              "note": "PS hardcodes cyan color and alpha=col.r; no color input"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Render/Types/ViewModeUtils.h",
+              "line": "37-40",
+              "note": "SuppressesEditorOverlays classifies this as an editor overlay"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": true
+        },
+        {
+          "checklistItem": "B3-font-atlas-nature",
+          "conclusion": "The engine font used by both AddWorldText and AddScreenText is a FIXED-GRID BITMAP atlas, not a proportional/kerned font. FFontResource (=FTextureAtlasResource) only stores an SRV plus Columns/Rows; FFontGeometry::BuildCharInfoMap slices the atlas into uniform Columns x Rows cells (monospaced) for ASCII 32-126 then Hangul AC00-D7A3. Every glyph is the same cell size; there is no per-glyph width/advance/kerning. Good enough for numeric HP values, but lower visual quality than RmlUi's TTF text.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/Core/Types/ResourceTypes.h",
+              "line": "12-26",
+              "note": "FFontResource = FTextureAtlasResource: SRV + Columns/Rows only"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Render/Geometry/FontGeometry.cpp",
+              "line": "38-63",
+              "note": "BuildCharInfoMap: uniform CellW=1/Columns, CellH=1/Rows monospaced grid"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Resource/ResourceManager.cpp",
+              "line": "40-55",
+              "note": "Font loaded from Resource.ini with Columns/Rows grid metadata"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": false
+        },
+        {
+          "checklistItem": "B3-rmlui-text",
+          "conclusion": "The RmlUi path renders text via RmlUi's OWN internal font engine (FreeType-based). UIManager::Initialize calls Rml::LoadFontFace on Content/Font/Maplestory Bold.ttf; RmlUi internally rasterizes glyphs and calls back into FRmlRenderInterfaceD3D11 (GenerateTexture/RenderGeometry) with already-laid-out textured quads. The engine supplies NO font/glyph logic to RmlUi and gets NO reusable glyph atlas back out of it. So the simple UI cannot directly reuse RmlUi's font atlas; it would either go through RmlUi's API entirely or use the engine-side FFontGeometry atlas. If the simple model mounts an RmlUi document, it gets high-quality TTF labels for free.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/UI/UIManager.cpp",
+              "line": "574-579",
+              "note": "Rml::LoadFontFace loads Maplestory Bold.ttf into RmlUi's font engine"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/UI/UIManager.cpp",
+              "line": "264-315,392-430",
+              "note": "Render interface only compiles/draws geometry and generates textures RmlUi hands it; no glyph code engine-side"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": false
+        },
+        {
+          "checklistItem": "B3-third-path-imgui",
+          "conclusion": "A third text capability is Dear ImGui (ImGui::Text/TextUnformatted), but it is used only by editor panels (EditorMaterialInspector). It is an immediate-mode debug/editor overlay, not a game-world or hierarchy-driven HUD system, so it is not a fit for runtime HP-bar labels in the proposed Canvas->Group->Element model.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Editor/UI/Panel/EditorMaterialInspector.cpp",
+              "line": "154,166,237",
+              "note": "ImGui::Text/TextUnformatted used in editor material inspector panel only"
+            }
+          ],
+          "confidence": "med",
+          "loadBearing": false
+        }
+      ],
+      "openQuestions": [
+        "Does the simple-UI design intend a SEPARATE lightweight renderer or to mount RmlUi documents? If separate, FFontGeometry::AddScreenText is the reuse target but needs per-label color/size and removal of the SuppressesEditorOverlays gate. If RmlUi, TTF labels come for free.",
+        "Which font atlas asset is registered as 'Default' in Resource.ini, and is its bitmap quality/coverage acceptable for HP/numeric labels, or is a new atlas needed?",
+        "Is the bitmap-atlas monospaced look acceptable for HUD numbers, or is proportional TTF rendering (RmlUi) required for the label aesthetic?"
+      ],
+      "verdicts": [
+        {
+          "claim": "[B3-screen-text-exists] A SCREEN-space text facility FFontGeometry::AddScreenText(Text, ScreenX, ScreenY, ViewportW, ViewportH, Scale) exists, maps pixel position to clip space (PixelToClipX/Y), emits quads, CharW/CharH = 23*Scale; header has signature + ScreenVB/IB getters.",
+          "status": "confirmed",
+          "note": "Verified at FontGeometry.cpp:159-231. Signature matches exactly (lines 159-162). PixelToClipX/Y lambdas at 187-195 do pixel->clip mapping. CharW=CharH=23.0f*Scale at 167-168. Builds screen quads into ScreenVertices/ScreenIndices (175-230). FontGeometry.h:35-38 has the AddScreenText signature and :53-56 has GetScreenVBBuffer/GetScreenVBStride/GetScreenIBBuffer/GetScreenIndexCount getters. Raw capability genuinely exists.",
+          "correctedEvidence": ""
+        },
+        {
+          "claim": "[B3-screen-text-unused-and-constrained] Screen-text path is dead/editor-scoped: AddOverlayText has ZERO callers (no C++ or Lua match); BuildFontCommands early-returns under SuppressesEditorOverlays; OverlayFont PS hardcodes cyan float4(0.6,1.0,1.0,col.r) with alpha from red only; AddScreenText hardcodes 23px and negative letter-spacing. Reuse needs new plumbing.",
+          "status": "confirmed",
+          "note": "All sub-claims verified. FScene.cpp:383-386 defines AddOverlayText; grep across repo shows only the decl (FScene.h:55) and definition (FScene.cpp:383) — zero call sites in Source; no *.lua match for AddOverlayText/OverlayText. DrawCommandBuilder.cpp:916 feeds overlay text exclusively from Scene->GetOverlayTexts(). BuildFontCommands at DrawCommandBuilder.cpp:1259-1262 early-returns when ViewModeUtils::SuppressesEditorOverlays(ViewMode) is true. OverlayFont.hlsl:21 returns float4(0.6f, 1.0f, 1.0f, col.r) — hardcoded cyan, alpha derived from red channel only, no per-label color input. AddScreenText hardcodes 23.0f cell (FontGeometry.cpp:167-168) and LetterSpacing = -0.5f*CharW (line 169, negative). ViewModeUtils.h:37-40 confirms SuppressesEditorOverlays definition. Note: the SuppressesEditorOverlays gate suppresses overlay rendering only in pure-debug/DoFCoC view modes, not in normal modes — so the path renders in standard view modes; the 'editor-overlay debug facility' framing rests primarily on the zero-callers + editor-only data source, which is sound.",
+          "correctedEvidence": ""
+        }
+      ]
+    },
+    {
+      "dimension": "CROSS-CUTTING: Anatomy of existing RmlUi UI system; reuse-vs-replace verdict for the new Canvas/Group/Element model",
+      "summary": "The existing UI is a fully-functional RmlUi (HTML/RCSS) layer. UUIManager (a TSingleton + FGCObject) owns a single Rml::Context \"GameViewport\", three custom Rml interfaces (System/File-wide/RenderInterface-D3D11), and a list of UUserWidget UObjects; each widget wraps one Rml::ElementDocument loaded from an .rml file path. It is initialized in Engine.cpp (UUIManager::Get().Initialize(Device)), driven once per frame entirely from inside the render pass FUIPass::Execute -> UUIManager::Render(Ctx) (there is NO separate game-thread tick; SetDimensions, ProcessInput, Update, Render all happen in the render pass), renders via FRmlRenderInterfaceD3D11 straight to the viewport RTV, and feeds mouse/keys from InputSystem through Rml::Context::ProcessMouseMove/ButtonDown/etc. RmlUi already does full hit-testing, hover, and even native drag/dragstart/dragdrop events internally (GetElementAtPoint/GetHoverElement exist), and already has the exact \"reference resolution + uniform scale\" primitive the new model wants: SetDimensions(px) plus SetDensityIndependentPixelRatio(dp_ratio) — but the engine currently calls neither dp_ratio nor GetElementAtPoint. Widgets are created from Lua via UI.CreateWidget(path) and a new_usertype<UUserWidget> exposing AddToViewport/bind_click/SetText/SetProperty. VERDICT (F1): build the new simple Canvas/Group/Element model as a SEPARATE lightweight system, NOT a layer over RmlUi and NOT a replacement — coupling to RmlUi types is pervasive and total (every widget == an Rml::Document; layout/render/input all delegate to Rml), so there is essentially nothing reusable at the model level. The only thing worth reusing is the integration plumbing: the D3D11 render path pattern, the FUIPass slot, and the GameViewportClient input-capture contract (FUIInputCaptureState).",
+      "findings": [
+        {
+          "checklistItem": "C-init: how the existing UI is initialized",
+          "conclusion": "UUIManager is a TSingleton<UUIManager>+FGCObject. Engine.cpp initializes it once with the D3D11 device after the render pipeline is created, and shuts it down before LuaScriptManager (ordering matters because widgets hold sol::protected_function Lua callbacks). Initialize() news the 3 Rml interfaces, registers them, calls Rml::Initialise(), creates ONE context named \"GameViewport\" at 1x1, and loads a Maplestory font.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/Runtime/Engine.cpp",
+              "line": "102",
+              "note": "UUIManager::Get().Initialize(Device); after SetRenderPipeline"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Runtime/Engine.cpp",
+              "line": "117-121",
+              "note": "comment + UUIManager::Get().Shutdown(); ordered before FLuaScriptManager::Shutdown() because UI holds Lua callbacks"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/UI/UIManager.cpp",
+              "line": "544-579",
+              "note": "Initialize(): new System/File/Render interfaces, Rml::SetSystemInterface/SetFileInterface/SetRenderInterface, Rml::Initialise(), CreateContext(\"GameViewport\",{1,1}), LoadFontFace"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/UI/UIManager.h",
+              "line": "96-97",
+              "note": "class UUIManager : public TSingleton<UUIManager>, public FGCObject"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": false
+        },
+        {
+          "checklistItem": "C-tick/render: how/where it ticks and renders each frame",
+          "conclusion": "There is no independent UI tick. Everything happens inside the render pass FUIPass: BeginPass gates on Frame.ViewportRTV && HasViewportWidgets(); Execute calls UUIManager::Render(Ctx). Render() does SetDimensions(viewport px) -> ProcessInput(frame) -> RmlContext->Update() -> RenderInterface->BeginFrame -> RmlContext->Render() -> EndFrame, drawing to Ctx.Cache.RTV/DSV. So input processing, layout update and draw are all coupled to one render-thread call per frame. UI is one ERenderPass::UI slot in the pass list (after OverlayFont, before GammaCorrection).",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/Render/RenderPass/UIPass.cpp",
+              "line": "17-28",
+              "note": "BeginPass returns ViewportRTV && HasViewportWidgets(); Execute() -> UUIManager::Get().Render(Ctx)"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/UI/UIManager.cpp",
+              "line": "811-835",
+              "note": "Render(): SetDimensions, ProcessInput, FlushDeferredViewportRemovals, RmlContext->Update(), BeginFrame, RmlContext->Render(), EndFrame"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Render/Types/RenderTypes.h",
+              "line": "141",
+              "note": "ERenderPass::UI ordering entry in pass name map"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": false
+        },
+        {
+          "checklistItem": "C-render-interface: how it renders to D3D11",
+          "conclusion": "FRmlRenderInterfaceD3D11 implements Rml::RenderInterface. CompileGeometry builds D3D11 vertex/index buffers from Rml::Vertex (pos/colour/uv); RenderGeometry binds Shaders/UI/RmlUi.hlsl, sets NoDepth+AlphaBlend+SolidNoCull, OMSetRenderTargets to Ctx.Cache.RTV/DSV, uploads a per-frame CB (viewport W/H, translation, 4x4 transform) and draws indexed. Textures load via DirectXTK WICTextureLoader (LoadTexture) or raw RGBA8 (GenerateTexture); scissor uses a dedicated rasterizer state. This is a self-contained, reusable D3D11 2D-quad renderer pattern.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/UI/UIManager.cpp",
+              "line": "200-262",
+              "note": "CompileGeometry: Rml::Vertex -> FRmlVertexD3D11, CreateBuffer for VB/IB"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/UI/UIManager.cpp",
+              "line": "264-315",
+              "note": "RenderGeometry: GetOrCreate(UIShaderPath), state set, OMSetRenderTargets(Ctx.Cache.RTV/DSV), per-frame CB upload, DrawIndexed"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/UI/UIManager.cpp",
+              "line": "336-390",
+              "note": "LoadTexture via DirectX::CreateWICTextureFromFileEx"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": false
+        },
+        {
+          "checklistItem": "C-input/hit-testing: does RmlUi already do mouse hit-testing & drag (relevant to editor E1)",
+          "conclusion": "YES. UUIManager::ProcessInput feeds raw mouse position and L/R/M button down/up + wheel into Rml::Context::ProcessMouseMove/ProcessMouseButtonDown/Up/Wheel. RmlUi internally performs hit-testing, hover, focus, AND has native drag support (dragstart/drag/dragdrop events) plus GetElementAtPoint/GetHoverElement on the context. The engine code does NOT currently call GetElementAtPoint or use any drag events itself — so for the new editor's 'drag Element with mouse', if the new model is separate from RmlUi it must implement its own per-Element rect hit-test (the math FinalPos/size makes this trivial) rather than reusing Rml's. Clicks today are wired only via FWidgetClickEventListener on 'click'.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/UI/UIManager.cpp",
+              "line": "837-893",
+              "note": "ProcessInput: ProcessMouseMove(MouseX,MouseY,0), ProcessMouseButtonDown/Up(0/1/2), ProcessMouseWheel; cursor from Frame.CursorViewportX/Y or InputSystem"
+            },
+            {
+              "file": "KraftonEngine/ThirdParty/RmlUi/Include/RmlUi/Core/Context.h",
+              "line": "115-128",
+              "note": "GetHoverElement(), GetElementAtPoint(point,...) — built-in hit-testing"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/UI/UserWidget.cpp",
+              "line": "52-73",
+              "note": "RegisterEventListeners adds 'click' listeners only; no drag wiring in engine code"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": false
+        },
+        {
+          "checklistItem": "C-lua: how documents/widgets are created from Lua (sol)",
+          "conclusion": "FLuaScriptManager::RegisterUIBindings exposes new_usertype<UUserWidget>(\"UserWidget\", bases<UObject>) with AddToViewport/AddToViewportZ/RemoveFromParent/Show/Hide/IsInViewport/bind_click/SetText/SetProperty/SetWantsMouse/WantsMouse, plus a UI table with UI.CreateWidget(path) that calls UUIManager::Get().CreateWidget(nullptr, path). So Lua drives the whole lifecycle: create widget from an .rml document path, add to viewport, bind click callbacks (sol::protected_function held in FWidgetClickEventListener). The new model would need its own analogous sol bindings (Canvas/Group/Element create + drag), but can mirror this exact pattern.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/Lua/LuaScriptManager.cpp",
+              "line": "3251-3302",
+              "note": "RegisterUIBindings: new_usertype<UUserWidget> with AddToViewport/bind_click/SetText/SetProperty/SetWantsMouse"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Lua/LuaScriptManager.cpp",
+              "line": "3304-3311",
+              "note": "UI.CreateWidget(DocumentPath) -> UUIManager::Get().CreateWidget(nullptr, DocumentPath)"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/UI/UserWidget.h",
+              "line": "23-53",
+              "note": "FWidgetClickEventListener stores sol::protected_function Callback, invoked under FScopedGarbageCollectionBlocker"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": false
+        },
+        {
+          "checklistItem": "D1/D2: does RmlUi already have a context-dimensions / dp-ratio concept matching RefRes1920x1080 + GlobalScale=Y/1080",
+          "conclusion": "YES, exactly. Rml::Context exposes SetDimensions(Vector2i)/GetDimensions() for pixel resolution AND SetDensityIndependentPixelRatio(float dp_ratio)/GetDensityIndependentPixelRatio() which is literally 'the ratio of the dp unit to the px unit' — i.e. RmlUi's built-in uniform UI scale. The required GlobalScale = CurrentRes.Y/1080 maps directly onto dp_ratio if the new model were built over RmlUi (author RCSS in dp, set dp_ratio = viewportHeight/1080). CRITICAL GAP: the engine TODAY only calls SetDimensions(viewport px) every frame in Render() and NEVER calls SetDensityIndependentPixelRatio — so currently there is zero reference-resolution/uniform-scaling behavior; RML content is laid out in raw viewport pixels. No RefRes/GlobalScale/1920x1080-as-design-res concept exists anywhere in engine code (window is merely created at 1920x1080 in WindowsApplication.cpp).",
+          "evidence": [
+            {
+              "file": "KraftonEngine/ThirdParty/RmlUi/Include/RmlUi/Core/Context.h",
+              "line": "42-54",
+              "note": "SetDimensions/GetDimensions and SetDensityIndependentPixelRatio/GetDensityIndependentPixelRatio (dp:px ratio = uniform scale)"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/UI/UIManager.cpp",
+              "line": "819-822",
+              "note": "Render() calls RmlContext->SetDimensions({viewportW,viewportH}) only — raw px, no dp_ratio call anywhere"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Platform/WindowsApplication.cpp",
+              "line": "125",
+              "note": "window created 1920,1080 but no engine-side ReferenceResolution/GlobalScale concept"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": true
+        },
+        {
+          "checklistItem": "F1/risk VERDICT + highest-coupling integration point",
+          "conclusion": "VERDICT: make the new Canvas/Group/Element model a BRAND-NEW lightweight system independent of RmlUi (option a), not a layer over it (c) and not a replacement of it (b). Justification: coupling between the existing model and RmlUi is total — UUserWidget IS a thin wrapper over Rml::ElementDocument, layout/styling is RCSS, hit-testing/hover/drag are Rml-internal, and rendering is Rml geometry. There is no clean seam to insert pivot/anchor/RectTransform math; reusing RmlUi would mean expressing the simple model as generated RML/RCSS (heavy, against the anti-overengineering mandate). The requested math (AnchorPx=ParentSize*anchor; FinalPos=ParentOrigin+AnchorPx+position-(size*pivot)) is trivial to compute directly and emit as quads. REUSE only the plumbing, not the model: (1) the FRmlRenderInterfaceD3D11 pattern -> write an analogous quad renderer, (2) the FUIPass slot to draw, (3) the Lua usertype pattern. HIGHEST-COUPLING integration point = the GameViewportClient<->UIManager input-capture contract: GameViewportClient::Update calls UUIManager::Get().GetViewportInputCaptureState() every frame and uses bWantsMouse/bBlocksGame* to decide cursor visibility and game-input routing. Any new UI system MUST plug into this same contract (or the two systems will fight over the mouse). Also note both must share the single mouse stream — RmlContext consumes ProcessMouseMove/Button each frame.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/Viewport/GameViewportClient.cpp",
+              "line": "109-119",
+              "note": "GetViewportInputCaptureState() consumed every frame; bWantsMouse/bBlocksGameMouseLook gate game input"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Viewport/GameViewportClient.cpp",
+              "line": "209-213",
+              "note": "ApplyGameCapturePolicy: bShouldCaptureMouse depends on !UIState.bWantsMouse/!bBlocksGameInput"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/UI/UserWidget.h",
+              "line": "56-142",
+              "note": "UUserWidget wraps a single Rml::ElementDocument* Document; all behavior delegates to Rml — nothing model-reusable"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/UI/UIManager.cpp",
+              "line": "786-794",
+              "note": "LoadDocument: RmlContext->LoadDocument(path) IS the widget — total RmlUi coupling at the model layer"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": true
+        }
+      ],
+      "openQuestions": [
+        "Will the new lightweight UI and the existing RmlUi UI coexist on screen simultaneously, or is RmlUi expected to be retired once the new HUD/menus are ported? Both draw in the same ERenderPass::UI slot and both consume the same mouse stream — if coexisting, the input-capture (FUIInputCaptureState) and mouse-event ownership must be arbitrated between the two systems.",
+        "Should the new model author against RmlUi's dp_ratio (which already exists and is unused) as a quick path to RefRes scaling, or implement GlobalScale=Y/1080 in its own layout math? The latter is cleaner for a separate system but duplicates a capability RmlUi already provides.",
+        "Does the in-game editor need pixel-accurate per-Element hit-testing for drag, or could it reuse Rml::Context::GetElementAtPoint? If the new model is separate, it must implement its own rect hit-test (straightforward from the FinalPos/size math)."
+      ],
+      "verdicts": [
+        {
+          "claim": "1 [D1/D2: RmlUi already has context-dimensions/dp-ratio concept; SetDimensions called every frame but SetDensityIndependentPixelRatio never called; no RefRes/GlobalScale/1920x1080-design-res concept in engine; window merely created at 1920x1080]",
+          "status": "confirmed",
+          "note": "Context.h:44-47 declares SetDimensions(Vector2i)/GetDimensions(); lines 49-54 declare SetDensityIndependentPixelRatio(float dp_ratio)/GetDensityIndependentPixelRatio() with doc comment 'Changes the ratio of the dp unit to the px unit' — verbatim matches the claim. UIManager.cpp:819-822 in Render() calls RmlContext->SetDimensions({(int)ViewportWidth,(int)ViewportHeight}) using raw px only. Grep of the entire engine Source tree for SetDensityIndependentPixelRatio returns ZERO matches, confirming dp_ratio is never set. Grep for RefRes/GlobalScale/ReferenceResolution/'/1080' finds no UI-scaling concept (only two unrelated SkinnedMeshComponent.cpp 'GlobalScale' hits for mesh transforms). WindowsApplication.cpp:125 creates the window with literal 1920,1080 args to CreateWindowExW with no reference-resolution semantics. Every sub-claim is supported.",
+          "correctedEvidence": ""
+        },
+        {
+          "claim": "2 [F1: option-a brand-new system verdict; total RmlUi coupling at model layer (UUserWidget wraps single Rml::ElementDocument, LoadDocument IS the widget); highest-coupling point = GameViewportClient<->UIManager input-capture contract via GetViewportInputCaptureState every frame gating mouse/game-input; shared single mouse stream consumed by RmlContext ProcessMouseMove/Button]",
+          "status": "partial",
+          "note": "Coupling and integration-point evidence are well-supported, but the cited function NAME is wrong. UserWidget.h:56-142 confirms UUserWidget holds a single 'Rml::ElementDocument* Document' (line 129) and all members delegate to Rml. UIManager.cpp:786-794 confirms RmlContext->LoadDocument(...) creates the Document that IS the widget (MarkDocumentLoaded). GameViewportClient.cpp:109 consumes UUIManager::Get().GetViewportInputCaptureState() and :110/:118-119 gate game mouse/keyboard on bWantsMouse/bBlocksGameMouseLook etc.; :209-213 ApplyGameCapturePolicy makes bShouldCaptureMouse depend on !bWantsMouse/!bBlocksGameInput/!bBlocksGameMouseLook — all as claimed. UIManager.cpp:862-890 confirms RmlContext->ProcessMouseMove/ProcessMouseButtonDown/Up/Wheel — single shared mouse stream, as claimed. DISCREPANCY: the claim says 'GameViewportClient::Update calls GetViewportInputCaptureState every frame' but the enclosing function at GameViewportClient.cpp:92 is ProcessInput(const FInputSystemSnapshot&, float), NOT a method named Update. The per-frame contract and gating logic are accurate; only the function name is misattributed. The architectural verdict (option a) is an opinion/recommendation, not a checkable fact, and the factual coupling premises underpinning it are confirmed.",
+          "correctedEvidence": "GameViewportClient.cpp:92 — the function consuming GetViewportInputCaptureState() (called at line 109) is UGameViewportClient::ProcessInput, not 'GameViewportClient::Update'."
+        }
+      ]
+    },
+    {
+      "dimension": "D — RefRes / GlobalScale (D1-D4 + B-coordinate cross-check)",
+      "summary": "The engine has a clean, single-window resolution pipeline that makes a once-per-resize GlobalScale = CurrentRes.Y/1080 trivial to compute. The authoritative client/back-buffer size flows: WM_SIZE -> FWindowsApplication::WndProc (WindowsApplication.cpp:66-77) -> FWindowsWindow::OnResized -> OnResizedCallback -> GEngine->OnWindowResized (EngineLoop.cpp:32-38) -> UEngine::OnWindowResized resizes the swapchain via FD3DDevice::OnResizeViewport (Engine.cpp:218-227, D3DDevice.cpp:121-137); UGameEngine::OnWindowResized additionally calls StandaloneViewport->RequestResize (GameEngine.cpp:95-106). Per frame, the offscreen FViewport's size is the single source of truth for UI: it is copied into FFrameContext.ViewportWidth/Height by SetViewportInfo (FrameContext.cpp:35-38) and the existing RmlUi UI already reads exactly these two floats to size itself (UIManager.cpp:819-822, 183-184, 293-294). So D1's best home for the fixed RefRes is FProjectSettings (existing JSON-backed singleton settings struct, ProjectSettings.h), D2's single compute point is OnWindowResized / the FViewport resize (resize-driven, not every frame), and D3 the natural application point is the UI layout pixel results (where RmlUi already consumes ViewportWidth/Height), NOT the 3D render projection. D4: there is currently NO aspect/16:9 enforcement anywhere (no WM_GETMINMAXINFO, no letterbox at window level); BlitToBackBuffer is a full-stretch fullscreen-triangle blit, so a 16:9 policy hook would be new and best lives either in the resize handler (clamp client size) or as a UI-only GlobalScale that ignores non-16:9 (simplest).",
+      "findings": [
+        {
+          "checklistItem": "D1",
+          "conclusion": "Best home for the fixed RefRes (1920x1080) constant is FProjectSettings — the existing global settings singleton. It is a TSingleton with nested option structs (FShadowOption, FPhysicsOption, FGameOption), JSON-serialized to Settings/ProjectSettings.ini (despite the .ini extension the format is JSON via SimpleJSON), and is already loaded once at startup in UGameEngine::Init. Add a small FUIOption { float RefResX=1920, RefResY=1080; } struct here (mirroring the FShadowOption pattern) rather than inventing a new config file or hardcoding in the UI manager. Alternatively, for a value that is conceptually a hard constant (16:9 only, never user-edited), a constexpr in a new UI header is acceptable — but the established engine pattern for tunable global values is FProjectSettings.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/Core/ProjectSettings.h",
+              "line": "12-72",
+              "note": "FProjectSettings : public TSingleton with nested FShadowOption/FPhysicsOption/FGameOption structs and SaveToFile/LoadFromFile — the canonical place for global tunables; a FUIOption with RefRes would slot in identically"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Runtime/GameEngine.cpp",
+              "line": "26",
+              "note": "FProjectSettings::Get().LoadFromFile(FProjectSettings::GetDefaultPath()) — settings loaded once during UGameEngine::Init, before viewport creation"
+            },
+            {
+              "file": "KraftonEngine/Settings/ProjectSettings.ini",
+              "line": "1-29",
+              "note": "On-disk file is actually JSON (Game/Physics/Shadow sections); confirms the serialization pattern a UI/RefRes section would follow"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Core/ProjectSettings.cpp",
+              "line": "39-82",
+              "note": "SaveToFile builds JSON objects per section via SimpleJSON; a RefRes section is a trivial 2-key add"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": false
+        },
+        {
+          "checklistItem": "D2",
+          "conclusion": "The current render resolution / client size is known authoritatively in two places, and GlobalScale should be computed ONCE per resize (not every frame). (1) The window client size is captured in FWindowsWindow (Width/Height floats) and pushed on WM_SIZE. (2) The single funnel that every resize passes through is UEngine::OnWindowResized(Width,Height) — it both resizes the swapchain (FD3DDevice::OnResizeViewport) and, in the Game override, resizes the offscreen FViewport. This is the ONE pass that should compute GlobalScale = Height/1080.0f and store it (e.g. on UIManager or a UI root). Per frame, the resolution is then read indirectly via FFrameContext.ViewportWidth/Height (set from the FViewport in SetViewportInfo). Because the UI is drawn from the offscreen FViewport (whose size == client size in standalone), Height there equals CurrentRes.Y. Computing in OnWindowResized avoids a per-frame divide and matches the existing resize-driven RT recreation.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/Platform/WindowsApplication.cpp",
+              "line": "66-77",
+              "note": "WM_SIZE handler: LOWORD/HIWORD(lParam) -> Window.OnResized(Width,Height) then OnResizedCallback(Width,Height) — the entry point for every resolution change"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Runtime/EngineLoop.cpp",
+              "line": "32-38",
+              "note": "OnResizedCallback forwards to GEngine->OnWindowResized(Width,Height) — single bridge from platform to engine"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Runtime/Engine.cpp",
+              "line": "218-227",
+              "note": "UEngine::OnWindowResized: early-out on 0 size, then Renderer.GetFD3DDevice().OnResizeViewport(Width,Height). THE single resize funnel — ideal one-time GlobalScale compute site"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Runtime/GameEngine.cpp",
+              "line": "95-106",
+              "note": "UGameEngine::OnWindowResized calls base then StandaloneViewport->RequestResize(Width,Height); Width/Height here == client size == CurrentRes for the UI"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Render/Types/FrameContext.cpp",
+              "line": "35-38",
+              "note": "SetViewportInfo copies FViewport GetWidth/GetHeight into Frame.ViewportWidth/ViewportHeight — the per-frame resolution the UI actually reads"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": true
+        },
+        {
+          "checklistItem": "D3",
+          "conclusion": "The natural application point for GlobalScale is the UI LAYOUT PIXEL results, NOT the 3D render projection. Evidence: the existing RmlUi UI is resolution-driven entirely through FFrameContext.ViewportWidth/Height — UIManager::Render feeds them straight into RmlContext->SetDimensions(), and the per-draw constant buffer (FRmlPerFrameCB.ViewportWidth/Height) maps pixel coords to NDC in the UI shader. The 3D scene projection is independent: it only consumes AspectRatio (UCameraComponent::OnResize sets AspectRatio = W/H; FrameContext SetCameraInfo builds Proj from the camera). So the new simple UI model should multiply its computed layout pixels (FinalPos, size) by GlobalScale BEFORE emitting vertices/quads in viewport-pixel space — leaving the existing pixel->NDC viewport mapping untouched. Do not bake GlobalScale into the camera projection; that would (wrongly) scale the 3D world. (B-scanner also owns the pixel->NDC mapping detail.)",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/UI/UIManager.cpp",
+              "line": "819-822",
+              "note": "RmlContext->SetDimensions({(int)Frame.ViewportWidth,(int)Frame.ViewportHeight}) — UI layout space is driven by viewport pixels; GlobalScale would pre-multiply element sizes/positions in this same pixel space"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/UI/UIManager.cpp",
+              "line": "292-300",
+              "note": "FRmlPerFrameCB carries ViewportWidth/Height per draw; the UI shader uses these to convert pixel coords to clip space — the existing pixel->NDC contract the new model should reuse"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Component/Camera/CameraComponent.cpp",
+              "line": "60-63",
+              "note": "UCameraComponent::OnResize sets only AspectRatio = W/H — the 3D projection path is separate from UI and must NOT carry GlobalScale"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Render/Types/MinimalViewInfo.h",
+              "line": "32",
+              "note": "Default AspectRatio = 16.0f/9.0f — confirms 16:9 is already the assumed baseline for the 3D camera"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": true
+        },
+        {
+          "checklistItem": "D4",
+          "conclusion": "Window resize is handled in FWindowsApplication::WndProc (WM_SIZE/WM_SIZING/WM_ENTERSIZEMOVE/WM_EXITSIZEMOVE). There is currently NO 16:9 / aspect enforcement of any kind: no WM_GETMINMAXINFO handler, no aspect clamp, and the final BlitToBackBuffer is a non-aspect-correcting fullscreen-triangle stretch (Draw(3,0)) of the offscreen RT onto the whole back buffer — so a non-16:9 window today simply stretches the image. Cleanest 16:9-only policy hooks, in order of simplicity for THIS engine: (a) IGNORE/UNIFORM-SCALE (simplest, matches the prompt's 'scale uniformly by GlobalScale'): compute GlobalScale = Height/1080 in OnWindowResized and accept that non-16:9 windows get pillarbox/overflow at the UI layer only — no window code changes. (b) LETTERBOX: there is already a camera-letterbox mechanism (FCameraLetterboxState + ApplyLetterboxAspect in GameRenderPipeline.cpp) that adjusts POV.AspectRatio; a UI letterbox could reuse this concept but is heavier. (c) HARD-ENFORCE 16:9 window: add a WM_GETMINMAXINFO/WM_SIZING handler in WndProc to constrain client size — most invasive. Recommendation: option (a), since the prompt explicitly wants a single uniform GlobalScale and 'no overengineering'.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/Platform/WindowsApplication.cpp",
+              "line": "66-89",
+              "note": "WM_SIZE/WM_SIZING/WM_ENTERSIZEMOVE/WM_EXITSIZEMOVE handled here; NO WM_GETMINMAXINFO and no aspect clamp — confirmed by grep returning no matches for WM_GETMINMAXINFO/EnforceAspect in Platform/"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Render/Pipeline/Renderer.cpp",
+              "line": "154-173",
+              "note": "BlitToBackBuffer = fullscreen-triangle Draw(3,0) stretch of the viewport SRV to the entire back buffer with no aspect/letterbox correction — current behavior stretches on non-16:9"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Runtime/GameRenderPipeline.cpp",
+              "line": "17-32",
+              "note": "ApplyLetterboxAspect + FCameraLetterboxState already exist as a letterbox mechanism (adjusts POV.AspectRatio) — a reusable precedent if option (b) letterbox is chosen"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Platform/WindowsApplication.cpp",
+              "line": "119-126",
+              "note": "CreateWindowExW uses fixed 1920x1080 initial size with WS_OVERLAPPEDWINDOW (freely resizable) — window starts 16:9 but is not constrained to it"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": false
+        },
+        {
+          "checklistItem": "B-coordinate cross-check",
+          "conclusion": "Coordinate/origin facts the B-scanner should reconcile with: (1) UI pixel space is top-left origin in viewport pixels — RmlUi (and the prompt's pivot top-left=(0,0)) agree; the offscreen FViewport is the coordinate frame, sized to client. (2) Mouse for in-game UI drag is already available in viewport-pixel space: GameRenderPipeline computes Frame.CursorViewportX/Y from InputSystem::Get().GetMouseClientPos() clamped to ViewportWidth/Height (GameRenderPipeline.cpp:203-215), and UIManager::ProcessInput consumes exactly those (UIManager.cpp:847-859) — so drag math can stay in unscaled client pixels and divide by GlobalScale to get logical UI coords. (3) The UI is rendered into the offscreen FViewport then stretch-blitted to the back buffer; since standalone FViewport size == client size, viewport pixels == back-buffer pixels (1:1) today, so no extra back-buffer-vs-viewport scale factor is needed beyond GlobalScale.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/Runtime/GameRenderPipeline.cpp",
+              "line": "203-215",
+              "note": "Frame.CursorViewportX/Y derived from GetMouseClientPos() and bounded by Frame.ViewportWidth/Height — mouse already in viewport-pixel space for UI drag"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/UI/UIManager.cpp",
+              "line": "847-862",
+              "note": "ProcessInput uses Frame.CursorViewportX/Y (fallback GetMouseClientPos) and passes to RmlContext->ProcessMouseMove — the input coordinate frame the new drag model should match"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Runtime/GameEngine.cpp",
+              "line": "28-32",
+              "note": "StandaloneViewport->Initialize sized to InWindow GetWidth/GetHeight — offscreen UI render target == client size, so viewport pixels == back-buffer pixels 1:1"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/UI/UIManager.cpp",
+              "line": "180-188",
+              "note": "FRmlRenderInterfaceD3D11::BeginFrame sets D3D viewport to Frame.ViewportWidth/Height at TopLeft 0,0 — confirms top-left origin, full-viewport UI render"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": false
+        }
+      ],
+      "openQuestions": [
+        "Should GlobalScale be stored on UUIManager (alongside RmlContext) or on a new UI-root object? UIManager is the natural cache point since it already owns SetDimensions, but the new lightweight model may want its own root distinct from the RmlUi path.",
+        "For non-16:9 windows, does the team want pillarbox/letterbox bars or simple overflow? The prompt says 'scale uniformly by Height/1080' which implies ignore-aspect (overflow), but no existing UI letterbox exists to confirm intent.",
+        "The editor path (UEditorEngine::OnWindowResized, EditorEngine.cpp:145) defers FViewport resize to the ImGui SSplitter layout, so in-editor the UI 'client size' is a panel, not the OS window. If the new UI editor runs inside an ImGui panel, GlobalScale should use the panel/viewport height, not the window height — needs confirmation of which surface the in-game editor renders into."
+      ],
+      "verdicts": [
+        {
+          "claim": "[D2] Window client size captured in FWindowsWindow as Width/Height floats and pushed on WM_SIZE; UEngine::OnWindowResized(Width,Height) is the single resize funnel that resizes the swapchain (FD3DDevice::OnResizeViewport) and (Game override) the offscreen FViewport; per-frame resolution read via FFrameContext.ViewportWidth/Height set in SetViewportInfo. Ideal one-time GlobalScale=Height/1080 compute site.",
+          "status": "confirmed",
+          "note": "All evidence verified. WindowsApplication.cpp:66-77 is the WM_SIZE handler: LOWORD/HIWORD(lParam) -> Window.OnResized(Width,Height) then OnResizedCallback(Width,Height). EngineLoop.cpp:32-38 forwards OnResizedCallback to GEngine->OnWindowResized. Engine.cpp:218-227 is UEngine::OnWindowResized: early-out on 0 size, then Renderer.GetFD3DDevice().OnResizeViewport(Width,Height) (the single funnel). GameEngine.cpp:95-106 calls base then StandaloneViewport->RequestResize(Width,Height). FrameContext.cpp:35-38 SetViewportInfo copies VP GetWidth/GetHeight into ViewportWidth/ViewportHeight. Cross-checked: WindowsWindow.h:18-29 stores Width/Height as floats (Width=0.f, Height=0.f) and WindowsWindow.cpp:13-17 OnResized assigns them; D3DDevice.cpp:121-130 OnResizeViewport calls SwapChain->ResizeBuffers (confirms swapchain resize). The compute-once-per-resize / GlobalScale=Height/1080 part is a forward-looking design recommendation, not a factual code claim, but is well-grounded in the verified structure."
+        },
+        {
+          "claim": "[D3] GlobalScale should apply to UI layout pixels, not 3D projection. Existing RmlUi UI is resolution-driven via FFrameContext.ViewportWidth/Height: UIManager::Render feeds them into RmlContext->SetDimensions(); FRmlPerFrameCB.ViewportWidth/Height maps pixels to NDC in UI shader. 3D scene projection is independent, consuming only AspectRatio (UCameraComponent::OnResize sets AspectRatio=W/H; FrameContext SetCameraInfo builds Proj from camera). Do not bake GlobalScale into camera projection.",
+          "status": "confirmed",
+          "note": "All evidence verified. UIManager.cpp:819-822 calls RmlContext->SetDimensions({(int)Ctx.Frame.ViewportWidth,(int)Ctx.Frame.ViewportHeight}) in UUIManager::Render. UIManager.cpp:292-300 builds FRmlPerFrameCB CBData with ViewportWidth/Height = Ctx->Frame.ViewportWidth/Height per draw. CameraComponent.cpp:60-63 UCameraComponent::OnResize sets ONLY CameraState.AspectRatio = (float)Width/(float)Height. MinimalViewInfo.h:32 default AspectRatio = 16.0f/9.0f. Cross-checked FrameContext.cpp:8-16 SetCameraInfo: Proj = POV.CalculateProjectionMatrix(), confirming 3D projection path is built from camera POV and is independent of the UI/viewport-pixel path. The 'should multiply layout pixels by GlobalScale before emitting vertices' part is a design recommendation, not a current-code claim, but the underlying separation of UI-pixel vs 3D-projection paths is factually accurate."
+        }
+      ]
+    },
+    {
+      "dimension": "E (runtime drag editor: hit-test, drag mutation, save/load)",
+      "summary": "The engine has NO custom 2D UI hit-test: the existing RmlUi path delegates element-at-point entirely to RmlUi internally (UUIManager::ProcessInput -> RmlContext->ProcessMouseMove, UIManager.cpp:862), so the new simple model must implement its own top-most-Element-contains-point test from scratch — there is no FRect::Contains or 2D point-in-rect helper anywhere in Engine (only 3D FBoundingBox::IsContains, EngineTypes.h:112). The two reusable hit-test analogs to model on are both in the editor: (a) the gizmo axis intersection (UGizmoComponent::IntersectRayAxis / LineTraceComponent picking the nearest hit, GizmoComponent.cpp:96/353) and (b) the editor viewport picking flow FEditorViewportClient::HandleDragStart (EditorViewportClient.cpp:707) which picks gizmo-first then BVH-nearest and hands the result to FSelectionManager. For E2, the drag-mutation pattern to copy is UGizmoComponent::UpdateLinearDrag (GizmoComponent.cpp:475): first drag frame stores a reference, subsequent frames compute a delta and call a single mutation (TranslateTarget -> AddWorldOffset). The screen-px mouse delta source already exists: InputSystem::MouseDeltaX()/MouseDeltaY() (InputSystem.h:95-96) feeding UGameViewportClient::ProcessInput (GameViewportClient.cpp:92) — that delta MUST be divided by GlobalScale before being added to RectTransform.position. For E4, a save/load format IS warranted and should reuse the existing reflection-driven JSON serialization stack (FArchive/FJsonArchive over SimpleJSON, JsonArchive.h; FSceneSaveManager::SerializeProperties -> Obj->SerializeProperties(Ar, PF_Save), SceneSaveManager.cpp:451-461 and the property-iterating loader at 761-780) — i.e. make Element a reflected UObject whose RectTransform fields are PF_Save properties so the .Scene serializer auto-persists placements; the flat NodeEditor.json (id->{x,y}) is the precedent for a lightweight standalone file if a separate UI-layout asset is preferred over embedding in .Scene.",
+      "findings": [
+        {
+          "checklistItem": "E1",
+          "conclusion": "Mouse-coord -> UI-tree hit-test must be NEW code owned by the runtime UI subsystem (alongside/instead of UUIManager). Algorithm: traverse the Canvas->Group->Element tree, and using each Element's computed screen rect from the layout pass (FinalPos + size*GlobalScale), return the top-most (last-drawn / highest Z / deepest child) Element whose rect contains the mouse point. There is NO existing 2D element-at-point or point-in-rect helper to reuse — the RmlUi path hides all hit-testing inside RmlContext->ProcessMouseMove, and the only Contains-style tests in Engine are 3D (FBoundingBox::IsContains(FVector)). Model the traversal+nearest-pick structure on the gizmo picker (LineTraceComponent loops candidates, keeps best) and the selection ownership on FSelectionManager.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/UI/UIManager.cpp",
+              "line": "861-863",
+              "note": "RmlUi delegates hit-test internally: ProcessInput calls RmlContext->ProcessMouseMove(MouseX,MouseY,...) — engine has no custom element-at-point logic to reuse"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Core/Types/EngineTypes.h",
+              "line": "105-112",
+              "note": "Only Contains-style point test is 3D FBoundingBox::IsContains(FVector)/(FBoundingBox); no 2D screen-rect Contains exists"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Component/Debug/GizmoComponent.cpp",
+              "line": "353-410",
+              "note": "LineTraceComponent: loop over candidate handles, track BestRayT/BestAxis, return nearest — the existing 'pick top-most/nearest of N candidates' analog to model the tree hit-test on"
+            },
+            {
+              "file": "KraftonEngine/Source/Editor/Viewport/EditorViewportClient.cpp",
+              "line": "707-758",
+              "note": "HandleDragStart: the canonical picking entry — gizmo-first hit test, else World->RaycastPrimitives nearest, then SelectionManager->Select(BestActor). Structural template for grab-on-click."
+            },
+            {
+              "file": "KraftonEngine/Source/Editor/Selection/SelectionManager.h",
+              "line": "20-55",
+              "note": "FSelectionManager owns SelectedActors + drives the gizmo; the 'which thing is grabbed' ownership pattern an in-game-editor UI selection should mirror"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": true
+        },
+        {
+          "checklistItem": "E2",
+          "conclusion": "A drag must mutate ONLY RectTransform.position (anchor & pivot stay fixed). The mutation owner should be the runtime UI subsystem's per-frame update, modeled on UGizmoComponent::UpdateLinearDrag: on the first drag frame store the grab reference, then each frame take the mouse delta and add it to position. CRITICAL: the engine's mouse delta is in screen pixels (InputSystem::MouseDeltaX()/MouseDeltaY()), and because FinalPos = ParentOrigin + ParentSize*anchor + position - size*pivot is later multiplied by GlobalScale (=CurrentRes.Y/1080) when computing the screen rect, the screen-px delta MUST be divided by GlobalScale before adding to position: position += FVector2(MouseDeltaX, MouseDeltaY) / GlobalScale. The input enters at UGameViewportClient::ProcessInput (the runtime, not the editor, viewport client).",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/Component/Debug/GizmoComponent.cpp",
+              "line": "475-502",
+              "note": "UpdateLinearDrag: bIsFirstFrameOfDrag stores LastIntersectionLocation, then FullDelta = Current - Last -> DragAmount -> HandleDrag. The 'store ref then apply per-frame delta' drag pattern to copy."
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Component/Debug/GizmoComponent.cpp",
+              "line": "318-328",
+              "note": "TranslateTarget: single mutation site Target->AddWorldOffset(Delta) — analog of mutating only RectTransform.position"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Input/InputSystem.h",
+              "line": "95-97",
+              "note": "MouseDeltaX()/MouseDeltaY() return per-frame mouse delta in SCREEN PIXELS (FrameMouseDeltaX/Y) — must be divided by GlobalScale before adding to position"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Viewport/GameViewportClient.cpp",
+              "line": "92",
+              "note": "UGameViewportClient::ProcessInput(FInputSystemSnapshot,...) is the runtime input owner where an in-game drag editor hooks; Snapshot carries MouseDeltaX/MouseDeltaY (lines 49-50)"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": true
+        },
+        {
+          "checklistItem": "E4",
+          "conclusion": "YES, a save/load format for placements is needed (drag results are runtime mutations to RectTransform.position that must persist). Reuse the existing reflection-driven JSON serialization stack rather than inventing a new one: FArchive/FJsonArchive (over SimpleJSON/json.hpp) already serializes float arrays, FVector, FRotator, object references, and nested objects. FSceneSaveManager serializes the actor/component tree by calling Obj->SerializeProperties(Ar, PF_Save) and reloads by iterating reflected FProperty list and calling Property->Serialize. Recommendation: make Element/RectTransform a reflected type whose pivot/anchor/position/size are PF_Save properties (note: serializer currently has FVector/FVector4 but NO Vec2 path — SerializeVector2 must be added, ~3 lines mirroring SerializeVector). Then placements persist for free via the .Scene save path. The flat NodeEditor.json (node-id -> {x,y} map + selection + view) is the precedent if a separate lightweight UI-layout asset file is preferred over embedding in .Scene; reuse the same SimpleJSON lib either way. Do NOT add a third serialization mechanism.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/Serialization/SceneSaveManager.cpp",
+              "line": "451-461",
+              "note": "SerializeProperties -> Obj->SerializeProperties(Ar, PF_Save) via FSceneJsonSaveArchive; reflection-driven, auto-serializes any reflected PF_Save property"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Serialization/SceneSaveManager.cpp",
+              "line": "761-790",
+              "note": "Loader iterates reflected FProperty list, skips non-PF_Save, calls Property->Serialize(Obj, Ar) then fires PostEditChangeProperty — the auto-deserialize path a reflected RectTransform would ride"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Serialization/JsonArchive.h",
+              "line": "138-265",
+              "note": "FJsonArchive already serializes float/string/bool/FVector(3)/FVector4/FRotator/object-ref; SerializeVector (160-163) handles 3-component only — no 2-component Vec2 helper yet (would need adding)"
+            },
+            {
+              "file": "KraftonEngine/NodeEditor.json",
+              "line": "1",
+              "note": "Existing lightweight standalone layout file: flat {node-id -> {location:{x,y}}} map + selection + view block — precedent/template for a per-canvas UI-placement json if not embedding in .Scene"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Serialization/SceneSaveManager.h",
+              "line": "41-51",
+              "note": ".Scene format entry points SaveSceneAsJSON/LoadSceneFromJSON; SceneExtension = .Scene — the canonical reuse target for persisting drag placements with the rest of the scene"
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": false
+        },
+        {
+          "checklistItem": "E-mechanics (hit-test/drag flow)",
+          "conclusion": "End-to-end runtime drag flow to assemble from existing patterns: (1) on LBUTTON down, run the new tree hit-test (E1) to set GrabbedElement and mark first-frame-of-drag; (2) while LeftDragging, read InputSystem MouseDeltaX/Y, divide by GlobalScale, add to GrabbedElement->RectTransform.position, re-run layout pass; (3) on LBUTTON up, clear GrabbedElement. This mirrors the gizmo state machine: down->HandleDragStart sets pressed; dragging->SetHolding(true) then UpdateDrag; up->DragEnd resets first-frame flag (EditorViewportClient.cpp:609-693, GizmoComponent.cpp:564-579). Note the editor path uses 3D rays via DeprojectScreenToWorld; the UI path is purely 2D screen-space so it is simpler (no ray, just point-in-rect). The drag state (bIsFirstFrameOfDrag, GrabbedElement) should live on the runtime UI subsystem, analogous to FEditorViewportClient holding bIsMarqueeSelecting / Gizmo holding state.",
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Editor/Viewport/EditorViewportClient.cpp",
+              "line": "609-693",
+              "note": "Full down/drag/up state machine: GetKeyDown(VK_LBUTTON)->HandleDragStart, GetLeftDragging()->SetHolding+UpdateDrag, GetLeftDragEnd()->DragEnd — the drag lifecycle template"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Component/Debug/GizmoComponent.cpp",
+              "line": "564-579",
+              "note": "UpdateDrag/DragEnd: bIsFirstFrameOfDrag reset on DragEnd — the per-drag-session state reset pattern the UI drag should replicate"
+            },
+            {
+              "file": "KraftonEngine/Source/Editor/Viewport/EditorViewportClient.cpp",
+              "line": "590-601",
+              "note": "Editor converts screen mouse to local viewport coords then DeprojectScreenToWorld (3D). The UI model skips the ray entirely — work in 2D screen space, so simpler than this path."
+            }
+          ],
+          "confidence": "high",
+          "loadBearing": false
+        }
+      ],
+      "openQuestions": [
+        "Where should the runtime UI subsystem's drag state and per-frame hit-test/update live — extend UUIManager (currently RmlUi-only, no per-Element model) or add a new parallel subsystem? UUIManager has no Element tree, so a new lightweight system is implied; confirm against Engine.cpp init ordering.",
+        "Should placements embed in the existing .Scene file (Element as reflected UObject in the world) or live in a separate per-Canvas json asset like NodeEditor.json? Depends on whether Canvas/Element are world actors or standalone UI assets — not resolvable from Dimension E alone.",
+        "FJsonArchive/SceneSaveManager have no 2-component Vec2 serialization path (only FVector/FVector4); a SerializeVector2 must be added to reuse the reflection serializer for RectTransform — confirm FProperty/reflection registers a Vec2 type at all (Dimension on reflection/types should verify)."
+      ],
+      "verdicts": [
+        {
+          "claim": "[E1] Mouse->UI-tree hit-test must be NEW code; no existing 2D element-at-point/point-in-rect helper to reuse; RmlUi hides hit-test in RmlContext->ProcessMouseMove; only Contains tests are 3D FBoundingBox; model traversal on gizmo LineTraceComponent and selection ownership on FSelectionManager.",
+          "status": "confirmed",
+          "note": "All five citations open and support the claim. UIManager.cpp:861-862 is verbatim RmlContext->ProcessMouseMove(MouseX,MouseY,KeyModifierState) — RmlUi owns hit-testing, no custom element-at-point in engine (UI dir is RmlUi-only: UIManager + UserWidget). EngineTypes.h:105-117 shows ONLY 3D Contains: IsContains(FBoundingBox) at 105-110 and IsContains(FVector) at 112-117; no 2D screen-rect Contains anywhere (grep for RectTransform/anchor/pivot/FinalPos finds no UI layout system). GizmoComponent.cpp:353-410 LineTraceComponent loops axes, tracks BestRayT/BestAxis, returns nearest — accurate analog. EditorViewportClient.cpp:707-758 HandleDragStart does gizmo-first (RaycastComponent), else World->RaycastPrimitives, then SelectionManager->Select(BestActor) — accurate. SelectionManager.h:20-55 FSelectionManager owns SelectedActors (line 51) and drives gizmo (GetGizmo/SyncGizmo) — accurate. The Canvas->Group->Element tree / screen-rect formula are prescriptive (NEW design), consistent with the claim's own 'NEW code' framing, not asserted as existing.",
+          "correctedEvidence": ""
+        },
+        {
+          "claim": "[E2] Drag mutates only RectTransform.position; owner is runtime per-frame update modeled on UGizmoComponent::UpdateLinearDrag (store grab ref first frame, then per-frame delta); engine mouse delta is screen px (InputSystem::MouseDeltaX/Y), and because FinalPos=ParentOrigin+ParentSize*anchor+position-size*pivot is multiplied by GlobalScale(=CurrentRes.Y/1080), screen-px delta must be divided by GlobalScale; input enters at UGameViewportClient::ProcessInput.",
+          "status": "partial",
+          "note": "The CITED code evidence is all accurate. GizmoComponent.cpp:475-502 UpdateLinearDrag: bIsFirstFrameOfDrag stores LastIntersectionLocation (490) then FullDelta=Current-Last (495)->DragAmount->HandleDrag — exactly the store-ref-then-per-frame-delta pattern. GizmoComponent.cpp:318-328 TranslateTarget single AddWorldOffset mutation — accurate. InputSystem.h:95-96 MouseDeltaX()/MouseDeltaY() return FrameMouseDeltaX/Y in screen pixels — accurate. GameViewportClient.cpp:92 is verbatim UGameViewportClient::ProcessInput(const FInputSystemSnapshot&, float). HOWEVER two embedded factual assertions are NOT grounded in existing code and read as existing facts: (1) FinalPos=...*GlobalScale, GlobalScale=CurrentRes.Y/1080, and RectTransform.position do NOT exist anywhere in the codebase (no RectTransform/anchor/pivot/FinalPos/CurrentRes in any UI source; CurrentRes/1080 only appear unrelated at EditorViewportClient.h:131 WindowHeight=1080 and WindowsApplication.cpp:125). These are part of the proposed NEW UI layout model, not a verified engine fact. (2) Minor citation slip: the claim cites Snapshot MouseDeltaX/MouseDeltaY at GameViewportClient.cpp lines 49-50, but those lines are reset-to-zero statements (Snapshot.MouseDeltaX=0); the struct fields actually live in InputSystem.h:19-20. The field-carries claim is true, citation location is imprecise.",
+          "correctedEvidence": "FInputSystemSnapshot fields MouseDeltaX/MouseDeltaY declared at KraftonEngine/Source/Engine/Input/InputSystem.h:19-20 (GameViewportClient.cpp:49-50 are zero-out resets, not the declaration). The FinalPos/GlobalScale(=CurrentRes.Y/1080)/RectTransform.position formula has NO existing-code basis (grep finds no RectTransform/anchor/pivot/FinalPos/CurrentRes UI layout); it is prescriptive NEW design, not a cited engine fact."
+        }
+      ]
+    },
+    {
+      "dimension": "Graphics API surface / rendering primitive available for the simple UI",
+      "summary": "The trigger prompt's claim of \"DirectX/Vulkan direct calls\" is half right and half wrong. The renderer is Direct3D 11 ONLY — there is no Vulkan and no D3D12 anywhere in KraftonEngine/Source (zero matches for `\\bVulkan\\b`, `\\bvk[A-Z]`, `\\bD3D12\\b`, `D3D12CreateDevice`, `ID3D12Device`). The device is created via a single `D3D11CreateDeviceAndSwapChain` call pinned to `D3D_FEATURE_LEVEL_11_0`. There is NO RHI/abstraction layer: D3D calls are made directly against raw `ID3D11Device`/`ID3D11DeviceContext` COM interfaces throughout. The device, immediate context, and swapchain are all owned by the value-type `FD3DDevice` (member of `FRenderer`, which is a value member of `UEngine`, reachable globally via `extern UEngine* GEngine`). A UI quad renderer would get its handle via `GEngine->GetRenderer().GetFD3DDevice().GetDeviceContext()` (or `.GetDevice()`), or — during a render pass — via the already-passed `FPassContext::Device`. The actual rendering primitive surface is therefore raw immediate-mode D3D11: bind shader, set vertex/index buffers + constant buffer, `Draw`/`DrawIndexed`. The existing RmlUi path (`UIManager.cpp`, class `FRmlRenderInterfaceD3D11`) already proves this exact pattern for screen-space UI, so the simple UI can reuse the same primitive surface without inventing any new device plumbing.",
+      "findings": [
+        {
+          "checklistItem": "API: DirectX-only vs DirectX+Vulkan; D3D version",
+          "conclusion": "Renderer is Direct3D 11 ONLY — no Vulkan, no D3D12. Device is created with D3D11CreateDeviceAndSwapChain pinned to D3D_FEATURE_LEVEL_11_0. The design doc can safely treat the engine as a single-backend D3D11 renderer; the prompt's 'Vulkan' and unqualified 'DirectX' framing is incorrect.",
+          "confidence": "high",
+          "loadBearing": true,
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/Render/Device/D3DDevice.cpp",
+              "line": "151",
+              "note": "featureLevels[] = { D3D_FEATURE_LEVEL_11_0 } — D3D11, single feature level"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Render/Device/D3DDevice.cpp",
+              "line": "191-193",
+              "note": "D3D11CreateDeviceAndSwapChain(...) with D3D_DRIVER_TYPE_HARDWARE, D3D11_SDK_VERSION — the one and only device creation call"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Render/Device/D3DDevice.h",
+              "line": "37-39",
+              "note": "Members are ID3D11Device*, ID3D11DeviceContext*, IDXGISwapChain* — D3D11/DXGI types"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Render/Device/D3DDevice.h",
+              "line": "4",
+              "note": "#include <d3d11sdklayers.h> — D3D11 debug layer header; no Vulkan/D3D12 headers anywhere"
+            }
+          ]
+        },
+        {
+          "checklistItem": "RHI abstraction vs direct D3D calls",
+          "conclusion": "No RHI abstraction layer. Calls go directly against raw ID3D11DeviceContext COM methods (OMSetRenderTargets, RSSetViewports, PSSetShaderResources, Draw, ClearRenderTargetView, etc.). FD3DDevice is a thin owner, not an abstraction. The simple UI should likewise issue raw D3D11 immediate-context calls rather than expect a portable RHI.",
+          "confidence": "high",
+          "loadBearing": false,
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/Render/Device/D3DDevice.cpp",
+              "line": "108-112",
+              "note": "BeginFrame() calls DeviceContext->ClearRenderTargetView / RSSetViewports / OMSetRenderTargets directly"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Render/Pipeline/Renderer.cpp",
+              "line": "161-172",
+              "note": "BlitToBackBuffer: raw Ctx->PSSetShaderResources / IASetPrimitiveTopology / Ctx->Draw(3,0) — a full-screen-triangle blit, the closest existing analog to a UI quad draw"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Render/Pipeline/Renderer.h",
+              "line": "28",
+              "note": "BlitToBackBuffer(ID3D11ShaderResourceView*) — public API takes raw D3D11 SRV; confirms no abstraction over resource handles"
+            }
+          ]
+        },
+        {
+          "checklistItem": "Where device/context/swapchain are owned and accessed (handle a UI quad renderer needs)",
+          "conclusion": "FD3DDevice owns Device/Context/SwapChain. It is a value member of FRenderer (Renderer.h:52), which is a value member of UEngine (Engine.h:88), reachable globally via `extern UEngine* GEngine` (Engine.h:94). A UI quad renderer obtains its context via GEngine->GetRenderer().GetFD3DDevice().GetDeviceContext(), or inside a render pass via FPassContext::Device. Accessors: FD3DDevice::GetDevice()/GetDeviceContext() (D3DDevice.h:23-24); FRenderer::GetFD3DDevice() (Renderer.h:30); UEngine::GetRenderer() (Engine.h:63).",
+          "confidence": "high",
+          "loadBearing": true,
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/Render/Device/D3DDevice.h",
+              "line": "23-24",
+              "note": "GetDevice() / GetDeviceContext() public accessors — the handle entry points"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Render/Pipeline/Renderer.h",
+              "line": "30",
+              "note": "FRenderer::GetFD3DDevice() returns FD3DDevice& (Renderer owns Device at line 52)"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Runtime/Engine.h",
+              "line": "63",
+              "note": "UEngine::GetRenderer() returns FRenderer&; member 'FRenderer Renderer' at line 88"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/Runtime/Engine.h",
+              "line": "94",
+              "note": "extern UEngine* GEngine — global handle giving any UI code reach to the device"
+            }
+          ]
+        },
+        {
+          "checklistItem": "Existing screen-space UI render pattern to reuse (RmlUi path proof)",
+          "conclusion": "The existing RmlUi UI already implements screen-space rendering by pulling the same D3D11 immediate context via Ctx->Device.GetDeviceContext() and issuing raw draws (CompileGeometry builds vertex/index buffers; sets viewport/scissor; draws). This is the proven template for the new simple UI's quad renderer — it confirms the rendering primitive surface (raw ID3D11DeviceContext draw with a per-frame constant buffer) and that screen-space UI is fed via FPassContext during the pass pipeline.",
+          "confidence": "high",
+          "loadBearing": false,
+          "evidence": [
+            {
+              "file": "KraftonEngine/Source/Engine/UI/UIManager.cpp",
+              "line": "174",
+              "note": "FRmlRenderInterfaceD3D11::BeginFrame: ID3D11DeviceContext* DC = Ctx->Device.GetDeviceContext(); then RSSetViewports — UI grabs context from FPassContext"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/UI/UIManager.cpp",
+              "line": "481",
+              "note": "Ctx->Device.GetDeviceContext()->RSSetScissorRects(...) — scissor-clipped UI draw via raw context (relevant for hierarchical clip)"
+            },
+            {
+              "file": "KraftonEngine/Source/Engine/UI/UIManager.cpp",
+              "line": "200-209",
+              "note": "CompileGeometry builds FRmlVertexD3D11 vertex/index buffers — existing screen-space vertex pipeline the simple UI could mirror or share"
+            }
+          ]
+        }
+      ],
+      "openQuestions": [
+        "FPassContext.Device is a reference/value of FD3DDevice passed into passes (UIManager uses Ctx->Device.GetDeviceContext()); confirm whether the new simple UI should render as a dedicated FRenderPass inside the pass pipeline (like RmlUi) or as a separate post-present overlay — both have access to the same single immediate context.",
+        "The simple UI's quad shader would need an entry in EShaderPath / FShaderManager (same registry BlitToBackBuffer uses via EShaderPath::Blit). Not verified here whether a suitable 2D/UI vertex shader already exists or must be added."
+      ],
+      "verdicts": [
+        {
+          "claim": "Renderer is Direct3D 11 ONLY — no Vulkan, no D3D12. Device created via D3D11CreateDeviceAndSwapChain pinned to D3D_FEATURE_LEVEL_11_0; single-backend D3D11 renderer.",
+          "status": "confirmed",
+          "note": "D3DDevice.cpp:151 has featureLevels[] = { D3D_FEATURE_LEVEL_11_0 } (single level). D3DDevice.cpp:191-193 is the lone D3D11CreateDeviceAndSwapChain call with D3D_DRIVER_TYPE_HARDWARE and D3D11_SDK_VERSION. D3DDevice.h:37-39 members are ID3D11Device*, ID3D11DeviceContext*, IDXGISwapChain*. D3DDevice.h:4 includes <d3d11sdklayers.h>. A targeted grep for vulkan/d3d12/d3dx12/VkDevice/directx12 across Source returned no matches (the only case-insensitive 'dxc'-substring hits are unrelated false positives). Single-backend D3D11 framing is correct.",
+          "correctedEvidence": ""
+        },
+        {
+          "claim": "FD3DDevice owns Device/Context/SwapChain; value member of FRenderer (Renderer.h:52), value member of UEngine (Engine.h:88), reachable via extern UEngine* GEngine (Engine.h:94). Accessors: FD3DDevice::GetDevice()/GetDeviceContext() (D3DDevice.h:23-24); FRenderer::GetFD3DDevice() (Renderer.h:30); UEngine::GetRenderer() (Engine.h:63). Inside a render pass via FPassContext::Device.",
+          "status": "confirmed",
+          "note": "D3DDevice.h:23-24 declares public GetDevice()/GetDeviceContext(); members Device/DeviceContext/SwapChain at lines 37-39. Renderer.h:30 GetFD3DDevice() returns FD3DDevice&, owning 'FD3DDevice Device' at line 52. Engine.h:63 GetRenderer() returns FRenderer&, owning 'FRenderer Renderer' at line 88. Engine.h:94 declares extern UEngine* GEngine. FPassContext::Device confirmed as 'FD3DDevice& Device' in RenderPassBase.h:18-20. Full ownership/access chain verified.",
+          "correctedEvidence": ""
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,136 @@
+{
+  "Actors" : [{
+      "ClassName" : "AActor",
+      "Name" : "MenuCamera",
+      "NonSceneComponents" : [],
+      "ObjectId" : 2,
+      "Properties" : {
+        "PendingActorLocation" : [307.842957, 0.000026, 153.921478],
+        "PendingActorRotation" : [-0.000000, 26.565042, -179.999954],
+        "PendingActorScale" : [1.000000, 1.000000, 1.000000],
+        "PendingActorVisible" : true,
+        "PendingTagsString" : "",
+        "bNeedsTick" : false
+      },
+      "RootComponent" : {
+        "Children" : [],
+        "ClassName" : "UCameraComponent",
+        "ObjectId" : 3,
+        "Properties" : {
+          "AttachSocketName" : "Name_None",
+          "CachedEditRotator" : [-0.000000, 26.565042, -179.999954],
+          "CameraState.FOV" : 1.047198,
+          "CameraState.FarZ" : 1000.000000,
+          "CameraState.NearZ" : 0.100000,
+          "CameraState.OrthoWidth" : 10.000000,
+          "CameraState.bIsOrthogonal" : false,
+          "Letterbox.Amount" : 1.000000,
+          "Letterbox.Color" : [0.000000, 0.000000, 0.000000, 1.000000],
+          "Letterbox.Thickness" : 0.120000,
+          "Letterbox.bEnabled" : false,
+          "RelativeTransform.Location" : [307.842957, 0.000026, 153.921478],
+          "RelativeTransform.Scale" : [1.000000, 1.000000, 1.000000],
+          "bAutoActivate" : true,
+          "bEditorOnly" : false,
+          "bHiddenInComponentTree" : false,
+          "bIsActive" : true,
+          "bTickEnable" : true
+        }
+      }
+    }, {
+      "ClassName" : "AUICanvasActor",
+      "Name" : "AUICanvasActor_6",
+      "NonSceneComponents" : [],
+      "ObjectId" : 4,
+      "Properties" : {
+        "Bindings" : [],
+        "PendingActorLocation" : [0.000000, 0.000000, 0.000000],
+        "PendingActorRotation" : [-0.000000, 0.000000, 0.000000],
+        "PendingActorScale" : [1.000000, 1.000000, 1.000000],
+        "PendingActorVisible" : true,
+        "PendingTagsString" : "",
+        "UIAssetPath" : "Content/UI/MainImageUI.uasset",
+        "bNeedsTick" : true
+      }
+    }, {
+      "ClassName" : "AStaticMeshActor",
+      "Name" : "AStaticMeshActor_6",
+      "NonSceneComponents" : [{
+          "ClassName" : "ULuaScriptComponent",
+          "ObjectId" : 18,
+          "Properties" : {
+            "ScriptFile" : "MainScene.lua",
+            "bAutoActivate" : true,
+            "bEditorOnly" : false,
+            "bHiddenInComponentTree" : false,
+            "bIsActive" : true,
+            "bTickEnable" : true
+          }
+        }],
+      "ObjectId" : 16,
+      "Properties" : {
+        "PendingActorLocation" : [434.729126, 0.096800, 220.646530],
+        "PendingActorRotation" : [-0.000000, 0.000000, 0.000000],
+        "PendingActorScale" : [1.000000, 1.000000, 1.000000],
+        "PendingActorVisible" : true,
+        "PendingTagsString" : "",
+        "bNeedsTick" : true
+      },
+      "RootComponent" : {
+        "Children" : [],
+        "ClassName" : "UStaticMeshComponent",
+        "ObjectId" : 17,
+        "Properties" : {
+          "AttachSocketName" : "Name_None",
+          "CachedEditRotator" : [-0.000000, 0.000000, 0.000000],
+          "CenterOfMassOffset" : [0.000000, 0.000000, 0.000000],
+          "CollisionEnabled" : 0,
+          "Mass" : 1.000000,
+          "MaterialSlots" : ["None"],
+          "ObjectType" : 0,
+          "RelativeTransform.Location" : [434.729126, 0.096800, 220.646530],
+          "RelativeTransform.Scale" : [1.000000, 1.000000, 1.000000],
+          "ResponseContainer" : {
+            "Responses[0]" : 2,
+            "Responses[1]" : 2,
+            "Responses[2]" : 2,
+            "Responses[3]" : 2,
+            "Responses[4]" : 2
+          },
+          "StaticMeshPath" : "None",
+          "bAutoActivate" : true,
+          "bCastShadow" : true,
+          "bCastShadowAsTwoSided" : false,
+          "bEditorOnly" : false,
+          "bEnableCCD" : false,
+          "bEnableGravity" : true,
+          "bGenerateOverlapEvents" : false,
+          "bHiddenInComponentTree" : false,
+          "bIsActive" : true,
+          "bIsVisible" : true,
+          "bKinematic" : false,
+          "bSimulatePhysics" : false,
+          "bTickEnable" : true,
+          "bUseMeshTriangleCollision" : false
+        }
+      }
+    }],
+  "ClassName" : "UWorld",
+  "ContextHandle" : "NewScene",
+  "ContextName" : "New Scene",
+  "Name" : "main",
+  "ObjectId" : 1,
+  "PerspectiveCamera" : {
+    "FOV" : 1.047198,
+    "FarClip" : 1000.000000,
+    "Location" : [1001.556885, -4.373630, 497.152344],
+    "NearClip" : 0.100000,
+    "Rotation" : [0.000000, 26.265051, 179.550003]
+  },
+  "Version" : 2,
+  "WorldSettings" : {
+    "GameMode" : "",
+    "Gravity" : [0.000000, 0.000000, -9.810000]
+  },
+  "WorldType" : "Editor"
+}

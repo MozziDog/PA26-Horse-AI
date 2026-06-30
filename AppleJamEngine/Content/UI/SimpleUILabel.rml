@@ -1,0 +1,25 @@
+<rml>
+<head>
+	<style>
+		body
+		{
+			font-family: Maplestory;
+			font-weight: bold;
+			width: 100%;
+			height: 100%;
+		}
+		div#label
+		{
+			position: absolute;
+			left: 0dp;
+			top: 0dp;
+			font-size: 20dp;
+			color: #ffffff;
+			white-space: nowrap;
+		}
+	</style>
+</head>
+<body>
+	<div id="label">Label</div>
+</body>
+</rml>
