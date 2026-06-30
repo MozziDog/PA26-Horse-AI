@@ -629,6 +629,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClCompile Include="Source\Engine\Runtime\GameRenderPipeline.cpp" />
     <ClCompile Include="Source\Engine\Runtime\Launch.cpp" />
     <ClCompile Include="Source\Engine\Serialization\SceneSaveManager.cpp" />
+    <ClCompile Include="Source\Engine\Spline\Spline.cpp" />
     <ClCompile Include="Source\Engine\Texture\Texture2D.cpp" />
     <ClCompile Include="Source\Engine\Texture\stb_image_impl.cpp" />
     <ClCompile Include="Source\Engine\UI\UIAssetManager.cpp" />
@@ -1244,6 +1245,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClInclude Include="Source\Engine\Serialization\MemoryArchive.h" />
     <ClInclude Include="Source\Engine\Serialization\SceneSaveManager.h" />
     <ClInclude Include="Source\Engine\Serialization\WindowsArchive.h" />
+    <ClInclude Include="Source\Engine\Spline\Spline.h" />
     <ClInclude Include="Source\Engine\Texture\Texture2D.h" />
     <ClInclude Include="Source\Engine\UI\UIAsset.h" />
     <ClInclude Include="Source\Engine\UI\UIAssetManager.h" />

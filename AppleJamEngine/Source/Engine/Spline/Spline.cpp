@@ -3,8 +3,8 @@
 
 bool MapGraph::AddNode(SplineNode InNode)
 {
-	auto it = std::lower_bound(Nodes.begin(), Nodes.end(), InNode);
-	if(it != Nodes.end() && it->GetID() == InNode.GetID())
+	auto it = FindNode(InNode.GetID());
+	if(it == Nodes.end())
 		return false;
 
 	Nodes.insert(it, InNode);
@@ -13,12 +13,8 @@ bool MapGraph::AddNode(SplineNode InNode)
 
 bool MapGraph::RemoveNode(int InID)
 {
-	auto it = std::lower_bound(
-		Nodes.begin(),
-		Nodes.end(),
-		[InID](SplineNode node) { return node.GetID() < InID; }
-	);
-	if (it == Nodes.end() || it->GetID() != InID)
+	auto it = FindNode(InID);
+	if (it == Nodes.end())
 		return false;
 	if (!it->GetConnectedSegments().empty())
 		return false;
@@ -27,50 +23,62 @@ bool MapGraph::RemoveNode(int InID)
 	return true;
 }
 
+TArray<SplineNode>::iterator MapGraph::FindNode(int InID)
+{
+	SplineNode ToFind = { InID, FVector::ZeroVector };
+	auto it = std::lower_bound(Nodes.begin(), Nodes.end(), ToFind);
+	if (it->GetID() == InID)
+		return it;
+	else
+		return Nodes.end();
+}
+
 bool MapGraph::AddSegment(SplineSegment InSegment)
 {
-	auto it = std::lower_bound(Segments.begin(), Segments.end(), InSegment);
-	if (it != Segments.end() && it->GetID() == InSegment.GetID())
+	auto it = FindSegment(InSegment.GetID());
+	if (it != Segments.end())
 		return false;
 
-	auto startNode = std::lower_bound(Nodes.begin(), Nodes.end(), InSegment.GetStartNodeID());
-	if (startNode == Nodes.end() || startNode->GetID() != InSegment.GetStartNodeID())
+	auto startNode = FindNode(InSegment.GetStartNodeID());
+	if (startNode == Nodes.end())
 		return false;
 
-	auto endNode = std::lower_bound(Nodes.begin(), Nodes.end(), InSegment.GetEndNodeID());
-	if (endNode == Nodes.end() || endNode->GetID() != InSegment.GetEndNodeID())
+	auto endNode = FindNode(InSegment.GetEndNodeID());
+	if (endNode == Nodes.end())
 		return false;
 
 	startNode->AddConnectedSegment(InSegment.GetID());
 	endNode->AddConnectedSegment(InSegment.GetID());
 	Segments.insert(it, InSegment);
+	return true;
 }
 
 bool MapGraph::RemoveSegment(int InID)
 {
-	auto segmentIt = std::lower_bound(
-		Segments.begin(),
-		Segments.end(),
-		[InID](SplineSegment segment) { return segment.GetID() < InID; }
-	);
-	if (segmentIt == Segments.end() || segmentIt->GetID() != InID)
+	auto segmentIt = FindSegment(InID);
+	if (segmentIt == Segments.end())
 		return false;
 
-	int startNodeID = segmentIt->GetStartNodeID();
-	auto startNodeIt = find(Nodes.begin(), Nodes.end(), 
-		[startNodeID](SplineNode node) { node.GetID() == startNodeID; }
-	);
+	auto startNodeIt = FindNode(segmentIt->GetStartNodeID());
 	if (startNodeIt == Nodes.end())
 		return false;
 
-	int endNodeID = segmentIt->GetEndNodeID();
-	auto endNodeIt = find(Nodes.begin(), Nodes.end(),
-		[endNodeID](SplineNode node) { node.GetID() == endNodeID; }
-	);
+	auto endNodeIt = FindNode(segmentIt->GetEndNodeID());
 	if (endNodeIt == Nodes.end())
 		return false;
 
 	startNodeIt->RemoveConnectedSegment(InID);
 	endNodeIt->RemoveConnectedSegment(InID);
 	Segments.erase(segmentIt);
+	return true;
+}
+
+TArray<SplineSegment>::iterator MapGraph::FindSegment(int InID)
+{
+	SplineSegment ToFind = { InID, 0, 0 };
+	auto it = std::lower_bound(Segments.begin(), Segments.end(), ToFind);
+	if (it->GetID() == InID)
+		return it;
+	else
+		return Segments.end();
 }
