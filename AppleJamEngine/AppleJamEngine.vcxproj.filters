@@ -172,6 +172,9 @@
     <Filter Include="Source\Engine\Component">
       <UniqueIdentifier>{b8bdb521-a6e1-9a92-7d53-b2d509dbd59d}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source\Engine\Component\AI">
+      <UniqueIdentifier>{8d45be34-d601-1ca1-a807-83a799fde471}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Source\Engine\Component\Action">
       <UniqueIdentifier>{93db6751-4053-d8ee-77f3-40c31f98e1d2}</UniqueIdentifier>
     </Filter>
@@ -183,6 +186,9 @@
     </Filter>
     <Filter Include="Source\Engine\Component\Gameplay">
       <UniqueIdentifier>{7a0dfd6e-631f-e1df-8158-ac0ef8a6bda1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\Engine\Component\Horse">
+      <UniqueIdentifier>{b671fe7a-d48f-11e3-6197-488e096d9afd}</UniqueIdentifier>
     </Filter>
     <Filter Include="Source\Engine\Component\Input">
       <UniqueIdentifier>{c109288a-de76-dae8-58c7-55ec458f3d0c}</UniqueIdentifier>
@@ -378,6 +384,9 @@
     </Filter>
     <Filter Include="Source\Engine\Serialization">
       <UniqueIdentifier>{e0d8f362-a843-4a51-e6c2-204e298b9731}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\Engine\Spline">
+      <UniqueIdentifier>{d77a4036-2c92-01cb-bce5-2fba4a65fda3}</UniqueIdentifier>
     </Filter>
     <Filter Include="Source\Engine\Texture">
       <UniqueIdentifier>{3453d100-e8e7-5468-d153-0774bebb560e}</UniqueIdentifier>
@@ -1169,6 +1178,9 @@
     <ClCompile Include="Source\Engine\Component\Action\ActionVisualEffectComponent.cpp">
       <Filter>Source\Engine\Component\Action</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Engine\Component\AI\BTAgentComponent.cpp">
+      <Filter>Source\Engine\Component\AI</Filter>
+    </ClCompile>
     <ClCompile Include="Source\Engine\Component\Camera\CameraComponent.cpp">
       <Filter>Source\Engine\Component\Camera</Filter>
     </ClCompile>
@@ -1243,6 +1255,9 @@
     </ClCompile>
     <ClCompile Include="Source\Engine\Component\Gameplay\RagdollForceHitscanComponent.cpp">
       <Filter>Source\Engine\Component\Gameplay</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Engine\Component\Horse\HorsePlayerInputComponent.cpp">
+      <Filter>Source\Engine\Component\Horse</Filter>
     </ClCompile>
     <ClCompile Include="Source\Engine\Component\Input\ActionComponent.cpp">
       <Filter>Source\Engine\Component\Input</Filter>
@@ -1509,6 +1524,9 @@
       <Filter>Source\Engine\GameFramework\Pawn</Filter>
     </ClCompile>
     <ClCompile Include="Source\Engine\GameFramework\Pawn\Character.cpp">
+      <Filter>Source\Engine\GameFramework\Pawn</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Engine\GameFramework\Pawn\HorseCharacter.cpp">
       <Filter>Source\Engine\GameFramework\Pawn</Filter>
     </ClCompile>
     <ClCompile Include="Source\Engine\GameFramework\Pawn\LuaCharacter.cpp">
@@ -2147,6 +2165,9 @@
     <ClCompile Include="Source\Engine\Serialization\SceneSaveManager.cpp">
       <Filter>Source\Engine\Serialization</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Engine\Spline\Spline.cpp">
+      <Filter>Source\Engine\Spline</Filter>
+    </ClCompile>
     <ClCompile Include="Source\Engine\Texture\Texture2D.cpp">
       <Filter>Source\Engine\Texture</Filter>
     </ClCompile>
@@ -2244,7 +2265,6 @@
     <ClCompile Include="Intermediate\Generated\Reflection.generated.cpp">
       <Filter>Intermediate\Generated</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Engine\Spline\Spline.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Editor\EditorEngine.h">
@@ -2661,6 +2681,9 @@
     <ClInclude Include="Source\Engine\Component\Action\ActionVisualEffectComponent.h">
       <Filter>Source\Engine\Component\Action</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Engine\Component\AI\BTAgentComponent.h">
+      <Filter>Source\Engine\Component\AI</Filter>
+    </ClInclude>
     <ClInclude Include="Source\Engine\Component\Camera\CameraComponent.h">
       <Filter>Source\Engine\Component\Camera</Filter>
     </ClInclude>
@@ -2735,6 +2758,9 @@
     </ClInclude>
     <ClInclude Include="Source\Engine\Component\Gameplay\RagdollForceHitscanComponent.h">
       <Filter>Source\Engine\Component\Gameplay</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Engine\Component\Horse\HorsePlayerInputComponent.h">
+      <Filter>Source\Engine\Component\Horse</Filter>
     </ClInclude>
     <ClInclude Include="Source\Engine\Component\Input\ActionComponent.h">
       <Filter>Source\Engine\Component\Input</Filter>
@@ -3040,6 +3066,9 @@
       <Filter>Source\Engine\GameFramework\Pawn</Filter>
     </ClInclude>
     <ClInclude Include="Source\Engine\GameFramework\Pawn\Character.h">
+      <Filter>Source\Engine\GameFramework\Pawn</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Engine\GameFramework\Pawn\HorseCharacter.h">
       <Filter>Source\Engine\GameFramework\Pawn</Filter>
     </ClInclude>
     <ClInclude Include="Source\Engine\GameFramework\Pawn\LuaCharacter.h">
@@ -3869,6 +3898,9 @@
     </ClInclude>
     <ClInclude Include="Source\Engine\Serialization\WindowsArchive.h">
       <Filter>Source\Engine\Serialization</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Engine\Spline\Spline.h">
+      <Filter>Source\Engine\Spline</Filter>
     </ClInclude>
     <ClInclude Include="Source\Engine\Texture\Texture2D.h">
       <Filter>Source\Engine\Texture</Filter>
@@ -6366,9 +6398,8 @@
     <ClInclude Include="ThirdParty\sol2\include\sol\utility\to_string.hpp">
       <Filter>ThirdParty\sol2\include\sol\utility</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Engine\Spline\Spline.h" />
   </ItemGroup>
   <ItemGroup>
-    <ResourceCompile Include="KraftonEngine.rc" />
+    <ResourceCompile Include="AppleJamEngine.rc" />
   </ItemGroup>
 </Project>

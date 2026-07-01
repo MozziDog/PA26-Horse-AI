@@ -1,7 +1,10 @@
-#include "Game/GameActorPlacements.h"
+﻿#include "Game/GameActorPlacements.h"
 
 #include "Engine/Runtime/ActorPlacementRegistry.h"
 #include "Engine/Runtime/EngineInitHooks.h"
+
+#include "GameFramework/World.h"
+#include "GameFrameWork/Pawn/HorseCharacter.h"
 
 // ============================================================
 // 게임-특화 액터를 Editor 의 "Place Actor" 메뉴에 등록 — 현재는 비어 있음.
@@ -12,6 +15,20 @@
 // ============================================================
 void RegisterGameActorPlacements()
 {
+	FActorPlacementRegistry::Get().RegisterEntry(
+		"Horse Character",
+		[](UWorld* World, const FVector& Location) -> AActor*
+		{
+			if (!World) return nullptr;
+			AHorseCharacter* Actor = World->SpawnActor<AHorseCharacter>();
+			if (Actor)
+			{
+				Actor->SetActorLocation(Location);
+				Actor->InitDefaultComponents("Content/Mesh/HorseWalk/Horse_temp(with walk anim)_SkeletalMesh.uasset");
+			}
+			return Actor;
+		}
+	);
 }
 
 // 자기-등록 — Editor / Game 측이 함수명을 모르고도 FEngineInitHooks::RunAll() 로 호출됨.
