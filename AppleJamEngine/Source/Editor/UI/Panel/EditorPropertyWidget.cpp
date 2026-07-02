@@ -2931,6 +2931,28 @@ bool FEditorPropertyWidget::RenderArrayPropertyWidget(FPropertyValue& Prop, bool
 		FString ElementName = "Element " + std::to_string(ElemIdx);
 		const FString ElementPath = MakeArrayElementPath(PropertyPath, ElemIdx);
 
+		if (!bEditFixedSize && Ops->InsertDefault && ImGui::Button("+"))
+		{
+			// Insert a default element before this one so the new item takes ElemIdx.
+			// The array grows and subsequent indices shift, so stop iterating this frame.
+			Ops->InsertDefault(ArrayPtr, static_cast<size_t>(ElemIdx));
+			bChanged = true;
+			if (bDispatchChange)
+			{
+				DispatchPostEditChange(Prop, EPropertyChangeType::ArrayAdd, ElemIdx, ElementPath);
+			}
+			ImGui::PopID();
+			break;
+		}
+		if (!bEditFixedSize && Ops->InsertDefault)
+		{
+			if (ImGui::IsItemHovered())
+			{
+				ImGui::SetTooltip("Insert above");
+			}
+			ImGui::SameLine();
+		}
+
 		if (!bEditFixedSize && Ops->RemoveAt && ImGui::Button("-"))
 		{
 			Ops->RemoveAt(ArrayPtr, static_cast<size_t>(ElemIdx));
