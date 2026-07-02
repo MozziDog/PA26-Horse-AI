@@ -115,6 +115,12 @@
     <Filter Include="Source\Engine">
       <UniqueIdentifier>{8669fc44-7e45-2ea2-1837-5692ea5dabe6}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source\Engine\AI">
+      <UniqueIdentifier>{5db79a6e-3c01-1e09-3005-130774a8c7aa}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\Engine\AI\RoadNetwork">
+      <UniqueIdentifier>{8ec30fc6-39a1-cff1-bb0d-9f77513b5854}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Source\Engine\Animation">
       <UniqueIdentifier>{69920f02-f3f1-ed55-c2c6-22bb29c5746b}</UniqueIdentifier>
     </Filter>
@@ -384,9 +390,6 @@
     </Filter>
     <Filter Include="Source\Engine\Serialization">
       <UniqueIdentifier>{e0d8f362-a843-4a51-e6c2-204e298b9731}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Source\Engine\Spline">
-      <UniqueIdentifier>{d77a4036-2c92-01cb-bce5-2fba4a65fda3}</UniqueIdentifier>
     </Filter>
     <Filter Include="Source\Engine\Texture">
       <UniqueIdentifier>{3453d100-e8e7-5468-d153-0774bebb560e}</UniqueIdentifier>
@@ -1007,6 +1010,9 @@
     <ClCompile Include="Source\Engine\pch.cpp">
       <Filter>Source\Engine</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Engine\AI\RoadNetwork\RoadGraph.cpp">
+      <Filter>Source\Engine\AI\RoadNetwork</Filter>
+    </ClCompile>
     <ClCompile Include="Source\Engine\Animation\AnimInstance.cpp">
       <Filter>Source\Engine\Animation</Filter>
     </ClCompile>
@@ -1179,6 +1185,9 @@
       <Filter>Source\Engine\Component\Action</Filter>
     </ClCompile>
     <ClCompile Include="Source\Engine\Component\AI\BTAgentComponent.cpp">
+      <Filter>Source\Engine\Component\AI</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Engine\Component\AI\RoadGraphComponent.cpp">
       <Filter>Source\Engine\Component\AI</Filter>
     </ClCompile>
     <ClCompile Include="Source\Engine\Component\Camera\CameraComponent.cpp">
@@ -2165,9 +2174,6 @@
     <ClCompile Include="Source\Engine\Serialization\SceneSaveManager.cpp">
       <Filter>Source\Engine\Serialization</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Engine\Spline\Spline.cpp">
-      <Filter>Source\Engine\Spline</Filter>
-    </ClCompile>
     <ClCompile Include="Source\Engine\Texture\Texture2D.cpp">
       <Filter>Source\Engine\Texture</Filter>
     </ClCompile>
@@ -2471,6 +2477,9 @@
     <ClInclude Include="Source\Engine\pch.h">
       <Filter>Source\Engine</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Engine\AI\RoadNetwork\RoadGraph.h">
+      <Filter>Source\Engine\AI\RoadNetwork</Filter>
+    </ClInclude>
     <ClInclude Include="Source\Engine\Animation\AnimExtractContext.h">
       <Filter>Source\Engine\Animation</Filter>
     </ClInclude>
@@ -2682,6 +2691,9 @@
       <Filter>Source\Engine\Component\Action</Filter>
     </ClInclude>
     <ClInclude Include="Source\Engine\Component\AI\BTAgentComponent.h">
+      <Filter>Source\Engine\Component\AI</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Engine\Component\AI\RoadGraphComponent.h">
       <Filter>Source\Engine\Component\AI</Filter>
     </ClInclude>
     <ClInclude Include="Source\Engine\Component\Camera\CameraComponent.h">
@@ -3901,9 +3913,6 @@
     </ClInclude>
     <ClInclude Include="Source\Engine\Serialization\WindowsArchive.h">
       <Filter>Source\Engine\Serialization</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Engine\Spline\Spline.h">
-      <Filter>Source\Engine\Spline</Filter>
     </ClInclude>
     <ClInclude Include="Source\Engine\Texture\Texture2D.h">
       <Filter>Source\Engine\Texture</Filter>
