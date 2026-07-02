@@ -197,6 +197,10 @@ void UEditorEngine::Tick(float DeltaTime)
 
 	FAudioManager::Get().Tick();
 	WorldTick(DeltaTime);
+	if (ToolMode == EEditorToolMode::RoadEdit)
+	{
+		RoadEditMode.DrawHighlights();
+	}
 	FGarbageCollector::Get().TryCollectGarbage();
 
 	// 신규 계층형 UI 레이아웃 패스 — 게임 경로(UEngine::TickFrameBody)는 WorldTick 후 Render 전에
@@ -208,6 +212,20 @@ void UEditorEngine::Tick(float DeltaTime)
 
 	Render(DeltaTime);
 	SelectionManager.Tick();
+	if (ToolMode == EEditorToolMode::RoadEdit)
+	{
+		if (!RoadEditMode.IsBoundToWorld(GetWorld()))
+		{
+			// 씬 로드 등으로 월드가 바뀌면 모드를 안전하게 종료(선택/override 복원).
+			ToolMode = EEditorToolMode::Default;
+			RoadEditMode.Exit();
+			SelectionManager.SetSubObjectOverride(false);
+		}
+		else
+		{
+			RoadEditMode.Tick();
+		}
+	}
 }
 
 bool UEditorEngine::GetActiveViewportPOV(FMinimalViewInfo& OutPOV) const
@@ -274,6 +292,22 @@ void UEditorEngine::ToggleCoordSystem()
 		? EEditorCoordSystem::Local
 		: EEditorCoordSystem::World;
 	ApplyTransformSettingsToGizmo();
+}
+
+void UEditorEngine::ToggleRoadEditMode()
+{
+	if (ToolMode == EEditorToolMode::RoadEdit)
+	{
+		ToolMode = EEditorToolMode::Default;
+		RoadEditMode.Exit();
+		SelectionManager.SetSubObjectOverride(false);
+	}
+	else
+	{
+		RoadEditMode.Enter(GetWorld(), GetGizmo());
+		SelectionManager.SetSubObjectOverride(true);
+		ToolMode = EEditorToolMode::RoadEdit;
+	}
 }
 
 void UEditorEngine::ApplyTransformSettingsToGizmo()

@@ -21,6 +21,9 @@ public:
 	// NOTE: AI 등이 쿼리할 때 FRoadGraph를 직접 가져오지 않고 컴포넌트에서 제공하는 wrapper를 사용할지 고민 필요
 	const FRoadGraph& GetRoadGraph() const { return RoadGraph; }
 
+	// 에디터 툴(RoadEdit gizmo)이 노드/제어점 좌표를 직접 편집하기 위한 접근자.
+	FRoadGraph& GetRoadGraphMutable() { return RoadGraph; }
+
 protected:
 	void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction& ThisTickFunction) override;
 

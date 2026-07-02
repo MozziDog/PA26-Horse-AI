@@ -325,6 +325,12 @@ void FEditorMainPanel::Render(float DeltaTime)
 
 	AssetEditorManager.Render(DeltaTime);
 
+	// RoadEdit 삭제 확인 모달 (ImGui 프레임 안에서 그려야 함)
+	if (EditorEngine && EditorEngine->IsRoadEditMode())
+	{
+		EditorEngine->GetRoadEditMode().RenderUI();
+	}
+
 	// 토스트 알림 (항상 최상위에 표시)
 	FNotificationToast::Render();
 
@@ -695,6 +701,15 @@ void FEditorMainPanel::RenderShortcutOverlay()
 	ImGui::Separator();
 	ImGui::TextUnformatted("F : Focus viewport on selected body, shape, or constraint");
 	ImGui::TextUnformatted("Delete : Remove selected body or constraint");
+	ImGui::Separator();
+	ImGui::TextUnformatted("Road Edit");
+	ImGui::Separator();
+	ImGui::TextUnformatted("Toolbar 'Road' : Toggle road edit mode");
+	ImGui::TextUnformatted("LMB : Select node > control point > segment");
+	ImGui::TextUnformatted("N : Add node at cursor");
+	ImGui::TextUnformatted("C : Connect from selected node, then click target node");
+	ImGui::TextUnformatted("V : Add control point to selected segment at cursor");
+	ImGui::TextUnformatted("Delete : Remove selected node / control point / segment");
 	ImGui::Separator();
 	ImGui::TextUnformatted("EsterEgg");
 	ImGui::Separator();

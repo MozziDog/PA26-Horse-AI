@@ -88,4 +88,7 @@ struct FRoadGraph
 	// --- AI 쿼리용 (현재는 완전 탐색; 추후 공간 가속 구조로 최적화 필요) ---
 	FRoadNodeQueryResult FindNearestNode(const FVector& Point) const;
 	FRoadSegmentQueryResult FindClosestPointOnSegments(const FVector& Point) const;
+
+	// 특정 세그먼트에 대한 최근접점. SpanIndex는 제어점 삽입 위치로도 쓰인다. SegmentIndex는 설정하지 않음.
+	FRoadSegmentQueryResult FindClosestPointOnSegment(const FRoadSegment& Segment, const FVector& Point) const;
 };

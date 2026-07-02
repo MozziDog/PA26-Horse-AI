@@ -24,6 +24,7 @@ enum class EToolbarIcon : int32
 	ScaleSnap,
 	ShowFlag,
 	Camera,
+	RoadEdit,
 	Count
 };
 
@@ -50,6 +51,8 @@ struct FViewportToolbarContext
 	bool bShowShowFlags = true;
 	bool bShowPhysicsAssetShowFlags = false;
 
+	bool bRoadEditModeActive = false;
+
 	int32 SlotIndex = 0;
 	ID3D11ShaderResourceView** LayoutIcons = nullptr;
 	int32 LayoutIconCount = 0;
@@ -57,6 +60,7 @@ struct FViewportToolbarContext
 	int32 ToggleLayoutIndex = -1;
 
 	std::function<void()> OnAddActorClicked;
+	std::function<void()> OnRoadEditModeToggled;
 	std::function<void()> OnCoordSystemToggled;
 	std::function<void()> OnSettingsChanged;
 	std::function<void()> OnRenderViewModeExtras;

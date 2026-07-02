@@ -293,6 +293,45 @@ void FEditorViewportClient::TickEditorShortcuts()
 		EditorEngine->RequestEndPlayMap();
 	}
 
+	// RoadEdit 모드 단축키: Delete(삭제) / N(노드) / C(연결) / V(제어점).
+	if (EditorEngine->IsRoadEditMode())
+	{
+		FRoadEditMode& Road = EditorEngine->GetRoadEditMode();
+		InputSystem& Input = InputSystem::Get();
+
+		if (Input.GetKeyDown(VK_DELETE))
+		{
+			Road.RequestDeleteSelected();
+			return;
+		}
+		if (Input.GetKeyDown('C'))
+		{
+			Road.ToggleConnect();
+			return;
+		}
+		if (Input.GetKeyDown('N') || Input.GetKeyDown('V'))
+		{
+			const ImVec2 MousePos = ImGui::GetIO().MousePos;
+			const float LocalMouseX = MousePos.x - ViewportScreenRect.X;
+			const float LocalMouseY = MousePos.y - ViewportScreenRect.Y;
+			const float VPWidth = Viewport ? static_cast<float>(Viewport->GetWidth()) : WindowWidth;
+			const float VPHeight = Viewport ? static_cast<float>(Viewport->GetHeight()) : WindowHeight;
+			FMinimalViewInfo POV;
+			GetCameraView(POV);
+			const FRay Ray = POV.DeprojectScreenToWorld(LocalMouseX, LocalMouseY, VPWidth, VPHeight);
+
+			if (Input.GetKeyDown('N'))
+			{
+				Road.AddNodeAtCursor(Ray);
+			}
+			else
+			{
+				Road.AddControlPointAtCursor(Ray);
+			}
+			return;
+		}
+	}
+
 	// 키보드 소유권과 UpdateInputOwner 의 WantTextInput 해제로 게이팅 일원화됨.
 	if (SelectionManager && InputSystem::Get().GetKeyDown(VK_DELETE))
 	{
@@ -610,6 +649,11 @@ void FEditorViewportClient::TickInteraction(float DeltaTime)
 	// 기즈모 hovering 효과를 주석처리해 일단 fps를 개선합니다
 	FRayUtils::RaycastComponent(Gizmo, Ray, HitResult);
 
+	if (UEditorEngine* RoadEd = Cast<UEditorEngine>(GEngine); RoadEd && RoadEd->IsRoadEditMode())
+	{
+		RoadEd->GetRoadEditMode().UpdateHover(Ray);
+	}
+
 	InputSystem& Input = InputSystem::Get();
 
 	if (Input.GetKeyDown(VK_LBUTTON))
@@ -719,6 +763,11 @@ void FEditorViewportClient::HandleDragStart(const FRay& Ray)
 	if (FRayUtils::RaycastComponent(Gizmo, Ray, HitResult))
 	{
 		Gizmo->SetPressedOnHandle(true);
+	}
+	else if (UEditorEngine* EditorEngine = Cast<UEditorEngine>(GEngine); EditorEngine && EditorEngine->IsRoadEditMode())
+	{
+		// RoadEdit 모드: 액터 피킹 대신 도로 노드/제어점 핸들 피킹으로 대체.
+		EditorEngine->GetRoadEditMode().PickAtRay(Ray);
 	}
 	else
 	{

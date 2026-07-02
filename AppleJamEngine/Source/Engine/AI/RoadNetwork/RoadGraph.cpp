@@ -89,6 +89,39 @@ FRoadNodeQueryResult FRoadGraph::FindNearestNode(const FVector& Point) const
 	return Result;
 }
 
+FRoadSegmentQueryResult FRoadGraph::FindClosestPointOnSegment(const FRoadSegment& Segment, const FVector& Point) const
+{
+	FRoadSegmentQueryResult Result;
+
+	TArray<FVector> PathPoints;
+	if (!GetSegmentPathPoints(Segment, PathPoints) || PathPoints.size() < 2)
+	{
+		return Result;
+	}
+
+	for (int32 SpanIndex = 0; SpanIndex + 1 < static_cast<int32>(PathPoints.size()); ++SpanIndex)
+	{
+		const FVector& A = PathPoints[SpanIndex];
+		const FVector& B = PathPoints[SpanIndex + 1];
+		float Alpha = 0.0f;
+		const FVector Closest = ClosestPointOnLineSegment(A, B, Point, Alpha);
+		const float DistanceSq = FVector::DistSquared(Point, Closest);
+		if (!Result.bValid || DistanceSq < Result.DistanceSq)
+		{
+			const FVector Span = B - A;
+			Result.bValid = true;
+			Result.SegmentID = Segment.ID;
+			Result.SpanIndex = SpanIndex;
+			Result.SpanAlpha = Alpha;
+			Result.Position = Closest;
+			Result.Direction = Span.IsNearlyZero() ? FVector::ZeroVector : Span.Normalized();
+			Result.DistanceSq = DistanceSq;
+		}
+	}
+
+	return Result;
+}
+
 FRoadSegmentQueryResult FRoadGraph::FindClosestPointOnSegments(const FVector& Point) const
 {
 	FRoadSegmentQueryResult Result;

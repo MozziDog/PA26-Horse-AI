@@ -1148,6 +1148,14 @@ void FLevelViewportLayout::RenderSharedViewportToolbar(float ToolbarLeft, float 
 			}
 		}
 	};
+	Context.bRoadEditModeActive = Editor ? Editor->IsRoadEditMode() : false;
+	Context.OnRoadEditModeToggled = [&]()
+	{
+		if (Editor)
+		{
+			Editor->ToggleRoadEditMode();
+		}
+	};
 	Context.OnCoordSystemToggled = [&]()
 	{
 		if (Editor)

@@ -45,12 +45,14 @@ Texture2D Tex_Diffuse : register(t0);
 FMaterialResult EvaluateMaterial(FMaterialPixelInput Input)
 {
     float4 n_18 = Tex_Diffuse.Sample(LinearWrapSampler, Input.UV0);
+    float n_75 = 0.300000f;
+    float3 n_69 = ((n_18).rgb * float3(n_75, n_75, n_75));
     float4 n_32 = Tex_Diffuse.Sample(LinearWrapSampler, Input.UV0);
     float4 n_58 = Tex_Diffuse.Sample(LinearWrapSampler, Input.UV0);
     float4 n_45 = Tex_Diffuse.Sample(LinearWrapSampler, Input.UV0);
     float n_3 = 1.000000f;
     FMaterialResult Result;
-    Result.BaseColor = (n_18).rgb;
+    Result.BaseColor = n_69;
     Result.Normal = (n_32).rgb;
     Result.Roughness = ((n_58).rgb).x;
     Result.Metallic = ((n_45).rgb).x;

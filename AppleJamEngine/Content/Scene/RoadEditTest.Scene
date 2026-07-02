@@ -3907,7 +3907,7 @@
         "MaxHealth" : 10.000000,
         "MinCameraPitch" : -5.000000,
         "MouseSensitivity" : 0.100000,
-        "PendingActorLocation" : [-14.452175, -124.524361, 0.000000],
+        "PendingActorLocation" : [0.000000, -117.800003, 0.000000],
         "PendingActorRotation" : [-0.000000, 0.000000, 0.000000],
         "PendingActorScale" : [1.000000, 1.000000, 1.000000],
         "PendingActorVisible" : true,
@@ -4021,7 +4021,7 @@
           "RagdollRecoveryBlendOutTime" : 0.300000,
           "RecoveryFullBodyThreshold" : 0.900000,
           "RecoveryImpulseThreshold" : 0.550000,
-          "RelativeTransform.Location" : [-14.452175, -124.524361, 0.000000],
+          "RelativeTransform.Location" : [0.000000, -117.800003, 0.000000],
           "RelativeTransform.Scale" : [1.000000, 1.000000, 1.000000],
           "ResponseContainer" : {
             "Responses[0]" : 2,
@@ -4060,34 +4060,52 @@
             "RoadGraph" : {
               "Nodes" : [{
                   "ID" : 1,
-                  "Position" : [-63.508251, -77.406677, 0.000000]
+                  "Position" : [-40.000000, -68.800003, 0.000000]
                 }, {
                   "ID" : 2,
-                  "Position" : [-1.031424, -128.409271, 0.000000]
+                  "Position" : [5.600000, -125.900002, 0.000000]
                 }, {
                   "ID" : 3,
-                  "Position" : [74.164276, -99.184311, 0.000000]
+                  "Position" : [47.700001, -119.599998, 0.000000]
                 }, {
                   "ID" : 4,
-                  "Position" : [70.508209, -199.594482, 0.000000]
+                  "Position" : [47.400002, -175.899994, 0.000000]
+                }, {
+                  "ID" : 5,
+                  "Position" : [-13.704250, -140.565842, -0.575237]
+                }, {
+                  "ID" : 6,
+                  "Position" : [38.256119, -74.578606, 34.407261]
                 }],
               "Segments" : [{
-                  "ControlPoints" : [[-56.129944, -94.082123, -0.795313], [-48.481716, -104.481468, -0.795315], [-38.994373, -115.890648, -0.703711], [-18.165857, -123.393143, 0.000000]],
+                  "ControlPoints" : [[-24.400000, -106.599998, 0.000000]],
                   "EndNodeID" : 2,
                   "ID" : 1,
                   "StartNodeID" : 1,
                   "Width" : 1.000000
                 }, {
-                  "ControlPoints" : [[14.929392, -125.854889, -0.625736], [25.791271, -123.815849, -0.735882], [39.772034, -118.597290, -0.748421], [57.261810, -111.178085, -0.795094]],
+                  "ControlPoints" : [],
                   "EndNodeID" : 3,
                   "ID" : 2,
                   "StartNodeID" : 2,
                   "Width" : 1.000000
                 }, {
-                  "ControlPoints" : [[15.496222, -137.330780, 3.423740], [36.767971, -144.854797, -0.694817], [58.030067, -164.349442, -0.641396]],
+                  "ControlPoints" : [],
                   "EndNodeID" : 4,
                   "ID" : 3,
                   "StartNodeID" : 2,
+                  "Width" : 1.000000
+                }, {
+                  "ControlPoints" : [[-0.139423, -129.260757, -0.517244]],
+                  "EndNodeID" : 2,
+                  "ID" : 4,
+                  "StartNodeID" : 5,
+                  "Width" : 1.000000
+                }, {
+                  "ControlPoints" : [[38.330311, -83.011452, 21.301735], [39.546089, -92.090973, 4.187517], [46.459946, -100.982430, -0.785385]],
+                  "EndNodeID" : 3,
+                  "ID" : 5,
+                  "StartNodeID" : 6,
                   "Width" : 1.000000
                 }]
             },
@@ -4128,14 +4146,14 @@
   "ClassName" : "UWorld",
   "ContextHandle" : "NewScene",
   "ContextName" : "New Scene",
-  "Name" : "HorseTest",
+  "Name" : "RoadEditTest",
   "ObjectId" : 1,
   "PerspectiveCamera" : {
     "FOV" : 1.047198,
     "FarClip" : 1000.000000,
-    "Location" : [-18.161877, -134.720871, 8.527464],
+    "Location" : [87.115753, -165.914062, 38.980648],
     "NearClip" : 0.100000,
-    "Rotation" : [0.000000, 23.171431, 1117.180664]
+    "Rotation" : [0.000000, 19.421619, 854.400635]
   },
   "Version" : 2,
   "WorldSettings" : {
