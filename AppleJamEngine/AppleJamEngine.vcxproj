@@ -947,6 +947,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClInclude Include="Source\Engine\GameFramework\Actor\BoxActor.h" />
     <ClInclude Include="Source\Engine\GameFramework\Actor\CapsuleActor.h" />
     <ClInclude Include="Source\Engine\GameFramework\Actor\DecalActor.h" />
+    <ClInclude Include="Source\Engine\GameFramework\Actor\EmptyActor.h" />
     <ClInclude Include="Source\Engine\GameFramework\Actor\HeightFogActor.h" />
     <ClInclude Include="Source\Engine\GameFramework\Actor\InstancedStaticMeshValidationActor.h" />
     <ClInclude Include="Source\Engine\GameFramework\Actor\ParticleSystemActor.h" />

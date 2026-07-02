@@ -2987,6 +2987,9 @@
     <ClInclude Include="Source\Engine\GameFramework\Actor\DecalActor.h">
       <Filter>Source\Engine\GameFramework\Actor</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Engine\GameFramework\Actor\EmptyActor.h">
+      <Filter>Source\Engine\GameFramework\Actor</Filter>
+    </ClInclude>
     <ClInclude Include="Source\Engine\GameFramework\Actor\HeightFogActor.h">
       <Filter>Source\Engine\GameFramework\Actor</Filter>
     </ClInclude>
