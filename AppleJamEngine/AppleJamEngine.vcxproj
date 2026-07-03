@@ -190,6 +190,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
   <ItemGroup>
     <ClCompile Include="Source\Editor\EditorEngine.cpp" />
     <ClCompile Include="Source\Editor\EditorRenderPipeline.cpp" />
+    <ClCompile Include="Source\Editor\RoadEdit\RoadEditMode.cpp" />
     <ClCompile Include="Source\Editor\Selection\SelectionManager.cpp" />
     <ClCompile Include="Source\Editor\Settings\EditorSettings.cpp" />
     <ClCompile Include="Source\Editor\Slate\SSplitter.cpp" />
@@ -246,6 +247,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClCompile Include="Source\Engine\pch.cpp">
       <PrecompiledHeader>Create</PrecompiledHeader>
     </ClCompile>
+    <ClCompile Include="Source\Engine\AI\RoadNetwork\RoadGraph.cpp" />
     <ClCompile Include="Source\Engine\Animation\AnimInstance.cpp" />
     <ClCompile Include="Source\Engine\Animation\AnimationManager.cpp" />
     <ClCompile Include="Source\Engine\Animation\AnimationRuntime.cpp" />
@@ -304,6 +306,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClCompile Include="Source\Engine\Component\ShapeComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\Action\ActionVisualEffectComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\AI\BTAgentComponent.cpp" />
+    <ClCompile Include="Source\Engine\Component\AI\RoadGraphComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\Camera\CameraComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\Camera\CineCameraComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\Camera\SpringArmComponent.cpp" />
@@ -426,6 +429,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClCompile Include="Source\Engine\Gizmo\BoneTransformGizmoTarget.cpp" />
     <ClCompile Include="Source\Engine\Gizmo\ComponentGizmoTarget.cpp" />
     <ClCompile Include="Source\Engine\Gizmo\PhysicsAssetGizmoTarget.cpp" />
+    <ClCompile Include="Source\Engine\Gizmo\RoadGraphGizmoTarget.cpp" />
     <ClCompile Include="Source\Engine\Input\InputKeyCodes.cpp" />
     <ClCompile Include="Source\Engine\Input\InputSystem.cpp" />
     <ClCompile Include="Source\Engine\Lua\LuaActorBindings_1.cpp" />
@@ -632,7 +636,6 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClCompile Include="Source\Engine\Runtime\GameRenderPipeline.cpp" />
     <ClCompile Include="Source\Engine\Runtime\Launch.cpp" />
     <ClCompile Include="Source\Engine\Serialization\SceneSaveManager.cpp" />
-    <ClCompile Include="Source\Engine\Spline\Spline.cpp" />
     <ClCompile Include="Source\Engine\Texture\Texture2D.cpp" />
     <ClCompile Include="Source\Engine\Texture\stb_image_impl.cpp" />
     <ClCompile Include="Source\Engine\UI\UIAssetManager.cpp" />
@@ -710,6 +713,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClInclude Include="Source\Editor\EditorEngine.h" />
     <ClInclude Include="Source\Editor\EditorRenderPipeline.h" />
     <ClInclude Include="Source\Editor\PIE\PIETypes.h" />
+    <ClInclude Include="Source\Editor\RoadEdit\RoadEditMode.h" />
     <ClInclude Include="Source\Editor\Selection\SelectionManager.h" />
     <ClInclude Include="Source\Editor\Settings\EditorSettings.h" />
     <ClInclude Include="Source\Editor\Settings\EditorViewportSettings.h" />
@@ -775,6 +779,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClInclude Include="Source\Editor\Viewport\Level\FLevelViewportLayout.h" />
     <ClInclude Include="Source\Editor\Viewport\Level\LevelEditorViewportClient.h" />
     <ClInclude Include="Source\Engine\pch.h" />
+    <ClInclude Include="Source\Engine\AI\RoadNetwork\RoadGraph.h" />
     <ClInclude Include="Source\Engine\Animation\AnimExtractContext.h" />
     <ClInclude Include="Source\Engine\Animation\AnimInstance.h" />
     <ClInclude Include="Source\Engine\Animation\AnimationManager.h" />
@@ -846,6 +851,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClInclude Include="Source\Engine\Component\ShapeComponent.h" />
     <ClInclude Include="Source\Engine\Component\Action\ActionVisualEffectComponent.h" />
     <ClInclude Include="Source\Engine\Component\AI\BTAgentComponent.h" />
+    <ClInclude Include="Source\Engine\Component\AI\RoadGraphComponent.h" />
     <ClInclude Include="Source\Engine\Component\Camera\CameraComponent.h" />
     <ClInclude Include="Source\Engine\Component\Camera\CineCameraComponent.h" />
     <ClInclude Include="Source\Engine\Component\Camera\SpringArmComponent.h" />
@@ -983,6 +989,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClInclude Include="Source\Engine\Gizmo\ComponentGizmoTarget.h" />
     <ClInclude Include="Source\Engine\Gizmo\GizmoTransformTarget.h" />
     <ClInclude Include="Source\Engine\Gizmo\PhysicsAssetGizmoTarget.h" />
+    <ClInclude Include="Source\Engine\Gizmo\RoadGraphGizmoTarget.h" />
     <ClInclude Include="Source\Engine\Input\InputKeyCodes.h" />
     <ClInclude Include="Source\Engine\Input\InputSystem.h" />
     <ClInclude Include="Source\Engine\Lua\LuaActorBindings.internal.h" />
@@ -1252,7 +1259,6 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClInclude Include="Source\Engine\Serialization\MemoryArchive.h" />
     <ClInclude Include="Source\Engine\Serialization\SceneSaveManager.h" />
     <ClInclude Include="Source\Engine\Serialization\WindowsArchive.h" />
-    <ClInclude Include="Source\Engine\Spline\Spline.h" />
     <ClInclude Include="Source\Engine\Texture\Texture2D.h" />
     <ClInclude Include="Source\Engine\UI\UIAsset.h" />
     <ClInclude Include="Source\Engine\UI\UIAssetManager.h" />

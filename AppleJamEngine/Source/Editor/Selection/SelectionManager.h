@@ -42,6 +42,12 @@ public:
 	UGizmoComponent* GetGizmo() const;
 
 	void SetGizmoEnabled(bool bEnabled);
+
+	// 서브오브젝트 편집 툴(예: RoadEdit)이 gizmo 타겟을 직접 소유하는 동안,
+	// 선택된 액터로의 매-틱 재동기화를 중단한다.
+	void SetSubObjectOverride(bool bOverride);
+	bool IsSubObjectOverride() const { return bSubObjectOverride; }
+
 	void SetWorld(UWorld* InWorld);
 	const char* GetReferencerName() const override { return "FSelectionManager"; }
 	void AddReferencedObjects(FReferenceCollector& Collector) override;
@@ -58,4 +64,5 @@ private:
 	UGizmoComponent* Gizmo = nullptr;
 	TWeakObjectPtr<UWorld> World;
 	bool bGizmoEnabled = true;
+	bool bSubObjectOverride = false;
 };

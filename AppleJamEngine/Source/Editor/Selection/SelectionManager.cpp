@@ -329,6 +329,12 @@ void FSelectionManager::Tick()
 {
     PruneInvalidSelection();
 
+    // 서브오브젝트 툴이 gizmo를 소유 중이면 액터 기준 재동기화를 하지 않는다.
+    if (bSubObjectOverride)
+    {
+        return;
+    }
+
     if (!IsValid(Gizmo) || !bGizmoEnabled)
     {
         return;
@@ -414,6 +420,29 @@ void FSelectionManager::SetGizmoEnabled(bool bEnabled)
 
     bGizmoEnabled = bEnabled;
     SyncGizmo();
+}
+
+void FSelectionManager::SetSubObjectOverride(bool bOverride)
+{
+    if (bSubObjectOverride == bOverride)
+    {
+        return;
+    }
+
+    bSubObjectOverride = bOverride;
+
+    if (bSubObjectOverride)
+    {
+        // 액터 gizmo를 내려서 서브오브젝트 툴이 타겟을 새로 세팅할 수 있게 한다.
+        if (IsValid(Gizmo))
+        {
+            Gizmo->Deactivate();
+        }
+    }
+    else
+    {
+        SyncGizmo();
+    }
 }
 
 void FSelectionManager::SetWorld(UWorld* InWorld)
@@ -522,6 +551,10 @@ void FSelectionManager::RefreshSelectedActorCache()
 
 void FSelectionManager::SyncGizmo()
 {
+    // 서브오브젝트 툴 활성 중엔 액터 선택 변화가 gizmo를 가로채지 못하게 한다.
+    // (해제는 SetSubObjectOverride(false)가 이 함수를 직접 호출해 복원.)
+    if (bSubObjectOverride) return;
+
     PruneInvalidSelection();
 
     if (!IsValid(Gizmo)) return;

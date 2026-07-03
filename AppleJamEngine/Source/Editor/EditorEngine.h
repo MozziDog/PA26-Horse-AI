@@ -7,6 +7,7 @@
 #include "Editor/UI/EditorMainPanel.h"
 #include "Editor/Settings/EditorSettings.h"
 #include "Editor/Selection/SelectionManager.h"
+#include "Editor/RoadEdit/RoadEditMode.h"
 #include "Editor/PIE/PIETypes.h"
 #include <optional>
 #if STATS
@@ -39,6 +40,12 @@ public:
 
 	// Editor-specific API
 	UGizmoComponent* GetGizmo() const { return SelectionManager.GetGizmo(); }
+
+	// --- Road edit tool (global tool mode, orthogonal to gizmo transform mode) ---
+	EEditorToolMode GetToolMode() const { return ToolMode; }
+	bool IsRoadEditMode() const { return ToolMode == EEditorToolMode::RoadEdit; }
+	void ToggleRoadEditMode();
+	FRoadEditMode& GetRoadEditMode() { return RoadEditMode; }
 
 	// 활성 뷰포트의 카메라 POV 통화. D.3 부터 외부에 노출되는 카메라 API 는 이것뿐.
 	// 활성 뷰포트가 없으면 false 반환.
@@ -143,6 +150,8 @@ private:
 	void RestoreViewportCamera(const FPerspectiveCameraData& CamData);
 
 	FSelectionManager SelectionManager;
+	EEditorToolMode ToolMode = EEditorToolMode::Default;
+	FRoadEditMode RoadEditMode;
 	FEditorMainPanel MainPanel;
 	FLevelViewportLayout ViewportLayout;
 	FOverlayStatSystem OverlayStatSystem;

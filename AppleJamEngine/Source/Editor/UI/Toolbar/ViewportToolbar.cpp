@@ -534,6 +534,28 @@ void FViewportToolbar::RenderGizmoControls(const FToolbarRenderState& State)
 
 	ImGui::SameLine(0, State.GroupSpacing);
 
+	// Road edit 툴 토글 (전역 툴 모드, gizmo 변환 모드와 직교)
+	{
+		const bool bRoadActive = State.Context.bRoadEditModeActive;
+		if (bRoadActive)
+		{
+			ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.5f, 0.8f, 1.0f));
+		}
+		if (DrawToolbarIconButton("###RoadEditIcon", EToolbarIcon::RoadEdit, "Road", State.FallbackIconSize, State.MaxIconSize))
+		{
+			if (State.Context.OnRoadEditModeToggled)
+			{
+				State.Context.OnRoadEditModeToggled();
+			}
+		}
+		if (bRoadActive)
+		{
+			ImGui::PopStyleColor();
+		}
+	}
+
+	ImGui::SameLine(0, State.GroupSpacing);
+
 	RenderCoordSystemButton(State);
 	RenderSnapControls(State);
 }
