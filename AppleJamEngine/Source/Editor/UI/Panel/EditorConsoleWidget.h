@@ -120,7 +120,8 @@ private:
 	void HandleStatPhysics(const TArray<FString>& Args);
 	void HandleStatClothCollision(const TArray<FString>& Args);
 	void HandleStatBulletHell(const TArray<FString>& Args);
-	void HandleStatBossPattern(const TArray<FString>& Args);
+	void HandleDebugBossPattern(const TArray<FString>& Args);
+	void HandleDebugBT(const TArray<FString>& Args);
 	void HandleStatNone(const TArray<FString>& Args);
 	void HandleCauseCrash(const TArray<FString>& Args);
 	void HandleCSMResolution(const TArray<FString>& Args);

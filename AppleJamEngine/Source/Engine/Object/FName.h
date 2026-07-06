@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "Core/Types/CoreTypes.h"
 #include "Core/Singleton.h"
@@ -32,6 +32,16 @@ public:
 private:
 	uint32 ComparisonIndex;	// 소문자 변환된 문자열의 풀 인덱스 (비교용)
 	uint32 DisplayIndex;	// 원본 문자열의 풀 인덱스 (표시용)
+};
+
+// TMap/TSet에서 사용하기 위한 std::hash<FName> 특수화.
+template <>
+struct std::hash<FName>
+{
+	size_t operator()(const FName& Name) const
+	{
+		return FName::Hash{}(Name);
+	}
 };
 
 // ============================================================

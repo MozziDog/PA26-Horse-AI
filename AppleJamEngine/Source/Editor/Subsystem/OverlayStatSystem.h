@@ -38,6 +38,7 @@ public:
 	void ShowClothCollision(bool bEnable = true) { bShowClothCollision = bEnable; }
 	void ShowBulletHell(bool bEnable = true) { bShowBulletHell = bEnable; }
 	void ShowBossPattern(bool bEnable = true) { bShowBossPattern = bEnable; }
+	void ShowBehaviorTree(bool bEnable = true) { bShowBehaviorTree = bEnable; }
 	bool ToggleFPS() { bShowFPS = !bShowFPS; return bShowFPS; }
 	bool ToggleMemory() { bShowMemory = !bShowMemory; return bShowMemory; }
 	bool ToggleShadow() { bShowShadow = !bShowShadow; return bShowShadow; }
@@ -47,6 +48,7 @@ public:
 	bool ToggleClothCollision() { bShowClothCollision = !bShowClothCollision; return bShowClothCollision; }
 	bool ToggleBulletHell() { bShowBulletHell = !bShowBulletHell; return bShowBulletHell; }
 	bool ToggleBossPattern() { bShowBossPattern = !bShowBossPattern; return bShowBossPattern; }
+	bool ToggleBehaviorTree() { bShowBehaviorTree = !bShowBehaviorTree; return bShowBehaviorTree; }
 	void RecordPickingAttempt(double ElapsedMs);
 	void HideAll()
 	{
@@ -60,6 +62,7 @@ public:
 		bShowClothCollision = false;
 		bShowBulletHell = false;
 		bShowBossPattern = false;
+		bShowBehaviorTree = false;
 	}
 
 	const FOverlayStatLayout& GetLayout() const { return Layout; }
@@ -80,6 +83,7 @@ private:
 	void BuildClothCollisionLines(TArray<FString>& OutLines) const;
 	void BuildBulletHellLines(TArray<FString>& OutLines) const;
 	void BuildBossPatternLines(TArray<FOverlayStatLine>& OutLines) const;
+	void BuildBehaviorTreeLines(TArray<FOverlayStatLine>& OutLines) const;
 
 	bool bShowFPS = false;
 	bool bShowPickingTime = false; // WM_LBUTTONDOWN , VK_LBUTTON 입력 시점이 아닌 오브젝트 충돌 판정에 걸린 시간을 측정합니다.
@@ -91,6 +95,7 @@ private:
 	bool bShowClothCollision = false;
 	bool bShowBulletHell = false;
 	bool bShowBossPattern = false;
+	bool bShowBehaviorTree = false;
 	double LastPickingTimeMs = 0.0;
 	double AccumulatedPickingTimeMs = 0.0;
 	uint32 PickingAttemptCount = 0;

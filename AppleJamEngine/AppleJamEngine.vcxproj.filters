@@ -121,6 +121,9 @@
     <Filter Include="Source\Engine\AI">
       <UniqueIdentifier>{5db79a6e-3c01-1e09-3005-130774a8c7aa}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source\Engine\AI\BT">
+      <UniqueIdentifier>{8ebdb6ad-f8e6-c6ef-2b96-c07f8791f3b3}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Source\Engine\AI\RoadNetwork">
       <UniqueIdentifier>{8ec30fc6-39a1-cff1-bb0d-9f77513b5854}</UniqueIdentifier>
     </Filter>
@@ -1016,6 +1019,12 @@
     <ClCompile Include="Source\Engine\pch.cpp">
       <Filter>Source\Engine</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Engine\AI\Blackboard.cpp">
+      <Filter>Source\Engine\AI</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Engine\AI\BT\BehaviorTreeDebug.cpp">
+      <Filter>Source\Engine\AI\BT</Filter>
+    </ClCompile>
     <ClCompile Include="Source\Engine\AI\RoadNetwork\RoadGraph.cpp">
       <Filter>Source\Engine\AI\RoadNetwork</Filter>
     </ClCompile>
@@ -1193,6 +1202,9 @@
     <ClCompile Include="Source\Engine\Component\AI\BTAgentComponent.cpp">
       <Filter>Source\Engine\Component\AI</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Engine\Component\AI\BehaviorTreeExecutorComponent.cpp">
+      <Filter>Source\Engine\Component\AI</Filter>
+    </ClCompile>
     <ClCompile Include="Source\Engine\Component\AI\RoadGraphComponent.cpp">
       <Filter>Source\Engine\Component\AI</Filter>
     </ClCompile>
@@ -1227,6 +1239,9 @@
       <Filter>Source\Engine\Component\Gameplay</Filter>
     </ClCompile>
     <ClCompile Include="Source\Engine\Component\Gameplay\BossPatternComponentBase.cpp">
+      <Filter>Source\Engine\Component\Gameplay</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Engine\Component\Gameplay\BossPatternDebug.cpp">
       <Filter>Source\Engine\Component\Gameplay</Filter>
     </ClCompile>
     <ClCompile Include="Source\Engine\Component\Gameplay\BossPatternSelectorComponent.cpp">
@@ -1898,9 +1913,6 @@
     <ClCompile Include="Source\Engine\Profiling\StartupProfiler.cpp">
       <Filter>Source\Engine\Profiling</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Engine\Profiling\Stats\BossPatternStats.cpp">
-      <Filter>Source\Engine\Profiling\Stats</Filter>
-    </ClCompile>
     <ClCompile Include="Source\Engine\Profiling\Stats\BulletHellStats.cpp">
       <Filter>Source\Engine\Profiling\Stats</Filter>
     </ClCompile>
@@ -2489,6 +2501,15 @@
     <ClInclude Include="Source\Engine\pch.h">
       <Filter>Source\Engine</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Engine\AI\Blackboard.h">
+      <Filter>Source\Engine\AI</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Engine\AI\BT\BehaviorTree.h">
+      <Filter>Source\Engine\AI\BT</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Engine\AI\BT\BehaviorTreeDebug.h">
+      <Filter>Source\Engine\AI\BT</Filter>
+    </ClInclude>
     <ClInclude Include="Source\Engine\AI\RoadNetwork\RoadGraph.h">
       <Filter>Source\Engine\AI\RoadNetwork</Filter>
     </ClInclude>
@@ -2705,6 +2726,9 @@
     <ClInclude Include="Source\Engine\Component\AI\BTAgentComponent.h">
       <Filter>Source\Engine\Component\AI</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Engine\Component\AI\BehaviorTreeExecutorComponent.h">
+      <Filter>Source\Engine\Component\AI</Filter>
+    </ClInclude>
     <ClInclude Include="Source\Engine\Component\AI\RoadGraphComponent.h">
       <Filter>Source\Engine\Component\AI</Filter>
     </ClInclude>
@@ -2739,6 +2763,9 @@
       <Filter>Source\Engine\Component\Gameplay</Filter>
     </ClInclude>
     <ClInclude Include="Source\Engine\Component\Gameplay\BossPatternComponentBase.h">
+      <Filter>Source\Engine\Component\Gameplay</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Engine\Component\Gameplay\BossPatternDebug.h">
       <Filter>Source\Engine\Component\Gameplay</Filter>
     </ClInclude>
     <ClInclude Include="Source\Engine\Component\Gameplay\BossPatternSelectorComponent.h">
@@ -3565,9 +3592,6 @@
     </ClInclude>
     <ClInclude Include="Source\Engine\Profiling\StartupProfiler.h">
       <Filter>Source\Engine\Profiling</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Engine\Profiling\Stats\BossPatternStats.h">
-      <Filter>Source\Engine\Profiling\Stats</Filter>
     </ClInclude>
     <ClInclude Include="Source\Engine\Profiling\Stats\BulletHellStats.h">
       <Filter>Source\Engine\Profiling\Stats</Filter>

@@ -7,7 +7,8 @@
 #include "Engine/Profiling/Stats/ParticleStats.h"
 #include "Engine/Profiling/Stats/ClothCollisionStats.h"
 #include "Engine/Profiling/Stats/BulletHellStats.h"
-#include "Engine/Profiling/Stats/BossPatternStats.h"
+#include "Engine/Component/Gameplay/BossPatternDebug.h"
+#include "Engine/AI/BT/BehaviorTreeDebug.h"
 #include "Engine/Profiling/Stats/Stats.h"
 #include "GameFramework/World.h"
 #include "Physics/IPhysicsScene.h"
@@ -788,16 +789,16 @@ void FOverlayStatSystem::BuildBossPatternLines(TArray<FOverlayStatLine>& OutLine
 	const FVector4 MutedColor(0.74f, 0.76f, 0.80f, 0.88f);
 
 	char Buffer[512] = {};
-	snprintf(Buffer, sizeof(Buffer), "Components : %u", FBossPatternStats::ComponentCount);
+	snprintf(Buffer, sizeof(Buffer), "Components : %u", FBossPatternDebug::ComponentCount);
 	OutLines.push_back(MakeOverlayLine(FString(Buffer), HeaderColor));
 
-	if (FBossPatternStats::Snapshots.empty())
+	if (FBossPatternDebug::Snapshots.empty())
 	{
 		OutLines.push_back(MakeOverlayLine("No boss pattern selector snapshot", MutedColor));
 		return;
 	}
 
-	for (const FBossPatternStatsSnapshot& Snapshot : FBossPatternStats::Snapshots)
+	for (const FBossPatternDebugSnapshot& Snapshot : FBossPatternDebug::Snapshots)
 	{
 		snprintf(Buffer, sizeof(Buffer), "Owner : %s   Active : %s   Phase %d   HealthRatio %.2f   Select %d/%d   Total %d   Fallback %d",
 			Snapshot.OwnerName.c_str(),
@@ -821,16 +822,16 @@ void FOverlayStatSystem::BuildBossPatternLines(TArray<FOverlayStatLine>& OutLine
 			OutLines.push_back(MakeOverlayLine(FString(Buffer), MutedColor));
 		}
 
-		for (const FBossPatternStatEntry& Pattern : Snapshot.Patterns)
+		for (const FBossPatternDebugEntry& Pattern : Snapshot.Patterns)
 		{
 			const char* StatusText = "BLOCK";
 			FVector4 Color = BlockedColor;
-			if (Pattern.Status == EBossPatternStatStatus::Active)
+			if (Pattern.Status == EBossPatternDebugStatus::Active)
 			{
 				StatusText = "ACTIVE";
 				Color = ActiveColor;
 			}
-			else if (Pattern.Status == EBossPatternStatStatus::Ready)
+			else if (Pattern.Status == EBossPatternDebugStatus::Ready)
 			{
 				StatusText = "READY";
 				Color = ReadyColor;
@@ -851,6 +852,78 @@ void FOverlayStatSystem::BuildBossPatternLines(TArray<FOverlayStatLine>& OutLine
 	}
 #else
 	OutLines.push_back(MakeOverlayLine("BossPattern stats unavailable (STATS=0)", FVector4(1.0f, 1.0f, 1.0f, 0.95f)));
+#endif
+}
+
+void FOverlayStatSystem::BuildBehaviorTreeLines(TArray<FOverlayStatLine>& OutLines) const
+{
+#if STATS
+	const FVector4 HeaderColor(0.90f, 0.94f, 1.0f, 0.95f);
+	const FVector4 RunningColor(0.35f, 0.62f, 1.0f, 0.98f);   // active path
+	const FVector4 SuccessColor(0.35f, 1.0f, 0.45f, 0.95f);
+	const FVector4 FailColor(1.0f, 0.45f, 0.42f, 0.92f);
+	const FVector4 StaleColor(0.55f, 0.57f, 0.60f, 0.80f);    // 이번 tick 미평가
+
+	char Buffer[512] = {};
+	snprintf(Buffer, sizeof(Buffer), "Trees : %u", FBehaviorTreeDebug::TreeCount);
+	OutLines.push_back(MakeOverlayLine(FString(Buffer), HeaderColor));
+
+	if (FBehaviorTreeDebug::Snapshots.empty())
+	{
+		OutLines.push_back(MakeOverlayLine("No behavior tree snapshot", StaleColor));
+		return;
+	}
+
+	for (const FBehaviorTreeDebugSnapshot& Snapshot : FBehaviorTreeDebug::Snapshots)
+	{
+		snprintf(Buffer, sizeof(Buffer), "Owner : %s   Frame %llu   Nodes %llu",
+			Snapshot.OwnerName.c_str(),
+			static_cast<unsigned long long>(Snapshot.FrameNumber),
+			static_cast<unsigned long long>(Snapshot.Nodes.size()));
+		OutLines.push_back(MakeOverlayLine(FString(Buffer), HeaderColor));
+
+		for (const FBTNodeDebugEntry& Node : Snapshot.Nodes)
+		{
+			const char* ResultText = "FAIL";
+			FVector4 Color = FailColor;
+			if (Node.LastResult == EBTNodeDebugResult::Running)
+			{
+				ResultText = "RUN ";
+				Color = RunningColor;
+			}
+			else if (Node.LastResult == EBTNodeDebugResult::Success)
+			{
+				ResultText = "OK  ";
+				Color = SuccessColor;
+			}
+
+			// 이번 tick 에 평가되지 않은 노드는 회색으로 죽여서 표시(가지치기된 브랜치).
+			if (!Node.bEvaluatedThisFrame)
+			{
+				Color = StaleColor;
+			}
+
+			// 트리 깊이만큼 들여쓰기 + active path 는 화살표로 강조.
+			char Indent[64] = {};
+			int32 IndentChars = (std::min)(Node.Depth, 12) * 2;
+			for (int32 i = 0; i < IndentChars; ++i)
+			{
+				Indent[i] = ' ';
+			}
+			Indent[IndentChars] = '\0';
+
+			snprintf(Buffer, sizeof(Buffer), "%s%s [%s] %s.%s  %.2fs",
+				Node.bOnActivePath ? ">" : " ",
+				Indent,
+				ResultText,
+				Node.TypeName.c_str(),
+				Node.Label.c_str(),
+				Node.ActiveDuration);
+			OutLines.push_back(MakeOverlayLine(FString(Buffer), Color));
+		}
+	}
+#else
+	OutLines.push_back(MakeOverlayLine("BehaviorTree stats unavailable (STATS=0)", FVector4(1.0f, 1.0f, 1.0f, 0.95f)));
 #endif
 }
 
@@ -898,6 +971,10 @@ void FOverlayStatSystem::BuildLines(const UEditorEngine& Editor, TArray<FOverlay
 	if (bShowBossPattern)
 	{
 		EstimatedLineCount += 16;
+	}
+	if (bShowBehaviorTree)
+	{
+		EstimatedLineCount += 24;
 	}
 	OutLines.reserve(EstimatedLineCount);
 
@@ -989,6 +1066,13 @@ void FOverlayStatSystem::BuildLines(const UEditorEngine& Editor, TArray<FOverlay
 	{
 		ColoredLines.clear();
 		BuildBossPatternLines(ColoredLines);
+		AppendColoredGroup(ColoredLines);
+	}
+
+	if (bShowBehaviorTree)
+	{
+		ColoredLines.clear();
+		BuildBehaviorTreeLines(ColoredLines);
 		AppendColoredGroup(ColoredLines);
 	}
 }
@@ -1143,6 +1227,13 @@ void FOverlayStatSystem::RenderImGui(const UEditorEngine& Editor, const FRect& V
 	{
 		ColoredLines.clear();
 		BuildBossPatternLines(ColoredLines);
-		RenderWindow("##StatBossPatternOverlay", "Stat BossPattern", ImVec4(0.05f, 0.06f, 0.09f, 0.70f), ColoredLines);
+		RenderWindow("##DebugBossPatternOverlay", "Debug BossPattern", ImVec4(0.05f, 0.06f, 0.09f, 0.70f), ColoredLines);
+	}
+
+	if (bShowBehaviorTree)
+	{
+		ColoredLines.clear();
+		BuildBehaviorTreeLines(ColoredLines);
+		RenderWindow("##DebugBehaviorTreeOverlay", "Debug BehaviorTree", ImVec4(0.04f, 0.07f, 0.09f, 0.70f), ColoredLines);
 	}
 }

@@ -276,10 +276,12 @@ void FEditorConsoleWidget::RegisterDiagnosticsCommands()
 		"Diagnostics", "stat clothcollision", "Shows the cloth collision overlay stat for the level world.");
 	RegisterCommand("stat bullethell", [this](const TArray<FString>& Args) { HandleStatBulletHell(Args); },
 		"Diagnostics", "stat bullethell", "Shows the BulletHell overlay stat.");
-	RegisterCommand("stat bosspattern", [this](const TArray<FString>& Args) { HandleStatBossPattern(Args); },
-		"Diagnostics", "stat bosspattern", "Shows the boss pattern selector overlay stat.");
+	RegisterCommand("debug bosspattern", [this](const TArray<FString>& Args) { HandleDebugBossPattern(Args); },
+		"Diagnostics", "debug bosspattern", "Toggles the boss pattern selector debug overlay.");
 	RegisterCommand("stat none", [this](const TArray<FString>& Args) { HandleStatNone(Args); },
 		"Diagnostics", "stat none", "Hides all overlay stats.");
+	RegisterCommand("debug bt", [this](const TArray<FString>& Args) { HandleDebugBT(Args); },
+		"Diagnostics", "debug bt", "Toggles the behavior tree execution overlay.");
 	RegisterCommand("cause crash", [this](const TArray<FString>& Args) { HandleCauseCrash(Args); },
 		"Diagnostics", "cause crash", "Immediately raises an intentional crash for minidump testing.");
 }
@@ -1095,7 +1097,7 @@ void FEditorConsoleWidget::HandleStatBulletHell(const TArray<FString>& Args)
 	AddLog("Overlay stat %s: bullethell\n", bEnabled ? "enabled" : "disabled");
 }
 
-void FEditorConsoleWidget::HandleStatBossPattern(const TArray<FString>& Args)
+void FEditorConsoleWidget::HandleDebugBossPattern(const TArray<FString>& Args)
 {
 	(void)Args;
 	if (!EditorEngine)
@@ -1104,7 +1106,19 @@ void FEditorConsoleWidget::HandleStatBossPattern(const TArray<FString>& Args)
 		return;
 	}
 	const bool bEnabled = EditorEngine->GetOverlayStatSystem().ToggleBossPattern();
-	AddLog("Overlay stat %s: bosspattern\n", bEnabled ? "enabled" : "disabled");
+	AddLog("Debug overlay %s: bosspattern\n", bEnabled ? "enabled" : "disabled");
+}
+
+void FEditorConsoleWidget::HandleDebugBT(const TArray<FString>& Args)
+{
+	(void)Args;
+	if (!EditorEngine)
+	{
+		AddLog("[ERROR] EditorEngine is null.\n");
+		return;
+	}
+	const bool bEnabled = EditorEngine->GetOverlayStatSystem().ToggleBehaviorTree();
+	AddLog("Debug overlay %s: bt\n", bEnabled ? "enabled" : "disabled");
 }
 
 void FEditorConsoleWidget::HandleStatNone(const TArray<FString>& Args)

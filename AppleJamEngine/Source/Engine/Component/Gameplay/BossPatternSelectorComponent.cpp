@@ -10,7 +10,7 @@
 #include "GameFramework/GameMode/PlayerController.h"
 #include "GameFramework/Pawn/Pawn.h"
 #include "GameFramework/World.h"
-#include "Profiling/Stats/BossPatternStats.h"
+#include "Component/Gameplay/BossPatternDebug.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -648,7 +648,7 @@ void UBossPatternSelectorComponent::UpdateDebugStateFromActive()
 void UBossPatternSelectorComponent::RecordOverlayStats(const FBossPatternContext& Context) const
 {
 #if STATS
-	FBossPatternStatsSnapshot Snapshot;
+	FBossPatternDebugSnapshot Snapshot;
 	AActor* OwnerActor = GetOwner();
 	Snapshot.OwnerName = OwnerActor ? OwnerActor->GetName() : "None";
 	Snapshot.ActivePatternName = DebugState.ActivePatternName;
@@ -672,7 +672,7 @@ void UBossPatternSelectorComponent::RecordOverlayStats(const FBossPatternContext
 			continue;
 		}
 
-		FBossPatternStatEntry Entry;
+		FBossPatternDebugEntry Entry;
 		Entry.PatternName = Pattern->GetPatternName();
 		Entry.Detail = Pattern->GetRuntimeDebugText();
 		Entry.CooldownRemaining = Pattern->GetCooldownRemaining();
@@ -681,14 +681,14 @@ void UBossPatternSelectorComponent::RecordOverlayStats(const FBossPatternContext
 
 		if (ActivePattern.Get() == Pattern)
 		{
-			Entry.Status = EBossPatternStatStatus::Active;
+			Entry.Status = EBossPatternDebugStatus::Active;
 			Entry.Reason = "active";
 		}
 		else if (Pattern->GetCooldownRemaining() > 0.0f)
 		{
 			char Buffer[64] = {};
 			snprintf(Buffer, sizeof(Buffer), "cooldown %.2fs", Pattern->GetCooldownRemaining());
-			Entry.Status = EBossPatternStatStatus::Blocked;
+			Entry.Status = EBossPatternDebugStatus::Blocked;
 			Entry.Reason = Buffer;
 		}
 		else
@@ -696,22 +696,22 @@ void UBossPatternSelectorComponent::RecordOverlayStats(const FBossPatternContext
 			FString RejectReason;
 			if (!Pattern->GetCanUse(Context, &RejectReason))
 			{
-				Entry.Status = EBossPatternStatStatus::Blocked;
+				Entry.Status = EBossPatternDebugStatus::Blocked;
 				Entry.Reason = RejectReason.empty() ? "blocked" : RejectReason;
 			}
 			else if (Pattern->GetEffectiveWeight(Context) <= 0.0f)
 			{
-				Entry.Status = EBossPatternStatStatus::Blocked;
+				Entry.Status = EBossPatternDebugStatus::Blocked;
 				Entry.Reason = "phase weight zero";
 			}
 			else if (IsBlockedByRecentPattern(Pattern))
 			{
-				Entry.Status = EBossPatternStatStatus::Blocked;
+				Entry.Status = EBossPatternDebugStatus::Blocked;
 				Entry.Reason = "repeat blocked";
 			}
 			else
 			{
-				Entry.Status = EBossPatternStatStatus::Ready;
+				Entry.Status = EBossPatternDebugStatus::Ready;
 				Entry.Reason = "ready";
 			}
 		}
@@ -719,7 +719,7 @@ void UBossPatternSelectorComponent::RecordOverlayStats(const FBossPatternContext
 		Snapshot.Patterns.push_back(Entry);
 	}
 
-	BOSSPATTERN_STATS_ADD_COMPONENT(Snapshot);
+	BOSSPATTERN_DEBUG_ADD_COMPONENT(Snapshot);
 #else
 	(void)Context;
 #endif

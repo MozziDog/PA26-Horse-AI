@@ -247,6 +247,8 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClCompile Include="Source\Engine\pch.cpp">
       <PrecompiledHeader>Create</PrecompiledHeader>
     </ClCompile>
+    <ClCompile Include="Source\Engine\AI\Blackboard.cpp" />
+    <ClCompile Include="Source\Engine\AI\BT\BehaviorTreeDebug.cpp" />
     <ClCompile Include="Source\Engine\AI\RoadNetwork\RoadGraph.cpp" />
     <ClCompile Include="Source\Engine\Animation\AnimInstance.cpp" />
     <ClCompile Include="Source\Engine\Animation\AnimationManager.cpp" />
@@ -306,6 +308,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClCompile Include="Source\Engine\Component\ShapeComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\Action\ActionVisualEffectComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\AI\BTAgentComponent.cpp" />
+    <ClCompile Include="Source\Engine\Component\AI\BehaviorTreeExecutorComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\AI\RoadGraphComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\Camera\CameraComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\Camera\CineCameraComponent.cpp" />
@@ -318,6 +321,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClCompile Include="Source\Engine\Component\Debug\TemporaryBoneAnimatorComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\Gameplay\BeamAttackComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\Gameplay\BossPatternComponentBase.cpp" />
+    <ClCompile Include="Source\Engine\Component\Gameplay\BossPatternDebug.cpp" />
     <ClCompile Include="Source\Engine\Component\Gameplay\BossPatternSelectorComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\Gameplay\BossPattern_AimedRingVolley.cpp" />
     <ClCompile Include="Source\Engine\Component\Gameplay\BossPattern_HomingOrbTrail.cpp" />
@@ -541,7 +545,6 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClCompile Include="Source\Engine\Platform\WindowsWindow.cpp" />
     <ClCompile Include="Source\Engine\Profiling\GPUProfiler.cpp" />
     <ClCompile Include="Source\Engine\Profiling\StartupProfiler.cpp" />
-    <ClCompile Include="Source\Engine\Profiling\Stats\BossPatternStats.cpp" />
     <ClCompile Include="Source\Engine\Profiling\Stats\BulletHellStats.cpp" />
     <ClCompile Include="Source\Engine\Profiling\Stats\ClothCollisionStats.cpp" />
     <ClCompile Include="Source\Engine\Profiling\Stats\MemoryStats.cpp" />
@@ -779,6 +782,9 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClInclude Include="Source\Editor\Viewport\Level\FLevelViewportLayout.h" />
     <ClInclude Include="Source\Editor\Viewport\Level\LevelEditorViewportClient.h" />
     <ClInclude Include="Source\Engine\pch.h" />
+    <ClInclude Include="Source\Engine\AI\Blackboard.h" />
+    <ClInclude Include="Source\Engine\AI\BT\BehaviorTree.h" />
+    <ClInclude Include="Source\Engine\AI\BT\BehaviorTreeDebug.h" />
     <ClInclude Include="Source\Engine\AI\RoadNetwork\RoadGraph.h" />
     <ClInclude Include="Source\Engine\Animation\AnimExtractContext.h" />
     <ClInclude Include="Source\Engine\Animation\AnimInstance.h" />
@@ -851,6 +857,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClInclude Include="Source\Engine\Component\ShapeComponent.h" />
     <ClInclude Include="Source\Engine\Component\Action\ActionVisualEffectComponent.h" />
     <ClInclude Include="Source\Engine\Component\AI\BTAgentComponent.h" />
+    <ClInclude Include="Source\Engine\Component\AI\BehaviorTreeExecutorComponent.h" />
     <ClInclude Include="Source\Engine\Component\AI\RoadGraphComponent.h" />
     <ClInclude Include="Source\Engine\Component\Camera\CameraComponent.h" />
     <ClInclude Include="Source\Engine\Component\Camera\CineCameraComponent.h" />
@@ -863,6 +870,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClInclude Include="Source\Engine\Component\Debug\TemporaryBoneAnimatorComponent.h" />
     <ClInclude Include="Source\Engine\Component\Gameplay\BeamAttackComponent.h" />
     <ClInclude Include="Source\Engine\Component\Gameplay\BossPatternComponentBase.h" />
+    <ClInclude Include="Source\Engine\Component\Gameplay\BossPatternDebug.h" />
     <ClInclude Include="Source\Engine\Component\Gameplay\BossPatternSelectorComponent.h" />
     <ClInclude Include="Source\Engine\Component\Gameplay\BossPattern_AimedRingVolley.h" />
     <ClInclude Include="Source\Engine\Component\Gameplay\BossPattern_HomingOrbTrail.h" />
@@ -1138,7 +1146,6 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClInclude Include="Source\Engine\Platform\resource.h" />
     <ClInclude Include="Source\Engine\Profiling\GPUProfiler.h" />
     <ClInclude Include="Source\Engine\Profiling\StartupProfiler.h" />
-    <ClInclude Include="Source\Engine\Profiling\Stats\BossPatternStats.h" />
     <ClInclude Include="Source\Engine\Profiling\Stats\BulletHellStats.h" />
     <ClInclude Include="Source\Engine\Profiling\Stats\ClothCollisionStats.h" />
     <ClInclude Include="Source\Engine\Profiling\Stats\MemoryStats.h" />

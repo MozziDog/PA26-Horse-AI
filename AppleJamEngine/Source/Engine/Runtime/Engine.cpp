@@ -8,7 +8,8 @@
 #include "Profiling/Stats/ParticleStats.h"
 #include "Profiling/Stats/ClothCollisionStats.h"
 #include "Profiling/Stats/BulletHellStats.h"
-#include "Profiling/Stats/BossPatternStats.h"
+#include "Component/Gameplay/BossPatternDebug.h"
+#include "AI/BT/BehaviorTreeDebug.h"
 #include "Profiling/StartupProfiler.h"
 #include "Engine/Input/InputSystem.h"
 #include "Engine/Platform/WindowsWindow.h"
@@ -257,7 +258,8 @@ void UEngine::WorldTick(float DeltaTime)
 	PARTICLE_STATS_RESET();
 	CLOTH_COLLISION_STATS_RESET();
 	BULLETHELL_STATS_RESET();
-	BOSSPATTERN_STATS_RESET();
+	BOSSPATTERN_DEBUG_RESET();
+	BT_DEBUG_RESET();
 
 	// PIE 활성 시 Editor 월드는 sleep (UE 동작과 동일).
 	// culling/octree/visibility 갱신을 건너뛰어 50k+ 환경에서 비용 2배를 방지.
