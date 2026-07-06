@@ -8,7 +8,7 @@ struct FHorseInputState
 	float Steering = 0.0f;
 };
 
-class UBTAgentComponent;
+class UBlackboardComponent;
 
 #include "Source/Engine/Component/Horse/HorsePlayerInputComponent.generated.h"
 
@@ -39,6 +39,6 @@ public:
 
 protected:
 	FHorseInputState CurrentInput;
-	TWeakObjectPtr<UBTAgentComponent> BTAgentComponent;
+	TWeakObjectPtr<UBlackboardComponent> Blackboard;
 };
 

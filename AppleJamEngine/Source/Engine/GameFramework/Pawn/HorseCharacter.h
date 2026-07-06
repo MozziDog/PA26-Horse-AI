@@ -7,6 +7,7 @@
 class USkeletalMeshComponent;
 class UHorsePlayerInputComponent;
 class UBTAgentComponent;
+class UBlackboardComponent;
 class USpringArmComponent;
 class UCameraComponent;
 
@@ -48,6 +49,7 @@ protected:
 	TWeakObjectPtr<USkeletalMeshComponent> MeshComponent = nullptr;
 	TWeakObjectPtr<UHorsePlayerInputComponent> HorseMovementComponent = nullptr;
 	TWeakObjectPtr<UBTAgentComponent> BTAgentComponent = nullptr;
+	TWeakObjectPtr<UBlackboardComponent> BlackboardComponent = nullptr;
 	TWeakObjectPtr<USpringArmComponent> SpringArmComponent = nullptr;
 	TWeakObjectPtr<UCameraComponent> CameraComponent = nullptr;
 

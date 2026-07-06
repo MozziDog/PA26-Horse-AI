@@ -2,13 +2,13 @@
 #include "HorsePlayerInputComponent.h"
 
 #include "GameFramework/AActor.h"
-#include "Component/AI/BTAgentComponent.h"
+#include "Component/AI/BlackboardComponent.h"
 
 void UHorsePlayerInputComponent::BeginPlay()
 {
 	// Super::BeginPlay();
 
-	BTAgentComponent = GetOwner()->GetComponentByClass<UBTAgentComponent>();
+	Blackboard = GetOwner()->GetComponentByClass<UBlackboardComponent>();
 }
 
 void UHorsePlayerInputComponent::EndPlay()
@@ -22,12 +22,13 @@ void UHorsePlayerInputComponent::TickComponent(float DeltaTime, ELevelTick TickT
 {
 	// Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 	
-	// TODO: AI 판단에 필요한 프로퍼티 전달 Blackboard로 바꾸기
-	if (BTAgentComponent)
+	// 입력을 블랙보드에 기록
+	if (Blackboard.IsValid())
 	{
-		BTAgentComponent->SetThrottle(CurrentInput.Throttle);
-		BTAgentComponent->SetBrake(CurrentInput.Brake);
-		BTAgentComponent->SetSteering(CurrentInput.Steering);
+		FBlackboard& BB = Blackboard->GetBlackboard();
+		BB.SetFloat(FName("InputThrottle"), CurrentInput.Throttle);
+		BB.SetFloat(FName("InputBrake"),    CurrentInput.Brake);
+		BB.SetFloat(FName("InputSteering"), CurrentInput.Steering);
 		CurrentInput = { 0.0f, 0.0f, 0.0f };	// consume input
 	}
 }

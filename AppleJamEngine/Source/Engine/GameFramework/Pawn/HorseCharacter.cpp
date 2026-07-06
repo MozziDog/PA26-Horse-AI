@@ -6,6 +6,7 @@
 #include "Component/Input/InputComponent.h"
 #include "Component/Horse/HorsePlayerInputComponent.h"
 #include "Component/AI/BTAgentComponent.h"
+#include "Component/AI/BlackboardComponent.h"
 #include "Component/Primitive/SkeletalMeshComponent.h"
 #include "Mesh/MeshManager.h"
 #include "Runtime/Engine.h"
@@ -79,6 +80,8 @@ void AHorseCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 	}
 
 	HorseMovementComponent = AddComponent<UHorsePlayerInputComponent>();
+
+	BlackboardComponent = AddComponent<UBlackboardComponent>();
 
 	BTAgentComponent = AddComponent<UBTAgentComponent>();
 
@@ -176,6 +179,8 @@ void AHorseCharacter::RebindComponents()
 {
 	MeshComponent = GetComponentByClass<USkeletalMeshComponent>();
 	HorseMovementComponent = GetComponentByClass<UHorsePlayerInputComponent>();
+	BTAgentComponent = GetComponentByClass<UBTAgentComponent>();
+	BlackboardComponent = GetComponentByClass<UBlackboardComponent>();
 	SpringArmComponent = GetComponentByClass<USpringArmComponent>();
 	CameraComponent = GetComponentByClass<UCameraComponent>();
 }

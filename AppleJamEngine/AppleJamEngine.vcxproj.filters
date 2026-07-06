@@ -1202,9 +1202,6 @@
     <ClCompile Include="Source\Engine\Component\AI\BTAgentComponent.cpp">
       <Filter>Source\Engine\Component\AI</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Engine\Component\AI\BehaviorTreeExecutorComponent.cpp">
-      <Filter>Source\Engine\Component\AI</Filter>
-    </ClCompile>
     <ClCompile Include="Source\Engine\Component\AI\BlackboardComponent.cpp">
       <Filter>Source\Engine\Component\AI</Filter>
     </ClCompile>
@@ -2727,9 +2724,6 @@
       <Filter>Source\Engine\Component\Action</Filter>
     </ClInclude>
     <ClInclude Include="Source\Engine\Component\AI\BTAgentComponent.h">
-      <Filter>Source\Engine\Component\AI</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Engine\Component\AI\BehaviorTreeExecutorComponent.h">
       <Filter>Source\Engine\Component\AI</Filter>
     </ClInclude>
     <ClInclude Include="Source\Engine\Component\AI\BlackboardComponent.h">
