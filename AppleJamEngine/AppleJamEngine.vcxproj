@@ -309,6 +309,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClCompile Include="Source\Engine\Component\Action\ActionVisualEffectComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\AI\BTAgentComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\AI\BehaviorTreeExecutorComponent.cpp" />
+    <ClCompile Include="Source\Engine\Component\AI\BlackboardComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\AI\RoadGraphComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\Camera\CameraComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\Camera\CineCameraComponent.cpp" />
@@ -858,6 +859,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClInclude Include="Source\Engine\Component\Action\ActionVisualEffectComponent.h" />
     <ClInclude Include="Source\Engine\Component\AI\BTAgentComponent.h" />
     <ClInclude Include="Source\Engine\Component\AI\BehaviorTreeExecutorComponent.h" />
+    <ClInclude Include="Source\Engine\Component\AI\BlackboardComponent.h" />
     <ClInclude Include="Source\Engine\Component\AI\RoadGraphComponent.h" />
     <ClInclude Include="Source\Engine\Component\Camera\CameraComponent.h" />
     <ClInclude Include="Source\Engine\Component\Camera\CineCameraComponent.h" />

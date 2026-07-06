@@ -5,6 +5,7 @@
 #include <memory>
 
 class AActor;
+class FBlackboard;
 
 enum class EBTResult
 {
@@ -12,14 +13,15 @@ enum class EBTResult
 };
 
 // 트리 실행 중 노드 사이로 전달되는 공유 컨텍스트
-// NOTE: Owner 등을 std::function 캡쳐 내부에서 잡아두면 댕글링 포인터 생길 수 있어서 
+// NOTE: Owner 등을 std::function 캡쳐 내부에서 잡아두면 댕글링 포인터 생길 수 있어서
 // 매 프레임 필요한 정보를 주입해주는 방식을 채택
 struct FBTContext
 {
-	AActor* Owner       = nullptr;
-	float   DeltaTime   = 0.0f;
-	uint64  FrameNumber = 0;		// 현재 프레임 번호. 시각화가 "이번 tick 에 평가된 노드"를 판별하는 데 사용
-	// NOTE: 블랙보드 등 필요한 필드는 여기에 확장
+	AActor*      Owner       = nullptr;
+	float        DeltaTime   = 0.0f;
+	uint64       FrameNumber = 0;		// 현재 프레임 번호. 시각화가 "이번 tick 에 평가된 노드"를 판별하는 데 사용
+	FBlackboard* Blackboard  = nullptr;	// executor 가 매 tick 주입. 노드는 컴포넌트가 아니라 '데이터'만 안다.
+	// NOTE: 필요한 필드는 여기에 확장
 };
 
 // 노드별 디버그 스냅샷. 런타임 로직엔 영향 없음. 시각화(뷰어)가 read-only 로 읽는다.

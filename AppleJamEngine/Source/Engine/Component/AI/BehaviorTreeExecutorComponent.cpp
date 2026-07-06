@@ -3,6 +3,7 @@
 #include "Core/TickFunction.h"
 #include "GameFramework/AActor.h"
 #include "AI/BT/BehaviorTreeDebug.h"
+#include "Component/AI/BlackboardComponent.h"
 
 #include <cmath>
 
@@ -70,6 +71,14 @@ UBehaviorTreeExecutorComponent::UBehaviorTreeExecutorComponent()
 void UBehaviorTreeExecutorComponent::BeginPlay()
 {
 	UActorComponent::BeginPlay();
+
+	// 블랙보드는 형제 컴포넌트에서 찾아 캐싱한다(생산자=센서 / 소비자=BT 를 서로 모르게 디커플링).
+	// 없으면 nullptr → 노드는 Ctx.Blackboard 널 체크로 대응.
+	if (AActor* OwnerActor = GetOwner())
+	{
+		BlackboardComp = OwnerActor->GetComponentByClass<UBlackboardComponent>();
+	}
+
 	BuildTestTree();
 }
 
@@ -139,10 +148,23 @@ void UBehaviorTreeExecutorComponent::TickComponent(
 
 	Elapsed += DeltaTime;
 
+	FBlackboard* Blackboard = BlackboardComp ? &BlackboardComp->GetBlackboard() : nullptr;
+
+	// [테스트] 센서 단계 스탠드인: 블랙보드가 있으면 phase 파생값을 기록 → Details 패널 Entries 에서 라이브 확인.
+	// (조건은 아직 시간기반이라 블랙보드가 없어도 트리는 정상 동작)
+	if (Blackboard)
+	{
+		const float P = std::fmod(Elapsed, 12.0f);
+		Blackboard->SetFloat(FName("Phase"), P);
+		Blackboard->SetBool(FName("ThreatNear"), P >= 8.0f && P < 11.0f);
+		Blackboard->SetBool(FName("Hungry"), P < 5.0f);
+	}
+
 	FBTContext Context;
 	Context.Owner       = GetOwner();
 	Context.DeltaTime   = DeltaTime;
 	Context.FrameNumber = ++FrameCounter;   // 1 부터 시작(0 은 초기 미평가 상태로 예약)
+	Context.Blackboard  = Blackboard;
 
 	Tree->Behave(Context);
 	PublishSnapshot(Context.FrameNumber);
