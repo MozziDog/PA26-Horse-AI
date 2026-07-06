@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "Component/ActorComponent.h"
 #include "AI/BT/BehaviorTree.h"
@@ -26,7 +26,7 @@ private:
 	void BuildTestTree();         // 하드코딩 테스트 트리 구성
 	void PublishSnapshot(uint64 Frame) const;
 
-	std::unique_ptr<BehaviorTree> Tree;
+	std::unique_ptr<FBehaviorTree> Tree;
 	uint64 FrameCounter = 0;
 	float  Elapsed      = 0.0f;   // 테스트 조건을 시간 기반으로 흔들기 위한 누적 시간
 };

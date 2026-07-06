@@ -30,15 +30,15 @@ struct FBTDebugInfo
 	float     ActiveDuration     = 0.0f;  // 연속 Running 유지 시간(전이 시 0)
 };
 
-class BehaviorNode
+class FBehaviorNode
 {
 public:
-	virtual ~BehaviorNode() = default;
+	virtual ~FBehaviorNode() = default;
 
 	// 노드는 자식을 unique_ptr 로 소유하므로 복사 금지
-	BehaviorNode()                               = default;
-	BehaviorNode(const BehaviorNode&)            = delete;
-	BehaviorNode& operator=(const BehaviorNode&) = delete;
+	FBehaviorNode()                               = default;
+	FBehaviorNode(const FBehaviorNode&)            = delete;
+	FBehaviorNode& operator=(const FBehaviorNode&) = delete;
 
 	EBTResult Execute(FBTContext& Context)
 	{
@@ -71,7 +71,7 @@ public:
 	virtual const char* GetNodeTypeName() const = 0;
 	FName GetDebugLabel() const { return DebugLabel; }
 	void  SetDebugLabel(FName In) { DebugLabel = In; }
-	virtual TArray<const BehaviorNode*> GetChildrenForDebug() const { return {}; }
+	virtual TArray<const FBehaviorNode*> GetChildrenForDebug() const { return {}; }
 
 protected:
 	virtual EBTResult OnBehave(FBTContext& Context) = 0;
@@ -80,23 +80,23 @@ protected:
 	FName        DebugLabel;
 };
 
-class BehaviorTree
+class FBehaviorTree
 {
 public:
-	explicit BehaviorTree(std::unique_ptr<BehaviorNode> InRootNode) : Root(std::move(InRootNode)) { }
+	explicit FBehaviorTree(std::unique_ptr<FBehaviorNode> InRootNode) : Root(std::move(InRootNode)) { }
 	EBTResult Behave(FBTContext& Context) { return Root->Execute(Context); }
 
-	const BehaviorNode* GetRootForDebug() const { return Root.get(); }
+	const FBehaviorNode* GetRootForDebug() const { return Root.get(); }
 private:
-	std::unique_ptr<BehaviorNode> Root;
+	std::unique_ptr<FBehaviorNode> Root;
 };
 
 // ===== Leaf Nodes =====
 
-class BehaviorTask : public BehaviorNode
+class FBehaviorTask : public FBehaviorNode
 {
 public:
-	BehaviorTask(FName InName, std::function<EBTResult(FBTContext&)> InFunc)
+	FBehaviorTask(FName InName, std::function<EBTResult(FBTContext&)> InFunc)
 		: Func(std::move(InFunc)) { DebugLabel = InName; }
 
 	const char* GetNodeTypeName() const override { return "Task"; }
@@ -109,10 +109,10 @@ private:
 	std::function<EBTResult(FBTContext&)> Func;
 };
 
-class Conditional : public BehaviorNode
+class FConditional : public FBehaviorNode
 {
 public:
-	Conditional(FName InName, std::function<bool(FBTContext&)> InFunc)
+	FConditional(FName InName, std::function<bool(FBTContext&)> InFunc)
 		: Func(std::move(InFunc)) { DebugLabel = InName; }
 
 	const char* GetNodeTypeName() const override { return "Condition"; }
@@ -127,36 +127,36 @@ private:
 
 // ===== Composite Nodes =====
 
-class CompositeNode : public BehaviorNode
+class FCompositeNode : public FBehaviorNode
 {
 public:
-	explicit CompositeNode(TArray<std::unique_ptr<BehaviorNode>> InChildren)
+	explicit FCompositeNode(TArray<std::unique_ptr<FBehaviorNode>> InChildren)
 		: Children(std::move(InChildren)) { }
 
-	TArray<const BehaviorNode*> GetChildrenForDebug() const override
+	TArray<const FBehaviorNode*> GetChildrenForDebug() const override
 	{
-		TArray<const BehaviorNode*> Out;
+		TArray<const FBehaviorNode*> Out;
 		Out.reserve(Children.size());
-		for (const std::unique_ptr<BehaviorNode>& Child : Children)
+		for (const std::unique_ptr<FBehaviorNode>& Child : Children)
 			Out.push_back(Child.get());
 		return Out;
 	}
 protected:
-	TArray<std::unique_ptr<BehaviorNode>> Children;
+	TArray<std::unique_ptr<FBehaviorNode>> Children;
 };
 
 // NOTE: Sequence는 진행 중이던 자식을 기억하지 않음 (=> Reactive node)
-class Sequence : public CompositeNode
+class FSequence : public FCompositeNode
 {
 public:
-	explicit Sequence(TArray<std::unique_ptr<BehaviorNode>> InChildren)
-		: CompositeNode(std::move(InChildren)) { DebugLabel = FName("Sequence"); }
+	explicit FSequence(TArray<std::unique_ptr<FBehaviorNode>> InChildren)
+		: FCompositeNode(std::move(InChildren)) { DebugLabel = FName("Sequence"); }
 
 	const char* GetNodeTypeName() const override { return "Sequence"; }
 protected:
 	EBTResult OnBehave(FBTContext& Context) override
 	{
-		for (const std::unique_ptr<BehaviorNode>& Child : Children)
+		for (const std::unique_ptr<FBehaviorNode>& Child : Children)
 		{
 			EBTResult ChildResult = Child->Execute(Context);
 			if (ChildResult != EBTResult::Success)
@@ -167,17 +167,17 @@ protected:
 };
 
 // NOTE: Selector도 진행 중이던 자식을 기억하지 않음 (=> Reactive node)
-class Selector : public CompositeNode
+class FSelector : public FCompositeNode
 {
 public:
-	explicit Selector(TArray<std::unique_ptr<BehaviorNode>> InChildren)
-		: CompositeNode(std::move(InChildren)) { DebugLabel = FName("Selector"); }
+	explicit FSelector(TArray<std::unique_ptr<FBehaviorNode>> InChildren)
+		: FCompositeNode(std::move(InChildren)) { DebugLabel = FName("Selector"); }
 
 	const char* GetNodeTypeName() const override { return "Selector"; }
 protected:
 	EBTResult OnBehave(FBTContext& Context) override
 	{
-		for (const std::unique_ptr<BehaviorNode>& Child : Children)
+		for (const std::unique_ptr<FBehaviorNode>& Child : Children)
 		{
 			EBTResult ChildResult = Child->Execute(Context);
 			if (ChildResult != EBTResult::Fail)
@@ -188,25 +188,25 @@ protected:
 };
 
 // ===== Decorator Nodes =====
-class DecoratorNode : public BehaviorNode
+class FDecoratorNode : public FBehaviorNode
 {
 public:
-	explicit DecoratorNode(std::unique_ptr<BehaviorNode> InChild) : Child(std::move(InChild)) { }
+	explicit FDecoratorNode(std::unique_ptr<FBehaviorNode> InChild) : Child(std::move(InChild)) { }
 
-	TArray<const BehaviorNode*> GetChildrenForDebug() const override
+	TArray<const FBehaviorNode*> GetChildrenForDebug() const override
 	{
 		return { Child.get() };
 	}
 protected:
-	std::unique_ptr<BehaviorNode> Child;
+	std::unique_ptr<FBehaviorNode> Child;
 };
 
 // 자식이 Fail 이면 Success 로 바꾸고, 그 외(Success/Running)는 그대로 전달
-class ForceSuccess : public DecoratorNode
+class FForceSuccess : public FDecoratorNode
 {
 public:
-	explicit ForceSuccess(std::unique_ptr<BehaviorNode> InChild) 
-		: DecoratorNode(std::move(InChild)) { DebugLabel = FName("ForceSuccess"); }
+	explicit FForceSuccess(std::unique_ptr<FBehaviorNode> InChild) 
+		: FDecoratorNode(std::move(InChild)) { DebugLabel = FName("ForceSuccess"); }
 
 	const char* GetNodeTypeName() const override { return "ForceSuccess"; }
 protected:
@@ -220,11 +220,11 @@ protected:
 	}
 };
 
-class Invert : public DecoratorNode
+class FInvert : public FDecoratorNode
 {
 public:
-	explicit Invert(std::unique_ptr<BehaviorNode> InChild) 
-		: DecoratorNode(std::move(InChild)) { DebugLabel = FName("Invert"); }
+	explicit FInvert(std::unique_ptr<FBehaviorNode> InChild) 
+		: FDecoratorNode(std::move(InChild)) { DebugLabel = FName("Invert"); }
 
 	const char* GetNodeTypeName() const override { return "Invert"; }
 protected:

@@ -9,14 +9,14 @@
 namespace
 {
 	// TODO: Tree builder로 옮기기
-	std::unique_ptr<BehaviorTask> MakeTask(const char* Name, std::function<EBTResult(FBTContext&)> Fn)
+	std::unique_ptr<FBehaviorTask> MakeTask(const char* Name, std::function<EBTResult(FBTContext&)> Fn)
 	{
-		return std::make_unique<BehaviorTask>(FName(Name), std::move(Fn));
+		return std::make_unique<FBehaviorTask>(FName(Name), std::move(Fn));
 	}
 
-	std::unique_ptr<Conditional> MakeCond(const char* Name, std::function<bool(FBTContext&)> Fn)
+	std::unique_ptr<FConditional> MakeCond(const char* Name, std::function<bool(FBTContext&)> Fn)
 	{
-		return std::make_unique<Conditional>(FName(Name), std::move(Fn));
+		return std::make_unique<FConditional>(FName(Name), std::move(Fn));
 	}
 
 #if STATS
@@ -31,7 +31,7 @@ namespace
 	}
 
 	// 디버깅 시각화용 트리 순회(DFS), 스냅샷 생성
-	void FlattenNode(const BehaviorNode* Node, int32 Depth, uint64 Frame, TArray<FBTNodeDebugEntry>& Out)
+	void FlattenNode(const FBehaviorNode* Node, int32 Depth, uint64 Frame, TArray<FBTNodeDebugEntry>& Out)
 	{
 		if (!Node)
 		{
@@ -50,7 +50,7 @@ namespace
 		Entry.bOnActivePath       = Node->IsOnActivePath(Frame);
 		Out.push_back(Entry);
 
-		for (const BehaviorNode* Child : Node->GetChildrenForDebug())
+		for (const FBehaviorNode* Child : Node->GetChildrenForDebug())
 		{
 			FlattenNode(Child, Depth + 1, Frame, Out);
 		}
@@ -83,7 +83,7 @@ void UBehaviorTreeExecutorComponent::BuildTestTree()
 	auto Phase = [this]() { return std::fmod(Elapsed, 12.0f); };
 
 	// --- Flee 서브트리 (최우선) ---
-	TArray<std::unique_ptr<BehaviorNode>> FleeChildren;
+	TArray<std::unique_ptr<FBehaviorNode>> FleeChildren;
 	FleeChildren.push_back(MakeCond("ThreatNear", [Phase](FBTContext&)
 		{ const float P = Phase(); return P >= 8.0f && P < 11.0f; }));
 	FleeChildren.push_back(MakeTask("Run", [](FBTContext& Ctx)
@@ -96,31 +96,31 @@ void UBehaviorTreeExecutorComponent::BuildTestTree()
 			}
 			return EBTResult::Running;
 		}));
-	auto FleeSeq = std::make_unique<Sequence>(std::move(FleeChildren));
+	auto FleeSeq = std::make_unique<FSequence>(std::move(FleeChildren));
 	FleeSeq->SetDebugLabel(FName("FleeSeq"));
 
 	// --- Graze 서브트리 ---
 	// ForceSuccess 는 자식 1개(unique_ptr)를 받는다.
-	auto ChewDeco = std::make_unique<ForceSuccess>(
+	auto ChewDeco = std::make_unique<FForceSuccess>(
 		MakeTask("Chew", [](FBTContext&) { return EBTResult::Running; }));
 	ChewDeco->SetDebugLabel(FName("MaybeChew"));
 
-	TArray<std::unique_ptr<BehaviorNode>> GrazeChildren;
+	TArray<std::unique_ptr<FBehaviorNode>> GrazeChildren;
 	GrazeChildren.push_back(MakeCond("Hungry", [Phase](FBTContext&)
 		{ return Phase() < 5.0f; }));
 	GrazeChildren.push_back(std::move(ChewDeco));
-	auto GrazeSeq = std::make_unique<Sequence>(std::move(GrazeChildren));
+	auto GrazeSeq = std::make_unique<FSequence>(std::move(GrazeChildren));
 	GrazeSeq->SetDebugLabel(FName("GrazeSeq"));
 
 	// --- Root Selector ---
-	TArray<std::unique_ptr<BehaviorNode>> RootChildren;
+	TArray<std::unique_ptr<FBehaviorNode>> RootChildren;
 	RootChildren.push_back(std::move(FleeSeq));
 	RootChildren.push_back(std::move(GrazeSeq));
 	RootChildren.push_back(MakeTask("Idle", [](FBTContext&) { return EBTResult::Running; }));
-	auto Root = std::make_unique<Selector>(std::move(RootChildren));
+	auto Root = std::make_unique<FSelector>(std::move(RootChildren));
 	Root->SetDebugLabel(FName("Root"));
 
-	Tree = std::make_unique<BehaviorTree>(std::move(Root));
+	Tree = std::make_unique<FBehaviorTree>(std::move(Root));
 }
 
 void UBehaviorTreeExecutorComponent::TickComponent(
