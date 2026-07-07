@@ -1,6 +1,7 @@
 ﻿#include "RaycastSensorComponent.h"
 #include "GameFramework/World.h"
 #include "Debug/DrawDebugHelpers.h"
+#include "Render/Scene/FScene.h"
 
 void URaycastSensorComponent::BeginPlay()
 {
@@ -32,4 +33,12 @@ void URaycastSensorComponent::TickComponent(float DeltaTime, ELevelTick TickType
 	{
 		DrawDebugSphere(World, LineEndPosition, 0.3f, 16, FColor::Red());
 	}
+}
+
+void URaycastSensorComponent::ContributeSelectedVisuals(FScene& Scene) const
+{
+	// 에디터 타임 중 Ray 프리뷰
+	const FVector RayStart = GetWorldLocation();
+	const FVector RotatedRayDir = GetWorldRotation().ToQuaternion().RotateVector(RayDir);
+	Scene.AddDebugLine(RayStart, RayStart + RotatedRayDir, FColor::Green());
 }
