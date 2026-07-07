@@ -1022,7 +1022,19 @@
     <ClCompile Include="Source\Engine\AI\Blackboard.cpp">
       <Filter>Source\Engine\AI</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Engine\AI\BT\BTBehaviorRegistry.cpp">
+      <Filter>Source\Engine\AI\BT</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Engine\AI\BT\BTLuaBuilder.cpp">
+      <Filter>Source\Engine\AI\BT</Filter>
+    </ClCompile>
     <ClCompile Include="Source\Engine\AI\BT\BehaviorTreeDebug.cpp">
+      <Filter>Source\Engine\AI\BT</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Engine\AI\BT\BuiltinTask.cpp">
+      <Filter>Source\Engine\AI\BT</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Engine\AI\BT\HorseTask.cpp">
       <Filter>Source\Engine\AI\BT</Filter>
     </ClCompile>
     <ClCompile Include="Source\Engine\AI\RoadNetwork\RoadGraph.cpp">
@@ -2503,6 +2515,12 @@
     </ClInclude>
     <ClInclude Include="Source\Engine\AI\Blackboard.h">
       <Filter>Source\Engine\AI</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Engine\AI\BT\BTBehaviorRegistry.h">
+      <Filter>Source\Engine\AI\BT</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Engine\AI\BT\BTLuaBuilder.h">
+      <Filter>Source\Engine\AI\BT</Filter>
     </ClInclude>
     <ClInclude Include="Source\Engine\AI\BT\BehaviorTree.h">
       <Filter>Source\Engine\AI\BT</Filter>

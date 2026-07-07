@@ -89,5 +89,8 @@ protected:
 	bool bCameraLookInputThisFrame = false;
 	float LastThrottleInput = 0.0f;
 	float LastSteeringInput = 0.0f;
+
+	// TODO: [테스트] 센서 스탠드인용 누적 시간 — 실제 센서 컴포넌트 도입 시 제거.
+	float BTTestElapsed = 0.0f;
 };
 

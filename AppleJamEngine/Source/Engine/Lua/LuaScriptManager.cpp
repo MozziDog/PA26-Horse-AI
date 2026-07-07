@@ -19,6 +19,7 @@
 #include "CameraShake/CameraShakeAsset.h"
 #include "CameraShake/CameraShakeManager.h"
 #include "Component/ActorComponent.h"
+#include "Component/AI/BTAgentComponent.h"
 #include "Component/PrimitiveComponent.h"
 #include "Component/SceneComponent.h"
 #include "Component/ShapeComponent.h"
@@ -117,6 +118,7 @@ TMap<FString, sol::protected_function>      FLuaScriptManager::UIButtonCallbacks
 std::mutex                                  FLuaScriptManager::ComponentMutex;
 TArray<TWeakObjectPtr<ULuaScriptComponent>> FLuaScriptManager::RegisteredComponents;
 TArray<TWeakObjectPtr<ULuaAnimInstance>>    FLuaScriptManager::RegisteredAnimInstances;
+TArray<TWeakObjectPtr<UBTAgentComponent>>   FLuaScriptManager::RegisteredBTAgents;
 FSubscriptionID                             FLuaScriptManager::WatchSub = 0;
 
 namespace
@@ -230,10 +232,12 @@ void FLuaScriptManager::Shutdown()
 
     TArray<TWeakObjectPtr<ULuaScriptComponent>> ComponentsToRelease;
     TArray<TWeakObjectPtr<ULuaAnimInstance>>    AnimInstancesToRelease;
+    TArray<TWeakObjectPtr<UBTAgentComponent>>   BTAgentsToRelease;
     {
         std::lock_guard<std::mutex> Lock(ComponentMutex);
         ComponentsToRelease    = RegisteredComponents;
         AnimInstancesToRelease = RegisteredAnimInstances;
+        BTAgentsToRelease      = RegisteredBTAgents;
     }
 
     // lua_State 가 살아있는 동안 런타임 객체들이 들고 있는 sol reference 를 먼저 해제한다.
@@ -259,6 +263,16 @@ void FLuaScriptManager::Shutdown()
             }
         }
     }
+    for (const TWeakObjectPtr<UBTAgentComponent>& AgentPtr : BTAgentsToRelease)
+    {
+        if (UBTAgentComponent* Agent = AgentPtr.GetEvenIfPendingKill())
+        {
+            if (IsAliveObject(Agent))
+            {
+                Agent->ReleaseLuaForShutdown();
+            }
+        }
+    }
 
     // ULuaBlueprintComponent 는 ULuaScriptComponent/ULuaAnimInstance 와 달리 별도 레지스트리에
     // 등록되지 않으므로, 전역 객체 배열을 훑어 lua_State 가 살아있는 동안 sol 핸들을 해제한다.
@@ -277,6 +291,7 @@ void FLuaScriptManager::Shutdown()
         std::lock_guard<std::mutex> Lock(ComponentMutex);
         RegisteredComponents.clear();
         RegisteredAnimInstances.clear();
+        RegisteredBTAgents.clear();
     }
 
     // 등록된 Lua 콜백 (sol::protected_function 들) 을 lua_State 가 살아있는 동안 먼저 release.
@@ -548,6 +563,37 @@ void FLuaScriptManager::UnregisterAnimInstance(ULuaAnimInstance* Instance)
     );
 }
 
+void FLuaScriptManager::RegisterBTAgent(UBTAgentComponent* Agent)
+{
+    if (!IsAliveObject(Agent)) return;
+    std::lock_guard<std::mutex> Lock(ComponentMutex);
+    for (const TWeakObjectPtr<UBTAgentComponent>& Existing : RegisteredBTAgents)
+    {
+        if (Existing.Get() == Agent)
+        {
+            return;
+        }
+    }
+    RegisteredBTAgents.push_back(Agent);
+}
+
+void FLuaScriptManager::UnregisterBTAgent(UBTAgentComponent* Agent)
+{
+    if (!Agent) return;
+    std::lock_guard<std::mutex> Lock(ComponentMutex);
+    RegisteredBTAgents.erase(
+        std::remove_if(
+            RegisteredBTAgents.begin(),
+            RegisteredBTAgents.end(),
+            [Agent](const TWeakObjectPtr<UBTAgentComponent>& Existing)
+            {
+                return Existing.Get() == Agent || !Existing.IsValid();
+            }
+        ),
+        RegisteredBTAgents.end()
+    );
+}
+
 void FLuaScriptManager::OnScriptsChanged(const TSet<FString>& ChangedFiles)
 {
     TSet<ULuaScriptComponent*> Targets;
@@ -632,6 +678,45 @@ void FLuaScriptManager::OnScriptsChanged(const TSet<FString>& ChangedFiles)
         UE_LOG("[LuaHotReload] Reloading Anim: %s", Inst->ScriptFile.c_str());
         FNotificationManager::Get().AddNotification("Anim Reloaded: " + Inst->ScriptFile, ENotificationType::Success, 3.0f);
         Inst->ReloadScript();
+    }
+
+    // BTAgent 측도 같은 패턴 — 매칭되는 BehaviorTreeScript 의 트리를 재빌드(인라인 Lua task 갱신).
+    TSet<UBTAgentComponent*> BTTargets;
+    {
+        std::lock_guard<std::mutex> Lock(ComponentMutex);
+        RegisteredBTAgents.erase(
+            std::remove_if(
+                RegisteredBTAgents.begin(),
+                RegisteredBTAgents.end(),
+                [](const TWeakObjectPtr<UBTAgentComponent>& Agent)
+                {
+                    return !Agent.IsValid();
+                }
+            ),
+            RegisteredBTAgents.end()
+        );
+        for (const TWeakObjectPtr<UBTAgentComponent>& AgentPtr : RegisteredBTAgents)
+        {
+            UBTAgentComponent* Agent = AgentPtr.Get();
+            if (!IsValid(Agent)) continue;
+            const FString& BTScript = Agent->GetBehaviorTreeScript();
+            if (BTScript.empty()) continue;
+            for (const FString& File : ChangedFiles)
+            {
+                if (File == BTScript)
+                {
+                    BTTargets.insert(Agent);
+                    break;
+                }
+            }
+        }
+    }
+    for (UBTAgentComponent* Agent : BTTargets)
+    {
+        if (!Agent) continue;
+        UE_LOG("[LuaHotReload] Rebuilding BT: %s", Agent->GetBehaviorTreeScript().c_str());
+        FNotificationManager::Get().AddNotification("BT Reloaded: " + Agent->GetBehaviorTreeScript(), ENotificationType::Success, 3.0f);
+        Agent->RebuildBehaviorTree();
     }
 }
 

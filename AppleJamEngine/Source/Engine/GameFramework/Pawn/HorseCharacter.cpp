@@ -8,6 +8,7 @@
 #include "Component/AI/BTAgentComponent.h"
 #include "Component/AI/BlackboardComponent.h"
 #include "Component/Primitive/SkeletalMeshComponent.h"
+#include "AI/Blackboard.h"
 #include "Mesh/MeshManager.h"
 #include "Runtime/Engine.h"
 
@@ -84,6 +85,10 @@ void AHorseCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 	BlackboardComponent = AddComponent<UBlackboardComponent>();
 
 	BTAgentComponent = AddComponent<UBTAgentComponent>();
+	if (BTAgentComponent)
+	{
+		BTAgentComponent->SetBehaviorTreeScript("BT/HorseTest.lua");
+	}
 
 	SpringArmComponent = AddComponent<USpringArmComponent>();
 	SpringArmComponent->AttachToComponent(MeshComponent);
@@ -204,6 +209,18 @@ void AHorseCharacter::Tick(float DeltaTime)
 	Super::Tick(DeltaTime);
 	UpdateCameraReturn(DeltaTime);
 	UpdateCameraControlRotation();
+
+	// TODO: [테스트] 센서 스탠드인 — 시간 기반으로 블랙보드에 판단 입력을 써 준다. 실제 센서 컴포넌트로 대체 예정.
+	//        actor(TG_PrePhysics) 가 BT 컴포넌트(TG_PostPhysics) 보다 먼저 틱하므로 같은 프레임 내 읽기 전에 써진다.
+	if (BlackboardComponent)
+	{
+		BTTestElapsed += DeltaTime;
+		const float P = std::fmod(BTTestElapsed, 12.0f);
+		FBlackboard& Blackboard = BlackboardComponent->GetBlackboard();
+		Blackboard.SetFloat(FName("Phase"), P);
+		Blackboard.SetBool(FName("ThreatNear"), P >= 8.0f && P < 11.0f);
+		Blackboard.SetBool(FName("Hungry"), P < 5.0f);
+	}
 }
 
 void AHorseCharacter::PostDuplicate()

@@ -9,6 +9,7 @@
 
 class ULuaScriptComponent;
 class ULuaAnimInstance;
+class UBTAgentComponent;
 
 class FLuaScriptManager
 {
@@ -56,6 +57,10 @@ public:
 	static void RegisterAnimInstance(ULuaAnimInstance* Instance);
 	static void UnregisterAnimInstance(ULuaAnimInstance* Instance);
 
+	// Lua 로 트리를 구성하는 BTAgent — .lua 변경 시 RebuildBehaviorTree, 셧다운 시 ReleaseLuaForShutdown 받음.
+	static void RegisterBTAgent(UBTAgentComponent* Agent);
+	static void UnregisterBTAgent(UBTAgentComponent* Agent);
+
 private:
 	static void RegisterLuaHelpers(sol::state& Lua);
 	static void RegisterCoreBindings(sol::state& Lua);
@@ -85,5 +90,6 @@ private:
 	static std::mutex ComponentMutex;
 	static TArray<TWeakObjectPtr<ULuaScriptComponent>> RegisteredComponents;
 	static TArray<TWeakObjectPtr<ULuaAnimInstance>>    RegisteredAnimInstances;
+	static TArray<TWeakObjectPtr<UBTAgentComponent>>   RegisteredBTAgents;
 	static FSubscriptionID WatchSub;
 };

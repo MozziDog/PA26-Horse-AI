@@ -248,7 +248,11 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
       <PrecompiledHeader>Create</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="Source\Engine\AI\Blackboard.cpp" />
+    <ClCompile Include="Source\Engine\AI\BT\BTBehaviorRegistry.cpp" />
+    <ClCompile Include="Source\Engine\AI\BT\BTLuaBuilder.cpp" />
     <ClCompile Include="Source\Engine\AI\BT\BehaviorTreeDebug.cpp" />
+    <ClCompile Include="Source\Engine\AI\BT\BuiltinTask.cpp" />
+    <ClCompile Include="Source\Engine\AI\BT\HorseTask.cpp" />
     <ClCompile Include="Source\Engine\AI\RoadNetwork\RoadGraph.cpp" />
     <ClCompile Include="Source\Engine\Animation\AnimInstance.cpp" />
     <ClCompile Include="Source\Engine\Animation\AnimationManager.cpp" />
@@ -783,6 +787,8 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClInclude Include="Source\Editor\Viewport\Level\LevelEditorViewportClient.h" />
     <ClInclude Include="Source\Engine\pch.h" />
     <ClInclude Include="Source\Engine\AI\Blackboard.h" />
+    <ClInclude Include="Source\Engine\AI\BT\BTBehaviorRegistry.h" />
+    <ClInclude Include="Source\Engine\AI\BT\BTLuaBuilder.h" />
     <ClInclude Include="Source\Engine\AI\BT\BehaviorTree.h" />
     <ClInclude Include="Source\Engine\AI\BT\BehaviorTreeDebug.h" />
     <ClInclude Include="Source\Engine\AI\RoadNetwork\RoadGraph.h" />
