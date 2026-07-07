@@ -8,6 +8,7 @@
 #include "Render/Types/ShadowSettings.h"
 #include "Object/Object.h"
 #include <algorithm>
+#include <cmath>
 
 void FScene::EnqueueDirtyProxy(TArray<FPrimitiveSceneProxy*>& DirtyList, FPrimitiveSceneProxy* Proxy)
 {
@@ -393,6 +394,35 @@ void FScene::AddDebugAABB(const FVector& Min, const FVector& Max, const FColor& 
 void FScene::AddDebugLine(const FVector& Start, const FVector& End, const FColor& Color)
 {
 	DebugLines.push_back({ Start, End, Color });
+}
+
+void FScene::AddDebugSphere(const FVector& Center, float Radius, int32 Segments, const FColor& Color)
+{
+	if (Segments < 4) Segments = 4;
+
+	const float AngleStep = 2.0f * 3.14159265f / static_cast<float>(Segments);
+
+	for (int32 i = 0; i < Segments; ++i)
+	{
+		const float A0 = AngleStep * i;
+		const float A1 = AngleStep * (i + 1);
+
+		// XY 평면 (Z축 기준 원)
+		AddDebugLine(
+			Center + FVector(cosf(A0) * Radius, sinf(A0) * Radius, 0.0f),
+			Center + FVector(cosf(A1) * Radius, sinf(A1) * Radius, 0.0f),
+			Color);
+		// XZ 평면 (Y축 기준 원)
+		AddDebugLine(
+			Center + FVector(cosf(A0) * Radius, 0.0f, sinf(A0) * Radius),
+			Center + FVector(cosf(A1) * Radius, 0.0f, sinf(A1) * Radius),
+			Color);
+		// YZ 평면 (X축 기준 원)
+		AddDebugLine(
+			Center + FVector(0.0f, cosf(A0) * Radius, sinf(A0) * Radius),
+			Center + FVector(0.0f, cosf(A1) * Radius, sinf(A1) * Radius),
+			Color);
+	}
 }
 
 void FScene::SetGrid(float Spacing, int32 HalfLineCount)

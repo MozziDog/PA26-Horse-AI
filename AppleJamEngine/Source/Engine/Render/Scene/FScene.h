@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "Core/Types/CoreTypes.h"
 #include "Render/Proxy/PrimitiveSceneProxy.h"
@@ -63,6 +63,7 @@ public:
 	// --- Debug lines ---
 	struct FDebugLine { FVector Start; FVector End; FColor Color; };
 	void AddDebugLine(const FVector& Start, const FVector& End, const FColor& Color);
+	void AddDebugSphere(const FVector& Center, float Radius, int32 Segments, const FColor& Color);
 	const TArray<FDebugLine>& GetDebugLines() const { return DebugLines; }
 
 	// --- Grid ---
