@@ -1,4 +1,4 @@
-#include "RoadEditMode.h"
+﻿#include "RoadEditMode.h"
 
 #include "Component/AI/RoadGraphComponent.h"
 #include "Component/Debug/GizmoComponent.h"
@@ -15,7 +15,7 @@ namespace
 {
 	constexpr float NodePickRadius = 0.6f;
 	constexpr float ControlPointPickRadius = 0.4f;
-	constexpr float SegmentPickRadius = 0.4f;
+	constexpr float EdgePickRadius = 0.4f;
 	constexpr float NodeAddForwardDistance = 10.0f;
 
 	FVector NormalizedOrZero(const FVector& V)
@@ -59,12 +59,12 @@ namespace
 		return MaxID + 1;
 	}
 
-	int32 NextSegmentID(const FRoadGraph& Graph)
+	int32 NextEdgeID(const FRoadGraph& Graph)
 	{
 		int32 MaxID = -1;
-		for (const FRoadSegment& Segment : Graph.Segments)
+		for (const FRoadEdge& Edge : Graph.Edges)
 		{
-			if (Segment.ID > MaxID) MaxID = Segment.ID;
+			if (Edge.ID > MaxID) MaxID = Edge.ID;
 		}
 		return MaxID + 1;
 	}
@@ -91,7 +91,7 @@ namespace
 
 	// Ray(앞쪽 반직선)와 선분 [A,B] 사이 최근접 거리가 Threshold 이내면 true.
 	// 클램프는 단일 패스 근사(프로토타입 픽에 충분). OutT = 광선 파라미터.
-	bool RayHitsSegment(const FRay& Ray, const FVector& A, const FVector& B, float Threshold, float& OutT)
+	bool RayHitsEdge(const FRay& Ray, const FVector& A, const FVector& B, float Threshold, float& OutT)
 	{
 		const FVector U = Ray.Direction;
 		const FVector V = B - A;
@@ -121,8 +121,8 @@ namespace
 		else if (SegS > 1.0f) SegS = 1.0f;
 
 		const FVector PointOnRay = Ray.Origin + U * RayT;
-		const FVector PointOnSeg = A + V * SegS;
-		if (FVector::DistSquared(PointOnRay, PointOnSeg) > Threshold * Threshold)
+		const FVector PointOnEdge = A + V * SegS;
+		if (FVector::DistSquared(PointOnRay, PointOnEdge) > Threshold * Threshold)
 		{
 			return false;
 		}
@@ -150,7 +150,7 @@ void FRoadEditMode::Exit()
 	bPendingNodeDeleteConfirm = false;
 	bNeedOpenDeletePopup = false;
 	PendingDeleteNodeIndex = -1;
-	PendingDeleteSegmentCount = 0;
+	PendingDeleteEdgeCount = 0;
 	RoadComponent.Reset();
 	BoundWorld.Reset();
 	Gizmo = nullptr;
@@ -180,11 +180,11 @@ void FRoadEditMode::Tick()
 	}
 }
 
-bool FRoadEditMode::PickElementAtRay(const FRay& Ray, ERoadEditSelection& OutKind, int32& OutNodeIndex, int32& OutSegmentIndex, int32& OutControlPointIndex) const
+bool FRoadEditMode::PickElementAtRay(const FRay& Ray, ERoadEditSelection& OutKind, int32& OutNodeIndex, int32& OutEdgeIndex, int32& OutControlPointIndex) const
 {
 	OutKind = ERoadEditSelection::None;
 	OutNodeIndex = -1;
-	OutSegmentIndex = -1;
+	OutEdgeIndex = -1;
 	OutControlPointIndex = -1;
 
 	URoadGraphComponent* Comp = RoadComponent.Get();
@@ -205,41 +205,41 @@ bool FRoadEditMode::PickElementAtRay(const FRay& Ray, ERoadEditSelection& OutKin
 	}
 
 	// 2) 제어점.
-	int32 BestSegment = -1;
+	int32 BestEdge = -1;
 	int32 BestControlPoint = -1;
 	float BestControlPointT = 0.0f;
-	for (int32 SegIndex = 0; SegIndex < static_cast<int32>(Graph.Segments.size()); ++SegIndex)
+	for (int32 EdgeIndex = 0; EdgeIndex < static_cast<int32>(Graph.Edges.size()); ++EdgeIndex)
 	{
-		const TArray<FVector>& ControlPoints = Graph.Segments[SegIndex].ControlPoints;
+		const TArray<FVector>& ControlPoints = Graph.Edges[EdgeIndex].ControlPoints;
 		for (int32 CpIndex = 0; CpIndex < static_cast<int32>(ControlPoints.size()); ++CpIndex)
 		{
 			float T = 0.0f;
 			if (RayHitsSphere(Ray, ControlPoints[CpIndex], ControlPointPickRadius, T))
 			{
-				if (BestSegment == -1 || T < BestControlPointT)
+				if (BestEdge == -1 || T < BestControlPointT)
 				{
-					BestSegment = SegIndex;
+					BestEdge = EdgeIndex;
 					BestControlPoint = CpIndex;
 					BestControlPointT = T;
 				}
 			}
 		}
 	}
-	if (BestSegment != -1)
+	if (BestEdge != -1)
 	{
 		OutKind = ERoadEditSelection::ControlPoint;
-		OutSegmentIndex = BestSegment;
+		OutEdgeIndex = BestEdge;
 		OutControlPointIndex = BestControlPoint;
 		return true;
 	}
 
-	// 3) 세그먼트.
-	int32 BestSegmentLine = -1;
-	float BestSegmentT = 0.0f;
+	// 3) 엣지
+	int32 BestEdgeLine = -1;
+	float BestEdgeT = 0.0f;
 	TArray<FVector> PathPoints;
-	for (int32 SegIndex = 0; SegIndex < static_cast<int32>(Graph.Segments.size()); ++SegIndex)
+	for (int32 EdgeIndex = 0; EdgeIndex < static_cast<int32>(Graph.Edges.size()); ++EdgeIndex)
 	{
-		if (!Graph.GetSegmentPathPoints(Graph.Segments[SegIndex], PathPoints) || PathPoints.size() < 2)
+		if (!Graph.GetEdgePathPoints(Graph.Edges[EdgeIndex], PathPoints) || PathPoints.size() < 2)
 		{
 			continue;
 		}
@@ -247,20 +247,20 @@ bool FRoadEditMode::PickElementAtRay(const FRay& Ray, ERoadEditSelection& OutKin
 		for (int32 i = 0; i + 1 < static_cast<int32>(PathPoints.size()); ++i)
 		{
 			float T = 0.0f;
-			if (RayHitsSegment(Ray, PathPoints[i], PathPoints[i + 1], SegmentPickRadius, T))
+			if (RayHitsEdge(Ray, PathPoints[i], PathPoints[i + 1], EdgePickRadius, T))
 			{
-				if (BestSegmentLine == -1 || T < BestSegmentT)
+				if (BestEdgeLine == -1 || T < BestEdgeT)
 				{
-					BestSegmentLine = SegIndex;
-					BestSegmentT = T;
+					BestEdgeLine = EdgeIndex;
+					BestEdgeT = T;
 				}
 			}
 		}
 	}
-	if (BestSegmentLine != -1)
+	if (BestEdgeLine != -1)
 	{
-		OutKind = ERoadEditSelection::Segment;
-		OutSegmentIndex = BestSegmentLine;
+		OutKind = ERoadEditSelection::Edge;
+		OutEdgeIndex = BestEdgeLine;
 		return true;
 	}
 
@@ -281,7 +281,7 @@ void FRoadEditMode::PickAtRay(const FRay& Ray)
 		const int32 HitNode = PickNodeAtRay(Ray);
 		if (HitNode != -1 && HitNode != ConnectFromNodeIndex)
 		{
-			CreateSegment(ConnectFromNodeIndex, HitNode);
+			CreateEdge(ConnectFromNodeIndex, HitNode);
 			bConnecting = false;
 			ConnectFromNodeIndex = -1;
 			return;
@@ -298,9 +298,9 @@ void FRoadEditMode::PickAtRay(const FRay& Ray)
 
 	ERoadEditSelection Kind = ERoadEditSelection::None;
 	int32 NodeIndex = -1;
-	int32 SegmentIndex = -1;
+	int32 EdgeIndex = -1;
 	int32 ControlPointIndex = -1;
-	if (!PickElementAtRay(Ray, Kind, NodeIndex, SegmentIndex, ControlPointIndex))
+	if (!PickElementAtRay(Ray, Kind, NodeIndex, EdgeIndex, ControlPointIndex))
 	{
 		ClearSelection();
 		return;
@@ -312,10 +312,10 @@ void FRoadEditMode::PickAtRay(const FRay& Ray)
 		SelectNode(NodeIndex);
 		break;
 	case ERoadEditSelection::ControlPoint:
-		SelectControlPoint(SegmentIndex, ControlPointIndex);
+		SelectControlPoint(EdgeIndex, ControlPointIndex);
 		break;
-	case ERoadEditSelection::Segment:
-		SelectSegment(SegmentIndex);
+	case ERoadEditSelection::Edge:
+		SelectEdge(EdgeIndex);
 		break;
 	default:
 		ClearSelection();
@@ -325,14 +325,14 @@ void FRoadEditMode::PickAtRay(const FRay& Ray)
 
 void FRoadEditMode::UpdateHover(const FRay& Ray)
 {
-	PickElementAtRay(Ray, HoverKind, HoverNodeIndex, HoverSegmentIndex, HoverControlPointIndex);
+	PickElementAtRay(Ray, HoverKind, HoverNodeIndex, HoverEdgeIndex, HoverControlPointIndex);
 }
 
 void FRoadEditMode::ClearSelection()
 {
 	Selection = ERoadEditSelection::None;
 	SelectedNodeIndex = -1;
-	SelectedSegmentIndex = -1;
+	SelectedEdgeIndex = -1;
 	SelectedControlPointIndex = -1;
 	bConnecting = false;
 	ConnectFromNodeIndex = -1;
@@ -371,29 +371,29 @@ void FRoadEditMode::SelectNode(int32 NodeIndex)
 {
 	Selection = ERoadEditSelection::Node;
 	SelectedNodeIndex = NodeIndex;
-	SelectedSegmentIndex = -1;
+	SelectedEdgeIndex = -1;
 	SelectedControlPointIndex = -1;
 
 	GizmoTarget.SetNode(RoadComponent.Get(), NodeIndex);
 	ApplyGizmoTarget();
 }
 
-void FRoadEditMode::SelectControlPoint(int32 SegmentIndex, int32 ControlPointIndex)
+void FRoadEditMode::SelectControlPoint(int32 EdgeIndex, int32 ControlPointIndex)
 {
 	Selection = ERoadEditSelection::ControlPoint;
 	SelectedNodeIndex = -1;
-	SelectedSegmentIndex = SegmentIndex;
+	SelectedEdgeIndex = EdgeIndex;
 	SelectedControlPointIndex = ControlPointIndex;
 
-	GizmoTarget.SetControlPoint(RoadComponent.Get(), SegmentIndex, ControlPointIndex);
+	GizmoTarget.SetControlPoint(RoadComponent.Get(), EdgeIndex, ControlPointIndex);
 	ApplyGizmoTarget();
 }
 
-void FRoadEditMode::SelectSegment(int32 SegmentIndex)
+void FRoadEditMode::SelectEdge(int32 EdgeIndex)
 {
-	Selection = ERoadEditSelection::Segment;
+	Selection = ERoadEditSelection::Edge;
 	SelectedNodeIndex = -1;
-	SelectedSegmentIndex = SegmentIndex;
+	SelectedEdgeIndex = EdgeIndex;
 	SelectedControlPointIndex = -1;
 
 	// 세그먼트는 gizmo 없음.
@@ -468,7 +468,7 @@ bool FRoadEditMode::RaycastGround(const FRay& Ray, FVector& OutPos) const
 	return true;
 }
 
-bool FRoadEditMode::CursorToWorldForSegment(const FRay& Ray, const FRoadSegment& Segment, FVector& OutPos) const
+bool FRoadEditMode::CursorToWorldForEdge(const FRay& Ray, const FRoadEdge& Edge, FVector& OutPos) const
 {
 	if (RaycastGround(Ray, OutPos))
 	{
@@ -479,8 +479,8 @@ bool FRoadEditMode::CursorToWorldForSegment(const FRay& Ray, const FRoadSegment&
 	if (URoadGraphComponent* Comp = RoadComponent.Get())
 	{
 		const FRoadGraph& Graph = Comp->GetRoadGraph();
-		const FRoadNode* A = Graph.FindNode(Segment.StartNodeID);
-		const FRoadNode* B = Graph.FindNode(Segment.EndNodeID);
+		const FRoadNode* A = Graph.FindNode(Edge.StartNodeID);
+		const FRoadNode* B = Graph.FindNode(Edge.EndNodeID);
 		if (A && B)
 		{
 			const FVector D = B->Position - A->Position;
@@ -505,7 +505,7 @@ bool FRoadEditMode::CursorToWorldForSegment(const FRay& Ray, const FRoadSegment&
 	return true;
 }
 
-void FRoadEditMode::CreateSegment(int32 FromNodeIndex, int32 ToNodeIndex)
+void FRoadEditMode::CreateEdge(int32 FromNodeIndex, int32 ToNodeIndex)
 {
 	URoadGraphComponent* Comp = RoadComponent.Get();
 	if (!Comp)
@@ -519,15 +519,15 @@ void FRoadEditMode::CreateSegment(int32 FromNodeIndex, int32 ToNodeIndex)
 	if (ToNodeIndex < 0 || ToNodeIndex >= NodeCount) return;
 	if (FromNodeIndex == ToNodeIndex) return; // self-loop 금지
 
-	FRoadSegment Segment;
-	Segment.ID = NextSegmentID(Graph);
-	Segment.StartNodeID = Graph.Nodes[FromNodeIndex].ID;
-	Segment.EndNodeID = Graph.Nodes[ToNodeIndex].ID;
-	Segment.Width = 1.0f;
-	Graph.Segments.push_back(Segment);
+	FRoadEdge Edge;
+	Edge.ID = NextEdgeID(Graph);
+	Edge.StartNodeID = Graph.Nodes[FromNodeIndex].ID;
+	Edge.EndNodeID = Graph.Nodes[ToNodeIndex].ID;
+	Edge.Width = 1.0f;
+	Graph.Edges.push_back(Edge);
 	Comp->PostEditProperty("RoadGraph");
 
-	SelectSegment(static_cast<int32>(Graph.Segments.size()) - 1);
+	SelectEdge(static_cast<int32>(Graph.Edges.size()) - 1);
 }
 
 void FRoadEditMode::AddNodeAtCursor(const FRay& Ray)
@@ -575,7 +575,7 @@ void FRoadEditMode::ToggleConnect()
 
 void FRoadEditMode::AddControlPointAtCursor(const FRay& Ray)
 {
-	if (Selection != ERoadEditSelection::Segment)
+	if (Selection != ERoadEditSelection::Edge)
 	{
 		return; // V는 세그먼트 선택 상태에서만.
 	}
@@ -587,40 +587,40 @@ void FRoadEditMode::AddControlPointAtCursor(const FRay& Ray)
 	}
 
 	FRoadGraph& Graph = Comp->GetRoadGraphMutable();
-	if (SelectedSegmentIndex < 0 || SelectedSegmentIndex >= static_cast<int32>(Graph.Segments.size()))
+	if (SelectedEdgeIndex < 0 || SelectedEdgeIndex >= static_cast<int32>(Graph.Edges.size()))
 	{
 		return;
 	}
 
-	FRoadSegment& Segment = Graph.Segments[SelectedSegmentIndex];
+	FRoadEdge& Edge = Graph.Edges[SelectedEdgeIndex];
 
 	FVector CursorPos;
-	if (!CursorToWorldForSegment(Ray, Segment, CursorPos))
+	if (!CursorToWorldForEdge(Ray, Edge, CursorPos))
 	{
 		return;
 	}
 
 	// SpanIndex가 그대로 ControlPoints 삽입 위치(중간 insert). 삽입점은 커서 위치.
-	const FRoadSegmentQueryResult Query = Graph.FindClosestPointOnSegment(Segment, CursorPos);
-	int32 InsertIndex = Query.bValid ? Query.SpanIndex : static_cast<int32>(Segment.ControlPoints.size());
+	const FRoadEdgeQueryResult Query = Graph.FindClosestPointOnEdge(Edge, CursorPos);
+	int32 InsertIndex = Query.bValid ? Query.SpanIndex : static_cast<int32>(Edge.ControlPoints.size());
 	InsertIndex = InsertIndex < 0 ? 0 : InsertIndex;
-	if (InsertIndex > static_cast<int32>(Segment.ControlPoints.size()))
+	if (InsertIndex > static_cast<int32>(Edge.ControlPoints.size()))
 	{
-		InsertIndex = static_cast<int32>(Segment.ControlPoints.size());
+		InsertIndex = static_cast<int32>(Edge.ControlPoints.size());
 	}
 
-	Segment.ControlPoints.insert(Segment.ControlPoints.begin() + InsertIndex, CursorPos);
+	Edge.ControlPoints.insert(Edge.ControlPoints.begin() + InsertIndex, CursorPos);
 	Comp->PostEditProperty("RoadGraph");
 
-	SelectControlPoint(SelectedSegmentIndex, InsertIndex);
+	SelectControlPoint(SelectedEdgeIndex, InsertIndex);
 }
 
-int32 FRoadEditMode::CountReferencingSegments(const FRoadGraph& Graph, int32 NodeID)
+int32 FRoadEditMode::CountReferencingEdges(const FRoadGraph& Graph, int32 NodeID)
 {
 	int32 Count = 0;
-	for (const FRoadSegment& Segment : Graph.Segments)
+	for (const FRoadEdge& Edge : Graph.Edges)
 	{
-		if (Segment.StartNodeID == NodeID || Segment.EndNodeID == NodeID)
+		if (Edge.StartNodeID == NodeID || Edge.EndNodeID == NodeID)
 		{
 			++Count;
 		}
@@ -645,11 +645,11 @@ void FRoadEditMode::PerformNodeDelete(int32 NodeIndex)
 	const int32 NodeID = Graph.Nodes[NodeIndex].ID;
 
 	// 이 노드를 참조하는 세그먼트를 먼저 제거(뒤에서부터 지워 인덱스 안정).
-	for (int32 i = static_cast<int32>(Graph.Segments.size()) - 1; i >= 0; --i)
+	for (int32 i = static_cast<int32>(Graph.Edges.size()) - 1; i >= 0; --i)
 	{
-		if (Graph.Segments[i].StartNodeID == NodeID || Graph.Segments[i].EndNodeID == NodeID)
+		if (Graph.Edges[i].StartNodeID == NodeID || Graph.Edges[i].EndNodeID == NodeID)
 		{
-			Graph.Segments.erase(Graph.Segments.begin() + i);
+			Graph.Edges.erase(Graph.Edges.begin() + i);
 		}
 	}
 
@@ -678,12 +678,12 @@ void FRoadEditMode::RequestDeleteSelected()
 		}
 
 		const int32 NodeID = Graph.Nodes[SelectedNodeIndex].ID;
-		const int32 RefCount = CountReferencingSegments(Graph, NodeID);
+		const int32 RefCount = CountReferencingEdges(Graph, NodeID);
 		if (RefCount > 0)
 		{
 			// 연결 세그먼트가 있으면 확인 팝업(RenderUI에서 처리).
 			PendingDeleteNodeIndex = SelectedNodeIndex;
-			PendingDeleteSegmentCount = RefCount;
+			PendingDeleteEdgeCount = RefCount;
 			bPendingNodeDeleteConfirm = true;
 			bNeedOpenDeletePopup = true;
 		}
@@ -696,9 +696,9 @@ void FRoadEditMode::RequestDeleteSelected()
 	}
 	case ERoadEditSelection::ControlPoint:
 	{
-		if (SelectedSegmentIndex >= 0 && SelectedSegmentIndex < static_cast<int32>(Graph.Segments.size()))
+		if (SelectedEdgeIndex >= 0 && SelectedEdgeIndex < static_cast<int32>(Graph.Edges.size()))
 		{
-			TArray<FVector>& ControlPoints = Graph.Segments[SelectedSegmentIndex].ControlPoints;
+			TArray<FVector>& ControlPoints = Graph.Edges[SelectedEdgeIndex].ControlPoints;
 			if (SelectedControlPointIndex >= 0 && SelectedControlPointIndex < static_cast<int32>(ControlPoints.size()))
 			{
 				ControlPoints.erase(ControlPoints.begin() + SelectedControlPointIndex);
@@ -708,11 +708,11 @@ void FRoadEditMode::RequestDeleteSelected()
 		ClearSelection();
 		break;
 	}
-	case ERoadEditSelection::Segment:
+	case ERoadEditSelection::Edge:
 	{
-		if (SelectedSegmentIndex >= 0 && SelectedSegmentIndex < static_cast<int32>(Graph.Segments.size()))
+		if (SelectedEdgeIndex >= 0 && SelectedEdgeIndex < static_cast<int32>(Graph.Edges.size()))
 		{
-			Graph.Segments.erase(Graph.Segments.begin() + SelectedSegmentIndex);
+			Graph.Edges.erase(Graph.Edges.begin() + SelectedEdgeIndex);
 			Comp->PostEditProperty("RoadGraph");
 		}
 		ClearSelection();
@@ -750,7 +750,7 @@ void FRoadEditMode::DrawHighlights() const
 	const bool bHoverIsSelected =
 		HoverKind == Selection &&
 		HoverNodeIndex == SelectedNodeIndex &&
-		HoverSegmentIndex == SelectedSegmentIndex &&
+		HoverEdgeIndex == SelectedEdgeIndex &&
 		HoverControlPointIndex == SelectedControlPointIndex;
 	if (!bHoverIsSelected)
 	{
@@ -764,20 +764,20 @@ void FRoadEditMode::DrawHighlights() const
 			}
 			break;
 		case ERoadEditSelection::ControlPoint:
-			if (HoverSegmentIndex >= 0 && HoverSegmentIndex < static_cast<int32>(Graph.Segments.size()))
+			if (HoverEdgeIndex >= 0 && HoverEdgeIndex < static_cast<int32>(Graph.Edges.size()))
 			{
-				const TArray<FVector>& HoverCPs = Graph.Segments[HoverSegmentIndex].ControlPoints;
+				const TArray<FVector>& HoverCPs = Graph.Edges[HoverEdgeIndex].ControlPoints;
 				if (HoverControlPointIndex >= 0 && HoverControlPointIndex < static_cast<int32>(HoverCPs.size()))
 				{
 					DrawDebugSphere(World, HoverCPs[HoverControlPointIndex], 0.5f, 12, HoverColor, 0.0f);
 				}
 			}
 			break;
-		case ERoadEditSelection::Segment:
-			if (HoverSegmentIndex >= 0 && HoverSegmentIndex < static_cast<int32>(Graph.Segments.size()))
+		case ERoadEditSelection::Edge:
+			if (HoverEdgeIndex >= 0 && HoverEdgeIndex < static_cast<int32>(Graph.Edges.size()))
 			{
 				TArray<FVector> HoverPath;
-				if (Graph.GetSegmentPathPoints(Graph.Segments[HoverSegmentIndex], HoverPath))
+				if (Graph.GetEdgePathPoints(Graph.Edges[HoverEdgeIndex], HoverPath))
 				{
 					for (int32 i = 0; i + 1 < static_cast<int32>(HoverPath.size()); ++i)
 					{
@@ -800,25 +800,25 @@ void FRoadEditMode::DrawHighlights() const
 		}
 		break;
 	case ERoadEditSelection::ControlPoint:
-		if (SelectedSegmentIndex >= 0 && SelectedSegmentIndex < static_cast<int32>(Graph.Segments.size()))
+		if (SelectedEdgeIndex >= 0 && SelectedEdgeIndex < static_cast<int32>(Graph.Edges.size()))
 		{
-			const TArray<FVector>& ControlPoints = Graph.Segments[SelectedSegmentIndex].ControlPoints;
+			const TArray<FVector>& ControlPoints = Graph.Edges[SelectedEdgeIndex].ControlPoints;
 			if (SelectedControlPointIndex >= 0 && SelectedControlPointIndex < static_cast<int32>(ControlPoints.size()))
 			{
 				DrawDebugSphere(World, ControlPoints[SelectedControlPointIndex], 0.45f, 16, HighlightColor, 0.0f);
 			}
 		}
 		break;
-	case ERoadEditSelection::Segment:
-		if (SelectedSegmentIndex >= 0 && SelectedSegmentIndex < static_cast<int32>(Graph.Segments.size()))
+	case ERoadEditSelection::Edge:
+		if (SelectedEdgeIndex >= 0 && SelectedEdgeIndex < static_cast<int32>(Graph.Edges.size()))
 		{
 			TArray<FVector> PathPoints;
-			if (Graph.GetSegmentPathPoints(Graph.Segments[SelectedSegmentIndex], PathPoints))
+			if (Graph.GetEdgePathPoints(Graph.Edges[SelectedEdgeIndex], PathPoints))
 			{
-				const FColor SegmentColor(255, 140, 0);
+				const FColor EdgeColor(255, 140, 0);
 				for (int32 i = 0; i + 1 < static_cast<int32>(PathPoints.size()); ++i)
 				{
-					DrawDebugLine(World, PathPoints[i], PathPoints[i + 1], SegmentColor, 0.0f);
+					DrawDebugLine(World, PathPoints[i], PathPoints[i + 1], EdgeColor, 0.0f);
 				}
 			}
 		}
@@ -859,7 +859,7 @@ void FRoadEditMode::RenderUI()
 
 	if (ImGui::BeginPopupModal(PopupId, nullptr, ImGuiWindowFlags_AlwaysAutoResize))
 	{
-		ImGui::Text("This node is connected to %d segment(s).", PendingDeleteSegmentCount);
+		ImGui::Text("This node is connected to %d Edge(s).", PendingDeleteEdgeCount);
 		ImGui::Text("They will be deleted together. Continue?");
 		ImGui::Separator();
 
@@ -868,7 +868,7 @@ void FRoadEditMode::RenderUI()
 			PerformNodeDelete(PendingDeleteNodeIndex);
 			bPendingNodeDeleteConfirm = false;
 			PendingDeleteNodeIndex = -1;
-			PendingDeleteSegmentCount = 0;
+			PendingDeleteEdgeCount = 0;
 			ClearSelection();
 			ImGui::CloseCurrentPopup();
 		}
@@ -877,7 +877,7 @@ void FRoadEditMode::RenderUI()
 		{
 			bPendingNodeDeleteConfirm = false;
 			PendingDeleteNodeIndex = -1;
-			PendingDeleteSegmentCount = 0;
+			PendingDeleteEdgeCount = 0;
 			ImGui::CloseCurrentPopup();
 		}
 		ImGui::EndPopup();
@@ -887,7 +887,7 @@ void FRoadEditMode::RenderUI()
 		// Esc 등으로 팝업이 닫혔으면 취소로 처리.
 		bPendingNodeDeleteConfirm = false;
 		PendingDeleteNodeIndex = -1;
-		PendingDeleteSegmentCount = 0;
+		PendingDeleteEdgeCount = 0;
 	}
 
 	ImGui::End();

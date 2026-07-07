@@ -1,4 +1,4 @@
-#include "RoadGraphComponent.h"
+﻿#include "RoadGraphComponent.h"
 
 #include "Debug/DrawDebugHelpers.h"
 #include "GameFramework/AActor.h"
@@ -62,7 +62,7 @@ void URoadGraphComponent::DrawRoadNetwork() const
 
 	// 세그먼트: Start 노드 -> ControlPoints... -> End 노드 를 순서대로 잇는 꺾은 선(노랑).
 	const FColor ControlPointColor(0, 200, 255);
-	for (const FRoadSegment& Segment : RoadGraph.Segments)
+	for (const FRoadEdge& Segment : RoadGraph.Edges)
 	{
 		const FRoadNode* StartNode = RoadGraph.FindNode(Segment.StartNodeID);
 		const FRoadNode* EndNode = RoadGraph.FindNode(Segment.EndNodeID);

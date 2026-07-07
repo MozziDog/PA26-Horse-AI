@@ -1,4 +1,4 @@
-#include "RoadGraphGizmoTarget.h"
+﻿#include "RoadGraphGizmoTarget.h"
 
 #include "Component/AI/RoadGraphComponent.h"
 
@@ -7,16 +7,16 @@ void FRoadGraphGizmoTarget::SetNode(URoadGraphComponent* InComponent, int32 InNo
 	Component = InComponent;
 	Kind = ERoadGizmoTargetKind::Node;
 	NodeIndex = InNodeIndex;
-	SegmentIndex = -1;
+	EdgeIndex = -1;
 	ControlPointIndex = -1;
 }
 
-void FRoadGraphGizmoTarget::SetControlPoint(URoadGraphComponent* InComponent, int32 InSegmentIndex, int32 InControlPointIndex)
+void FRoadGraphGizmoTarget::SetControlPoint(URoadGraphComponent* InComponent, int32 InEdgeIndex, int32 InControlPointIndex)
 {
 	Component = InComponent;
 	Kind = ERoadGizmoTargetKind::ControlPoint;
 	NodeIndex = -1;
-	SegmentIndex = InSegmentIndex;
+	EdgeIndex = InEdgeIndex;
 	ControlPointIndex = InControlPointIndex;
 }
 
@@ -24,7 +24,7 @@ void FRoadGraphGizmoTarget::Clear()
 {
 	Component.Reset();
 	NodeIndex = -1;
-	SegmentIndex = -1;
+	EdgeIndex = -1;
 	ControlPointIndex = -1;
 }
 
@@ -47,9 +47,9 @@ FVector* FRoadGraphGizmoTarget::ResolvePosition() const
 		return nullptr;
 	}
 
-	if (SegmentIndex >= 0 && SegmentIndex < static_cast<int32>(Graph.Segments.size()))
+	if (EdgeIndex >= 0 && EdgeIndex < static_cast<int32>(Graph.Edges.size()))
 	{
-		TArray<FVector>& ControlPoints = Graph.Segments[SegmentIndex].ControlPoints;
+		TArray<FVector>& ControlPoints = Graph.Edges[EdgeIndex].ControlPoints;
 		if (ControlPointIndex >= 0 && ControlPointIndex < static_cast<int32>(ControlPoints.size()))
 		{
 			return &ControlPoints[ControlPointIndex];

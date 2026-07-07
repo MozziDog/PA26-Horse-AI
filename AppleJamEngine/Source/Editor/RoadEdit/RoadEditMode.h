@@ -9,7 +9,7 @@ class UWorld;
 class UGizmoComponent;
 struct FRay;
 struct FRoadGraph;
-struct FRoadSegment;
+struct FRoadEdge;
 
 // EGizmoMode(Translate/Rotate/Scale)와 독립축인 전역 에디터 툴 모드.
 enum class EEditorToolMode : uint8
@@ -23,7 +23,7 @@ enum class ERoadEditSelection : uint8
 	None,
 	Node,
 	ControlPoint,
-	Segment,
+	Edge,
 };
 
 // 레벨 뷰포트에서 도로망(노드/제어점/세그먼트)을 편집하는 툴 상태.
@@ -61,18 +61,18 @@ public:
 private:
 	// World에서 RoadGraphComponent 가져오기. World 상에 1개만 있다고 가정.
 	static URoadGraphComponent* ResolveRoadComponent(UWorld* World);
-	static int32 CountReferencingSegments(const FRoadGraph& Graph, int32 NodeID);
+	static int32 CountReferencingEdges(const FRoadGraph& Graph, int32 NodeID);
 
 	void SelectNode(int32 NodeIndex);
-	void SelectControlPoint(int32 SegmentIndex, int32 ControlPointIndex);
-	void SelectSegment(int32 SegmentIndex);
+	void SelectControlPoint(int32 EdgeIndex, int32 ControlPointIndex);
+	void SelectEdge(int32 EdgeIndex);
 	void ApplyGizmoTarget();
 	void PerformNodeDelete(int32 NodeIndex);
 
 	int32 PickNodeAtRay(const FRay& Ray) const;
-	bool PickElementAtRay(const FRay& Ray, ERoadEditSelection& OutKind, int32& OutNodeIndex, int32& OutSegmentIndex, int32& OutControlPointIndex) const;
-	void CreateSegment(int32 FromNodeIndex, int32 ToNodeIndex);
-	bool CursorToWorldForSegment(const FRay& Ray, const FRoadSegment& Segment, FVector& OutPos) const;
+	bool PickElementAtRay(const FRay& Ray, ERoadEditSelection& OutKind, int32& OutNodeIndex, int32& OutEdgeIndex, int32& OutControlPointIndex) const;
+	void CreateEdge(int32 FromNodeIndex, int32 ToNodeIndex);
+	bool CursorToWorldForEdge(const FRay& Ray, const FRoadEdge& Edge, FVector& OutPos) const;
 	bool RaycastGround(const FRay& Ray, FVector& OutPos) const;
 
 	TWeakObjectPtr<URoadGraphComponent> RoadComponent;
@@ -82,7 +82,7 @@ private:
 	FRoadGraphGizmoTarget GizmoTarget;
 	ERoadEditSelection Selection = ERoadEditSelection::None;
 	int32 SelectedNodeIndex = -1;
-	int32 SelectedSegmentIndex = -1;
+	int32 SelectedEdgeIndex = -1;
 	int32 SelectedControlPointIndex = -1;
 
 	// 세그먼트 연결 대기 상태 (C로 시작 → 다음 노드 클릭으로 완성).
@@ -92,12 +92,12 @@ private:
 	// hover 대상 (마우스 오버 강조용).
 	ERoadEditSelection HoverKind = ERoadEditSelection::None;
 	int32 HoverNodeIndex = -1;
-	int32 HoverSegmentIndex = -1;
+	int32 HoverEdgeIndex = -1;
 	int32 HoverControlPointIndex = -1;
 
 	// 노드 삭제 확인 팝업 상태.
 	bool bPendingNodeDeleteConfirm = false;
 	bool bNeedOpenDeletePopup = false;
 	int32 PendingDeleteNodeIndex = -1;
-	int32 PendingDeleteSegmentCount = 0;
+	int32 PendingDeleteEdgeCount = 0;
 };

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "Gizmo/GizmoTransformTarget.h"
 #include "Object/Ptr/WeakObjectPtr.h"
@@ -18,12 +18,12 @@ class FRoadGraphGizmoTarget : public IGizmoTransformTarget
 {
 public:
 	void SetNode(URoadGraphComponent* InComponent, int32 InNodeIndex);
-	void SetControlPoint(URoadGraphComponent* InComponent, int32 InSegmentIndex, int32 InControlPointIndex);
+	void SetControlPoint(URoadGraphComponent* InComponent, int32 InEdgeIndex, int32 InControlPointIndex);
 	void Clear();
 
 	ERoadGizmoTargetKind GetKind() const { return Kind; }
 	int32 GetNodeIndex() const { return NodeIndex; }
-	int32 GetSegmentIndex() const { return SegmentIndex; }
+	int32 GetEdgeIndex() const { return EdgeIndex; }
 	int32 GetControlPointIndex() const { return ControlPointIndex; }
 
 	bool IsValid() const override;
@@ -49,6 +49,6 @@ private:
 	TWeakObjectPtr<URoadGraphComponent> Component;
 	ERoadGizmoTargetKind Kind = ERoadGizmoTargetKind::Node;
 	int32 NodeIndex = -1;
-	int32 SegmentIndex = -1;
+	int32 EdgeIndex = -1;
 	int32 ControlPointIndex = -1;
 };
