@@ -244,7 +244,6 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClCompile Include="Source\Editor\Viewport\Asset\MeshEditorViewportClient.cpp" />
     <ClCompile Include="Source\Editor\Viewport\Asset\StaticMeshEditorViewportClient.cpp" />
     <ClCompile Include="Source\Editor\Viewport\Level\FLevelViewportLayout.cpp" />
-    <ClCompile Include="Source\Engine\Component\AI\RaycastSensorComponent.cpp" />
     <ClCompile Include="Source\Engine\pch.cpp">
       <PrecompiledHeader>Create</PrecompiledHeader>
     </ClCompile>
@@ -314,7 +313,9 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClCompile Include="Source\Engine\Component\Action\ActionVisualEffectComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\AI\BTAgentComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\AI\BlackboardComponent.cpp" />
+    <ClCompile Include="Source\Engine\Component\AI\RaycastSensorComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\AI\RoadGraphComponent.cpp" />
+    <ClCompile Include="Source\Engine\Component\AI\RoadSensorComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\Camera\CameraComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\Camera\CineCameraComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\Camera\SpringArmComponent.cpp" />
@@ -786,7 +787,6 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClInclude Include="Source\Editor\Viewport\Asset\StaticMeshEditorViewportClient.h" />
     <ClInclude Include="Source\Editor\Viewport\Level\FLevelViewportLayout.h" />
     <ClInclude Include="Source\Editor\Viewport\Level\LevelEditorViewportClient.h" />
-    <ClInclude Include="Source\Engine\Component\AI\RaycastSensorComponent.h" />
     <ClInclude Include="Source\Engine\pch.h" />
     <ClInclude Include="Source\Engine\AI\Blackboard.h" />
     <ClInclude Include="Source\Engine\AI\BT\BTBehaviorRegistry.h" />
@@ -866,7 +866,9 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClInclude Include="Source\Engine\Component\Action\ActionVisualEffectComponent.h" />
     <ClInclude Include="Source\Engine\Component\AI\BTAgentComponent.h" />
     <ClInclude Include="Source\Engine\Component\AI\BlackboardComponent.h" />
+    <ClInclude Include="Source\Engine\Component\AI\RaycastSensorComponent.h" />
     <ClInclude Include="Source\Engine\Component\AI\RoadGraphComponent.h" />
+    <ClInclude Include="Source\Engine\Component\AI\RoadSensorComponent.h" />
     <ClInclude Include="Source\Engine\Component\Camera\CameraComponent.h" />
     <ClInclude Include="Source\Engine\Component\Camera\CineCameraComponent.h" />
     <ClInclude Include="Source\Engine\Component\Camera\SpringArmComponent.h" />
