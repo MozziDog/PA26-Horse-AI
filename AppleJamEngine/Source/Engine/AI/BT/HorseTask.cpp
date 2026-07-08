@@ -2,7 +2,7 @@
 
 #include "AI/BT/BTBehaviorRegistry.h"
 #include "AI/Blackboard.h"
-#include "Component/Movement/PawnMovementComponent.h"
+#include "Component/Movement/HorseLocomotionComponent.h"   // EHorseGait
 #include "GameFramework/AActor.h"
 #include "Runtime/EngineInitHooks.h"
 
@@ -24,18 +24,32 @@ namespace
 				return Ctx.Blackboard && Ctx.Blackboard->TryGetBool(FName("Hungry"), Value) && Value;
 			});
 
-		// 태스크
-		// Run: 현재 forward 방향으로 전진 입력만 제공. 실제 가감속·지면 처리는 MovementComponent 담당.
-		// 입력 방향이 현재 forward 와 같아 조향은 중립 → 직진. Movement 없으면 아무것도 안 함(no-op).
-		FBTBehaviorRegistry::RegisterTask(FName("Run"), [](FBTContext& Ctx)
+		// 태스크 — BT 는 이동을 직접 만지지 않고 Blackboard 의 "DesiredGait"(원하는 보법)만 쓴다.
+		// Locomotion이 이를 읽어 쿨타임·envelope를 고려해 실제 gait에 반영하고 Movement로 라우팅한다.
+		auto SetDesiredGait = [](FBTContext& Ctx, EHorseGait Gait)
 			{
-				if (Ctx.Movement && Ctx.Owner)
+				if (Ctx.Blackboard)
 				{
-					Ctx.Movement->AddInputVector(Ctx.Owner->GetActorForward(), 1.0f);
+					Ctx.Blackboard->SetInt(FName("DesiredGait"), static_cast<int>(Gait));
 				}
+			};
+
+		// Run: 전력 질주 요청(Flee 등). Chew/Idle: 정지 요청.
+		FBTBehaviorRegistry::RegisterTask(FName("Run"), [SetDesiredGait](FBTContext& Ctx)
+			{
+				SetDesiredGait(Ctx, EHorseGait::Gallop);
 				return EBTResult::Running;
 			});
-		FBTBehaviorRegistry::RegisterTask(FName("Chew"), [](FBTContext&) { return EBTResult::Running; });
+		FBTBehaviorRegistry::RegisterTask(FName("Chew"), [SetDesiredGait](FBTContext& Ctx) // 테스트용 임시 Task
+			{
+				SetDesiredGait(Ctx, EHorseGait::Stop);
+				return EBTResult::Running;
+			});
+		FBTBehaviorRegistry::RegisterTask(FName("Idle"), [SetDesiredGait](FBTContext& Ctx)
+			{
+				SetDesiredGait(Ctx, EHorseGait::Stop);
+				return EBTResult::Running;
+			});
 	}
 
 	// 자기-등록 — 엔진 부팅 시 1회 자동 호출(RunAll).

@@ -5,9 +5,12 @@
 #include "Component/Camera/SpringArmComponent.h"
 #include "Component/Input/InputComponent.h"
 #include "Component/Movement/HorseMovementComponent.h"
+#include "Component/Movement/HorseLocomotionComponent.h"
 #include "Component/AI/BTAgentComponent.h"
 #include "Component/AI/BlackboardComponent.h"
 #include "Component/Primitive/SkeletalMeshComponent.h"
+#include "Component/Shape/BoxComponent.h"
+#include "Core/Types/CollisionTypes.h"
 #include "AI/Blackboard.h"
 #include "Mesh/MeshManager.h"
 #include "Runtime/Engine.h"
@@ -69,9 +72,21 @@ namespace
 
 void AHorseCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 {
-	// NOTE: Mesh가 Root여도 되는지 검증 필요
+	// 몸통 collider 를 root 로: Movement 의 sweep(관통/비비기 차단)·에디터 시각화·향후 물리의 단일 바디.
+	// (직립 capsule 이 아닌 quadruped 전제라 torso box 형상 사용.) Pawn 채널, 지금은 query 전용.
+	CollisionComponent = AddComponent<UBoxComponent>();
+	SetRootComponent(CollisionComponent);
+	CollisionComponent->SetBoxExtent(FVector(0.8f, 0.3f, 0.3f));   // half-extents(전방X/측방Y/상하Z)
+	CollisionComponent->SetCollisionObjectType(ECollisionChannel::Pawn);
+	CollisionComponent->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+
+	// 실제 이동 담당. root(box)를 UpdatedComponent 로 자동 등록. 지면 스냅 높이(StandHeight) 소유.
+	MovementComponent = AddComponent<UHorseMovementComponent>();
+
+	// SkeletalMesh 는 box 자식으로, 발바닥이 지면에 닿도록 StandHeight 만큼 아래로 offset.
 	MeshComponent = AddComponent<USkeletalMeshComponent>();
-	SetRootComponent(MeshComponent);
+	MeshComponent->AttachToComponent(CollisionComponent);
+	MeshComponent->SetRelativeLocation(FVector(0.0f, 0.0f, -MovementComponent->GetStandHeight()));
 
 	ID3D11Device* Device = GEngine->GetRenderer().GetFD3DDevice().GetDevice();
 	if (!SkeletalMeshFileName.empty())
@@ -80,8 +95,8 @@ void AHorseCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 		MeshComponent->SetSkeletalMesh(Asset);
 	}
 
-	// 실제 이동 담당. 입력 소비·지면 스냅·낙하를 자기 tick 에서 처리.
-	MovementComponent = AddComponent<UHorseMovementComponent>();
+	// 조향·보법(gait) 계층. 플레이어/BT 입력을 받아 매 tick MovementComponent 로 라우팅.
+	LocomotionComponent = AddComponent<UHorseLocomotionComponent>();
 
 	BlackboardComponent = AddComponent<UBlackboardComponent>();
 
@@ -92,7 +107,7 @@ void AHorseCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 	}
 
 	SpringArmComponent = AddComponent<USpringArmComponent>();
-	SpringArmComponent->AttachToComponent(MeshComponent);
+	SpringArmComponent->AttachToComponent(CollisionComponent);   // root(box) 기준으로 카메라 추종
 	SpringArmComponent->TargetArmLength = 7.0f;
 	SpringArmComponent->SocketOffset = FVector(0.0f, 0.0f, 2.5f);
 	SpringArmComponent->bEnableCameraLag = true;
@@ -118,17 +133,36 @@ void AHorseCharacter::SetupInputComponent()
 		return;
 	}
 
-	// 키보드(디지털) + 게임패드 좌스틱(아날로그). BindAxis 콜백은 매 frame 합산값(0 포함)으로 호출되므로
-	// 멤버에 그대로 저장만 하고, 실제 MovementComponent 라우팅은 Tick 에서 한다.
-	InputComponent->AddAxisMapping("HorseThrottle", "W", 1.0f);
-	InputComponent->AddAxisMapping("HorseThrottle", "S", -1.0f);
+	// 조향(아날로그): 좌우 축 → LocomotionComponent 로 직접 전달. 게임패드 좌스틱 X 도 함께.
 	InputComponent->AddAxisMapping("HorseSteering", "D", 1.0f);
 	InputComponent->AddAxisMapping("HorseSteering", "A", -1.0f);
-	InputComponent->AddGamepadAxisMapping("HorseThrottle", EInputAxisSourceType::GamepadLeftStickY, 1.0f);
 	InputComponent->AddGamepadAxisMapping("HorseSteering", EInputAxisSourceType::GamepadLeftStickX, 1.0f);
+	InputComponent->BindAxis("HorseSteering", [this](float Value)
+	{
+		LastSteeringInput = Value;
+		if (LocomotionComponent)
+		{
+			LocomotionComponent->SetSteeringInput(Value);
+		}
+	});
 
-	InputComponent->BindAxis("HorseThrottle", [this](float Value) { LastThrottleInput = Value; });
-	InputComponent->BindAxis("HorseSteering", [this](float Value) { LastSteeringInput = Value; });
+	// 보법(gait) 변속: W=한 단계 가속(쿨타임 있음), S=한 단계 감속, X=정지.
+	// gait는 기어 변속 개념, 무입력 시 현재 gait 유지 => 순항
+	InputComponent->AddActionMapping("HorseGiddyup", "W");
+	InputComponent->AddActionMapping("HorseSlowDown", "S");
+	InputComponent->AddActionMapping("HorseStop", "X");
+	InputComponent->BindAction("HorseGiddyup", EInputEvent::Pressed, [this]()
+	{
+		if (LocomotionComponent) LocomotionComponent->RequestGiddyup();
+	});
+	InputComponent->BindAction("HorseSlowDown", EInputEvent::Pressed, [this]()
+	{
+		if (LocomotionComponent) LocomotionComponent->RequestSlowDown();
+	});
+	InputComponent->BindAction("HorseStop", EInputEvent::Pressed, [this]()
+	{
+		if (LocomotionComponent) LocomotionComponent->RequestStop();
+	});
 
 	if (bAutoInputCamera)
 	{
@@ -166,8 +200,10 @@ void AHorseCharacter::SetupInputComponent()
 
 void AHorseCharacter::RebindComponents()
 {
+	CollisionComponent = GetComponentByClass<UBoxComponent>();
 	MeshComponent = GetComponentByClass<USkeletalMeshComponent>();
 	MovementComponent = GetComponentByClass<UHorseMovementComponent>();
+	LocomotionComponent = GetComponentByClass<UHorseLocomotionComponent>();
 	BTAgentComponent = GetComponentByClass<UBTAgentComponent>();
 	BlackboardComponent = GetComponentByClass<UBlackboardComponent>();
 	SpringArmComponent = GetComponentByClass<USpringArmComponent>();
@@ -181,7 +217,6 @@ void AHorseCharacter::BeginPlay()
 	CameraYawOffset = 0.0f;
 	CameraTimeSinceLookInput = CameraReturnDelay;
 	bCameraLookInputThisFrame = false;
-	LastThrottleInput = 0.0f;
 	LastSteeringInput = 0.0f;
 	UpdateCameraControlRotation();
 
@@ -192,25 +227,7 @@ void AHorseCharacter::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
-	// 플레이어 입력(throttle/steering) → MovementComponent. 플레이어도 BT task 와 동일한 AddInputVector 경로.
-	// throttle=전진 세기, steering=목표 heading 편향. throttle<=0 이면 무입력(Movement 가 braking 감속).
-	if (MovementComponent)
-	{
-		const float Throttle = std::clamp(LastThrottleInput, 0.0f, 1.0f);
-		const float Steering = std::clamp(LastSteeringInput, -1.0f, 1.0f);
-		if (Throttle > 0.0f)
-		{
-			FVector Forward = GetActorForward();
-			FVector Right   = GetActorRight();
-			Forward.Z = 0.0f;
-			Right.Z   = 0.0f;
-			FVector Desired = Forward + Right * (Steering * SteerStrength);
-			if (!Desired.IsNearlyZero())
-			{
-				MovementComponent->AddInputVector(Desired.Normalized() * Throttle, 1.0f);
-			}
-		}
-	}
+	// 이동 입력은 LocomotionComponent 가 자기 tick 에서 Movement 로 라우팅한다(여기서 하지 않음).
 
 	UpdateCameraReturn(DeltaTime);
 	UpdateCameraControlRotation();
@@ -276,9 +293,7 @@ void AHorseCharacter::UpdateCameraReturn(float DeltaTime)
 
 	CameraTimeSinceLookInput += DeltaTime;
 
-	const bool bInputActive =
-		std::abs(LastThrottleInput) > 0.01f ||
-		std::abs(LastSteeringInput) > 0.01f;
+	const bool bInputActive = std::abs(LastSteeringInput) > 0.01f;
 	const bool bMoving =
 		MovementComponent && std::abs(MovementComponent->GetForwardSpeed()) > CameraMovingReturnSpeedThreshold;
 

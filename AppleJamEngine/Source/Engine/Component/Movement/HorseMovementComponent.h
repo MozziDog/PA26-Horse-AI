@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "PawnMovementComponent.h"
 
@@ -17,7 +17,8 @@ UENUM()
 enum class EHorseMoveMode : uint8
 {
 	Grounded,   // 지면 위 — XY 이동 + 지면 Z 스냅. Velocity.Z = 0.
-	Falling,    // 공중 — gravity 적분. 착지 시 Grounded 복귀.
+	Sliding,    // 급경사(보행 불가) — 입력 무시, 경사면 접선으로 미끄러짐. 완경사 도달 시 Grounded.
+	Falling,    // 공중 — gravity 적분. 착지 시 Grounded(또는 급경사면 Sliding) 복귀.
 };
 
 UCLASS()
@@ -37,6 +38,17 @@ public:
 	float   GetForwardSpeed() const;
 	UFUNCTION(Pure, Category="HorseMovement")
 	bool    IsFalling() const { return MoveMode == EHorseMoveMode::Falling; }
+	UFUNCTION(Pure, Category="HorseMovement")
+	bool    IsSliding() const { return MoveMode == EHorseMoveMode::Sliding; }
+	// root box가 지면 접점 위로 뜨는 높이
+	UFUNCTION(Pure, Category="HorseMovement")
+	float   GetStandHeight() const { return StandHeight; }
+	// gallop(습보, 전력질주) 시의 최고 속도 — Locomotion 이 gait 목표속도를 scale([0,1])로 환산할 때 분모로 쓴다.
+	UFUNCTION(Pure, Category="HorseMovement")
+	float   GetMaxSpeed() const { return MaxSpeed; }
+	// 낙하 중이면 가속 명령 수용 불가
+	UFUNCTION(Pure, Category="HorseMovement")
+	bool    CanAccelerate() const { return MoveMode != EHorseMoveMode::Falling; }
 
 	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Max Speed", Min=0.0f, Max=50.0f, Speed=0.1f)
 	float MaxSpeed = 8.0f;             // m/s — gallop 최고 속도
@@ -46,25 +58,47 @@ public:
 	float BrakingDeceleration = 12.0f; // m/s^2 — 입력 없을 때 감속률
 	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Max Turn Rate", Min=0.0f, Max=720.0f, Speed=1.0f)
 	float MaxTurnRate = 120.0f;        // deg/s — 조향 각속도
-	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Gravity", Min=0.0f, Max=100.0f, Speed=0.1f)
-	float Gravity = 9.8f;              // m/s^2 (양수 — 적용 시 Velocity.Z -= Gravity*dt)
-	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Ground Probe Up", Min=0.0f, Max=5.0f, Speed=0.01f)
-	float GroundProbeUp = 0.5f;        // 몸통 위 이만큼에서 아래로 raycast 시작
 	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Ground Snap Max Step", Min=0.0f, Max=5.0f, Speed=0.01f)
 	float GroundSnapMaxStep = 0.5f;    // 한 frame 스냅 허용 높이차. 넘게 벌어지면 낭떠러지 → 낙하
-	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Foot Height Offset", Min=-5.0f, Max=5.0f, Speed=0.01f)
-	float FootHeightOffset = 0.0f;     // root pivot ~ 발바닥 보정(지면 위 배치 높이)
+	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Root Stand Height", Min=0.0f, Max=5.0f, Speed=0.01f)
+	float StandHeight = 1.05f;         // root(=몸통 box 중심)가 지면 접점 위로 뜨는 높이. Mesh 는 이만큼 아래로 offset.
+
+	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Min Turn Radius", Min=0.0f, Max=20.0f, Speed=0.05f)
+	float MinTurnRadius = 2.0f;        // m — 이 반경보다 좁게는 못 돈다(저속 제자리회전 억제, 고속 광회전). 0=제한없음
+	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Turn Speed Floor", Min=0.0f, Max=10.0f, Speed=0.05f)
+	float TurnSpeedFloor = 0.8f;       // m/s — 선회율 계산 시 속도 하한(정지 상태에서도 최소한의 pivot 허용)
+	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Walkable Slope Z", Min=0.0f, Max=1.0f, Speed=0.01f)
+	float WalkableSlopeZ = 0.7f;       // 지면 노멀 Z 가 이 값 미만이면 보행 불가 → Sliding
+	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Slide Friction", Min=0.0f, Max=10.0f, Speed=0.05f)
+	float SlideFriction = 1.5f;        // 1/s — 미끄러질 때 속도 감쇠율
+	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Slide Ground Probe", Min=0.0f, Max=10.0f, Speed=0.05f)
+	float SlideGroundProbe = 3.0f;     // m — 미끄러지는 동안 아래로 지면 탐색 거리(급강하 추적용, snap step 보다 크게)
+
+	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Torso Collision")
+	bool  bTorsoCollision = true;      // 몸통 box(root) sweep 으로 벽/절벽 관통·비비기(rubbing climb) 차단
+	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Torso Skin", Min=0.0f, Max=1.0f, Speed=0.001f)
+	float TorsoSkin = 0.05f;           // Torso box에 여유 줘서 벽 근처에서 지형과 캐릭터 메시 교차 방지
 
 protected:
-	// From 에서 아래로 (GroundProbeUp + GroundSnapMaxStep) raycast. WorldStatic 만 지면 후보.
-	bool TraceGround(const FVector& From, FHitResult& OutHit) const;
+	FVector GetGravity() const;
+
+	// From 에서 아래로 raycast. WorldStatic 만 지면 후보. MaxDist<=0 이면 (StandHeight+GroundSnapMaxStep).
+	bool TraceGround(const FVector& From, FHitResult& OutHit, float MaxDist = -1.0f) const;
+	// 지면 노멀(면 노멀 우선, 없으면 shape 노멀, 그래도 없으면 +Z). 항상 정규화.
+	FVector GroundNormal(const FHitResult& Hit) const;
 
 	// Grounded 전용 — 입력을 yaw 조향 + forward 목표속도(가감속)로 분해해 Velocity 갱신.
+	// NOTE: Steering 로직은 임시 구현인 상태, 미세 조정 필요
 	void ApplySteeringAndSpeed(const FVector& Desired, float DeltaTime);
 	void TickGrounded(float DeltaTime);
+	void TickSliding(float DeltaTime);
 	void TickFalling(float DeltaTime);
 
+	// FromLoc 에서 DeltaXY 만큼 몸통 box 를 sweep. 벽/급경사면(walkable 아님)에 막히면 이동을
+	// 히트 지점(skin 여유)까지로 줄이고 Velocity 를 벽 접선으로 투영한다. 허용된 XY 이동을 반환.
+	// walkable 면(램프)·무충돌이면 DeltaXY 그대로. box 는 발밑 TorsoBoxHeight 높이라 램프 바닥은 통과.
+	FVector ResolveTorsoCollision(const FVector& FromLoc, const FVector& DeltaXY);
+
 	FVector        Velocity = FVector(0.0f, 0.0f, 0.0f);
-	// 시작 시 지면 잡을 때까지 Falling — 첫 frame TickFalling 이 raycast 후 자동 Grounded 스냅.
-	EHorseMoveMode MoveMode = EHorseMoveMode::Falling;
+	EHorseMoveMode MoveMode = EHorseMoveMode::Falling; // 시작 시 지면 잡아야 해서 Falling
 };

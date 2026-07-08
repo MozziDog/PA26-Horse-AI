@@ -5,7 +5,9 @@
 #include "Source/Engine/GameFramework/Pawn/HorseCharacter.generated.h"
 
 class USkeletalMeshComponent;
+class UBoxComponent;
 class UHorseMovementComponent;
+class UHorseLocomotionComponent;
 class UBTAgentComponent;
 class UBlackboardComponent;
 class USpringArmComponent;
@@ -27,18 +29,6 @@ public:
 protected:
 	void OnPostLoad(FArchive& Ar) override; // Re-Initialize after save & load
 
-public:
-	// Component Getters
-	UFUNCTION(Pure, Category = "Horse|Components")
-	USkeletalMeshComponent* GetMeshComponent() const { return MeshComponent; }
-	// 실제 이동(입력 소비·지면 처리)을 담당하는 컴포넌트.
-	UFUNCTION(Pure, Category = "Horse|Components")
-	UHorseMovementComponent* GetMovementComponent() const { return MovementComponent; }
-	UFUNCTION(Pure, Category = "Horse|Components")
-	USpringArmComponent* GetSpringArmComponent() const { return SpringArmComponent; }
-	UFUNCTION(Pure, Category = "Horse|Components")
-	UCameraComponent* GetCameraComponent() const { return CameraComponent; }
-
 protected:
 	void SetupInputComponent() override;
 	void RebindComponents();
@@ -47,8 +37,10 @@ protected:
 	float GetCameraBaseYaw() const;
 
 protected:
+	TWeakObjectPtr<UBoxComponent> CollisionComponent = nullptr;
 	TWeakObjectPtr<USkeletalMeshComponent> MeshComponent = nullptr;
 	TWeakObjectPtr<UHorseMovementComponent> MovementComponent = nullptr;
+	TWeakObjectPtr<UHorseLocomotionComponent> LocomotionComponent = nullptr;
 	TWeakObjectPtr<UBTAgentComponent> BTAgentComponent = nullptr;
 	TWeakObjectPtr<UBlackboardComponent> BlackboardComponent = nullptr;
 	TWeakObjectPtr<USpringArmComponent> SpringArmComponent = nullptr;
@@ -88,12 +80,9 @@ protected:
 	float CameraPitch = 10.0f;
 	float CameraTimeSinceLookInput = 1000.0f;
 	bool bCameraLookInputThisFrame = false;
-	// steering(±1) 이 목표 heading 을 forward 에서 얼마나 옆으로 편향시킬지. 1.0 이면 ±45°.
-	UPROPERTY(Edit, Save, Category = "Horse|Input", DisplayName = "Steer Strength", Min = 0.0f, Max = 4.0f, Speed = 0.05f)
-	float SteerStrength = 1.0f;
 
-	// InputComponent axis 콜백이 매 frame 채우는 현재 입력(0 포함). Tick 이 MovementComponent 로 라우팅.
-	float LastThrottleInput = 0.0f;
+	// steering 축 콜백이 매 frame 채우는 값(0 포함). 카메라 자동복귀의 "입력 활성" 판정에 쓴다.
+	// 실제 조향 라우팅은 콜백에서 LocomotionComponent 로 직접 전달한다.
 	float LastSteeringInput = 0.0f;
 
 	// TODO: [테스트] 센서 스탠드인용 누적 시간 — 실제 센서 컴포넌트 도입 시 제거.

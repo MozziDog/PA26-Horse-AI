@@ -8,7 +8,6 @@
 #include "Source/Engine/Component/AI/BTAgentComponent.generated.h"
 
 class UBlackboardComponent;
-class UPawnMovementComponent;
 
 // NOTE: "debug bt" 명령어를 통해 실시간 BT 판단 상태 콘솔 오버레이로 확인가능
 UCLASS()
@@ -44,7 +43,5 @@ private:
 
 	std::unique_ptr<FBehaviorTree> Tree;
 	UBlackboardComponent* BlackboardComp = nullptr;
-	// 입력 구동 이동 컴포넌트 캐시(BeginPlay 1회). 없으면 nullptr. 매 tick FBTContext 로 주입.
-	UPawnMovementComponent* MovementComp = nullptr;
 	uint64 FrameCounter = 0;
 };

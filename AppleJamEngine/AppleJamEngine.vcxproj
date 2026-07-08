@@ -352,6 +352,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClCompile Include="Source\Engine\Component\Light\SpotLightComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\Movement\CharacterMovementComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\Movement\FloatingPawnMovementComponent.cpp" />
+    <ClCompile Include="Source\Engine\Component\Movement\HorseLocomotionComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\Movement\HorseMovementComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\Movement\MovementComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\Movement\PawnMovementComponent.cpp" />
@@ -906,6 +907,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClInclude Include="Source\Engine\Component\Light\SpotLightComponent.h" />
     <ClInclude Include="Source\Engine\Component\Movement\CharacterMovementComponent.h" />
     <ClInclude Include="Source\Engine\Component\Movement\FloatingPawnMovementComponent.h" />
+    <ClInclude Include="Source\Engine\Component\Movement\HorseLocomotionComponent.h" />
     <ClInclude Include="Source\Engine\Component\Movement\HorseMovementComponent.h" />
     <ClInclude Include="Source\Engine\Component\Movement\MovementComponent.h" />
     <ClInclude Include="Source\Engine\Component\Movement\PawnMovementComponent.h" />

@@ -6,7 +6,6 @@
 
 class AActor;
 class FBlackboard;
-class UPawnMovementComponent;
 
 enum class EBTResult
 {
@@ -22,8 +21,8 @@ struct FBTContext
 	float        DeltaTime   = 0.0f;
 	uint64       FrameNumber = 0;		// 현재 프레임 번호. 시각화가 "이번 tick 에 평가된 노드"를 판별하는 데 사용
 	FBlackboard* Blackboard  = nullptr;	// executor 가 매 tick 주입. 노드는 컴포넌트가 아니라 '데이터'만 안다.
-	// 입력 구동 이동 컴포넌트(nullable). task 는 여기에 AddInputVector 로 '입력'만 주고, 실제 이동은 컴포넌트가 담당.
-	UPawnMovementComponent* Movement = nullptr;
+	// NOTE: task 는 이동 컴포넌트를 직접 만지지 않는다 — Blackboard 에 '판단(mode/gait 등)'만 쓰고,
+	//       Locomotion 이 그걸 읽어 조향·gait 로 변환한다. (예: DesiredGait 키)
 
 	// NOTE: 필요한 필드는 여기에 확장
 };
