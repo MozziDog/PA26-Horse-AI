@@ -1,49 +1,65 @@
-﻿#include "pch.h"
+#include "pch.h"
 #include "HorsePlayerInputComponent.h"
 
+#include "Component/Movement/PawnMovementComponent.h"
 #include "GameFramework/AActor.h"
-#include "Component/AI/BlackboardComponent.h"
+
+#include <algorithm>
 
 void UHorsePlayerInputComponent::BeginPlay()
 {
-	// Super::BeginPlay();
-
-	Blackboard = GetOwner()->GetComponentByClass<UBlackboardComponent>();
+	if (AActor* Owner = GetOwner())
+	{
+		Movement = Owner->GetComponentByClass<UPawnMovementComponent>();
+	}
 }
 
 void UHorsePlayerInputComponent::EndPlay()
 {
-	// TODO: Implement EndPlay()
-
-	// Super::EndPlay();
 }
 
 void UHorsePlayerInputComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction& ThisTickFunction)
 {
-	// Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-	
-	// 입력을 블랙보드에 기록
-	if (Blackboard.IsValid())
+	(void)DeltaTime;
+	(void)TickType;
+	(void)ThisTickFunction;
+
+	AActor* Owner = GetOwner();
+	UPawnMovementComponent* Move = Movement.Get();
+	if (Owner && Move)
 	{
-		FBlackboard& BB = Blackboard->GetBlackboard();
-		BB.SetFloat(FName("InputThrottle"), CurrentInput.Throttle);
-		BB.SetFloat(FName("InputBrake"),    CurrentInput.Brake);
-		BB.SetFloat(FName("InputSteering"), CurrentInput.Steering);
-		CurrentInput = { 0.0f, 0.0f, 0.0f };	// consume input
+		// 후진(throttle<0)은 후속 — 지금은 무입력으로 두어 MovementComponent 가 braking 감속하게 한다.
+		const float Throttle = std::clamp(CurrentInput.Throttle, 0.0f, 1.0f);
+		const float Steering = std::clamp(CurrentInput.Steering, -1.0f, 1.0f);
+
+		if (Throttle > 0.0f)
+		{
+			FVector Forward = Owner->GetActorForward();
+			FVector Right   = Owner->GetActorRight();
+			Forward.Z = 0.0f;
+			Right.Z   = 0.0f;
+
+			// 목표 heading = forward 를 steering 만큼 옆으로 편향, 세기 = throttle.
+			// MovementComponent 가 len=throttle 을 전진 세기로, 방향을 조향 목표로 해석한다.
+			FVector Desired = Forward + Right * (Steering * SteerStrength);
+			if (!Desired.IsNearlyZero())
+			{
+				Desired = Desired.Normalized() * Throttle;
+				Move->AddInputVector(Desired, 1.0f);
+			}
+		}
 	}
+
+	CurrentInput = { 0.0f, 0.0f, 0.0f };   // consume input
 }
 
 void UHorsePlayerInputComponent::PostEditChangeProperty(const FPropertyChangedEvent& Event)
 {
-	// Super::PostEditChangeProperty(Event);
-
-	// TODO: Add property change handling here
+	(void)Event;
 }
 
 void UHorsePlayerInputComponent::PostDuplicate()
 {
-	// Super::PostDuplicate();
-	// TODO: Add post duplicate handling here
 }
 
 void UHorsePlayerInputComponent::SetThrottleInput(float InThrottle)
@@ -59,10 +75,4 @@ void UHorsePlayerInputComponent::SetBrakeInput(float InBrake)
 void UHorsePlayerInputComponent::SetSteeringInput(float InSteering)
 {
 	CurrentInput.Steering = std::clamp(InSteering, -1.0f, 1.0f);
-}
-
-float UHorsePlayerInputComponent::GetForwardSpeed() const
-{
-	// TODO: Implement GetForwardSpeed()
-	return 0.0f;
 }

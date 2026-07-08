@@ -5,7 +5,7 @@
 #include "Source/Engine/GameFramework/Pawn/HorseCharacter.generated.h"
 
 class USkeletalMeshComponent;
-class UHorsePlayerInputComponent;
+class UHorseMovementComponent;
 class UBTAgentComponent;
 class UBlackboardComponent;
 class USpringArmComponent;
@@ -31,8 +31,12 @@ public:
 	// Component Getters
 	UFUNCTION(Pure, Category = "Horse|Components")
 	USkeletalMeshComponent* GetMeshComponent() const { return MeshComponent; }
+	// 실제 이동(입력 소비·지면 처리)을 담당하는 컴포넌트.
 	UFUNCTION(Pure, Category = "Horse|Components")
-	UHorsePlayerInputComponent* GetHorseMovementComponent() const { return HorseMovementComponent; }
+	UHorseMovementComponent* GetMovementComponent() const { return MovementComponent; }
+	// 플레이어 입력(throttle/steering)을 받아 이동 컴포넌트로 전달하는 컴포넌트.
+	UFUNCTION(Pure, Category = "Horse|Components")
+	UHorsePlayerInputComponent* GetPlayerInputComponent() const { return PlayerInputComponent; }
 	UFUNCTION(Pure, Category = "Horse|Components")
 	USpringArmComponent* GetSpringArmComponent() const { return SpringArmComponent; }
 	UFUNCTION(Pure, Category = "Horse|Components")
@@ -47,7 +51,8 @@ protected:
 
 protected:
 	TWeakObjectPtr<USkeletalMeshComponent> MeshComponent = nullptr;
-	TWeakObjectPtr<UHorsePlayerInputComponent> HorseMovementComponent = nullptr;
+	TWeakObjectPtr<UHorseMovementComponent> MovementComponent = nullptr;
+	TWeakObjectPtr<UHorsePlayerInputComponent> PlayerInputComponent = nullptr;
 	TWeakObjectPtr<UBTAgentComponent> BTAgentComponent = nullptr;
 	TWeakObjectPtr<UBlackboardComponent> BlackboardComponent = nullptr;
 	TWeakObjectPtr<USpringArmComponent> SpringArmComponent = nullptr;

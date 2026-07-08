@@ -5,6 +5,7 @@
 #include "Component/Camera/SpringArmComponent.h"
 #include "Component/Input/InputComponent.h"
 #include "Component/Horse/HorsePlayerInputComponent.h"
+#include "Component/Movement/HorseMovementComponent.h"
 #include "Component/AI/BTAgentComponent.h"
 #include "Component/AI/BlackboardComponent.h"
 #include "Component/Primitive/SkeletalMeshComponent.h"
@@ -80,7 +81,10 @@ void AHorseCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 		MeshComponent->SetSkeletalMesh(Asset);
 	}
 
-	HorseMovementComponent = AddComponent<UHorsePlayerInputComponent>();
+	// 실제 이동 담당. 입력 소비·지면 스냅·낙하를 자기 tick 에서 처리.
+	MovementComponent = AddComponent<UHorseMovementComponent>();
+	// 플레이어 입력 어댑터(현재는 입력 기록 stub — 추후 MovementComponent 로 라우팅).
+	PlayerInputComponent = AddComponent<UHorsePlayerInputComponent>();
 
 	BlackboardComponent = AddComponent<UBlackboardComponent>();
 
@@ -117,31 +121,31 @@ void AHorseCharacter::SetupInputComponent()
 		return;
 	}
 
-	if (HorseMovementComponent)
+	if (PlayerInputComponent)
 	{
 		InputComponent->AddAxisMapping("HorseThrottle", "W", 1.0f);
 		InputComponent->AddAxisMapping("HorseThrottle", "S", -1.0f);
 		InputComponent->AddAxisMapping("HorseSteering", "D", 1.0f);
 		InputComponent->AddAxisMapping("HorseSteering", "A", -1.0f);
-		
+
 		InputComponent->BindAxis("HorseThrottle", [this](float Value)
 		{
-			if (!HorseMovementComponent)
+			if (!PlayerInputComponent)
 			{
 				return;
 			}
 
 			LastThrottleInput = Value;
-			HorseMovementComponent->SetThrottleInput(Value);
-			HorseMovementComponent->SetBrakeInput(0.0f);
+			PlayerInputComponent->SetThrottleInput(Value);
+			PlayerInputComponent->SetBrakeInput(0.0f);
 		});
 
 		InputComponent->BindAxis("HorseSteering", [this](float Value)
 		{
 			LastSteeringInput = Value;
-			if (HorseMovementComponent)
+			if (PlayerInputComponent)
 			{
-				HorseMovementComponent->SetSteeringInput(Value);
+				PlayerInputComponent->SetSteeringInput(Value);
 			}
 		});
 	}
@@ -183,7 +187,8 @@ void AHorseCharacter::SetupInputComponent()
 void AHorseCharacter::RebindComponents()
 {
 	MeshComponent = GetComponentByClass<USkeletalMeshComponent>();
-	HorseMovementComponent = GetComponentByClass<UHorsePlayerInputComponent>();
+	MovementComponent = GetComponentByClass<UHorseMovementComponent>();
+	PlayerInputComponent = GetComponentByClass<UHorsePlayerInputComponent>();
 	BTAgentComponent = GetComponentByClass<UBTAgentComponent>();
 	BlackboardComponent = GetComponentByClass<UBlackboardComponent>();
 	SpringArmComponent = GetComponentByClass<USpringArmComponent>();
@@ -275,7 +280,7 @@ void AHorseCharacter::UpdateCameraReturn(float DeltaTime)
 		std::abs(LastThrottleInput) > 0.01f ||
 		std::abs(LastSteeringInput) > 0.01f;
 	const bool bMoving =
-		HorseMovementComponent && std::abs(HorseMovementComponent->GetForwardSpeed()) > CameraMovingReturnSpeedThreshold;
+		MovementComponent && std::abs(MovementComponent->GetForwardSpeed()) > CameraMovingReturnSpeedThreshold;
 
 	const bool bCameraReturnRequested = bInputActive || bMoving;
 	if (!bCameraReturnRequested || CameraTimeSinceLookInput < CameraReturnDelay)

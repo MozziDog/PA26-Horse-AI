@@ -6,6 +6,7 @@
 #include "AI/BT/BehaviorTreeDebug.h"
 #include "AI/BT/BTLuaBuilder.h"
 #include "Component/AI/BlackboardComponent.h"
+#include "Component/Movement/PawnMovementComponent.h"
 #include "Lua/LuaScriptManager.h"
 
 namespace
@@ -71,6 +72,7 @@ void UBTAgentComponent::BeginPlay()
 	if (AActor* OwnerActor = GetOwner())
 	{
 		BlackboardComp = OwnerActor->GetComponentByClass<UBlackboardComponent>();
+		MovementComp   = OwnerActor->GetComponentByClass<UPawnMovementComponent>();
 	}
 
 	BuildBehaviorTree();
@@ -118,6 +120,7 @@ void UBTAgentComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAct
 	Context.DeltaTime   = DeltaTime;
 	Context.FrameNumber = ++FrameCounter;   // 1 부터 시작 (0 은 초기 미평가 상태)
 	Context.Blackboard  = BlackboardComp ? &BlackboardComp->GetBlackboard() : nullptr;
+	Context.Movement    = MovementComp;
 
 	Tree->Behave(Context);
 	PublishSnapshot(Context.FrameNumber);

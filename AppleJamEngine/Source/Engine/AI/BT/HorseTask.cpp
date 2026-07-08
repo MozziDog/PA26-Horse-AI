@@ -2,6 +2,7 @@
 
 #include "AI/BT/BTBehaviorRegistry.h"
 #include "AI/Blackboard.h"
+#include "Component/Movement/PawnMovementComponent.h"
 #include "GameFramework/AActor.h"
 #include "Runtime/EngineInitHooks.h"
 
@@ -24,13 +25,13 @@ namespace
 			});
 
 		// 태스크
+		// Run: 현재 forward 방향으로 전진 입력만 제공. 실제 가감속·지면 처리는 MovementComponent 담당.
+		// 입력 방향이 현재 forward 와 같아 조향은 중립 → 직진. Movement 없으면 아무것도 안 함(no-op).
 		FBTBehaviorRegistry::RegisterTask(FName("Run"), [](FBTContext& Ctx)
 			{
-				// TODO: 실제 이동 로직으로 대체(현재는 forward 로 3m/s 전진하는 placeholder).
-				if (Ctx.Owner)
+				if (Ctx.Movement && Ctx.Owner)
 				{
-					constexpr float Speed = 3.0f;
-					Ctx.Owner->AddActorWorldOffset(Ctx.Owner->GetActorForward() * (Speed * Ctx.DeltaTime));
+					Ctx.Movement->AddInputVector(Ctx.Owner->GetActorForward(), 1.0f);
 				}
 				return EBTResult::Running;
 			});
