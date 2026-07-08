@@ -34,9 +34,6 @@ public:
 	// 실제 이동(입력 소비·지면 처리)을 담당하는 컴포넌트.
 	UFUNCTION(Pure, Category = "Horse|Components")
 	UHorseMovementComponent* GetMovementComponent() const { return MovementComponent; }
-	// 플레이어 입력(throttle/steering)을 받아 이동 컴포넌트로 전달하는 컴포넌트.
-	UFUNCTION(Pure, Category = "Horse|Components")
-	UHorsePlayerInputComponent* GetPlayerInputComponent() const { return PlayerInputComponent; }
 	UFUNCTION(Pure, Category = "Horse|Components")
 	USpringArmComponent* GetSpringArmComponent() const { return SpringArmComponent; }
 	UFUNCTION(Pure, Category = "Horse|Components")
@@ -52,7 +49,6 @@ protected:
 protected:
 	TWeakObjectPtr<USkeletalMeshComponent> MeshComponent = nullptr;
 	TWeakObjectPtr<UHorseMovementComponent> MovementComponent = nullptr;
-	TWeakObjectPtr<UHorsePlayerInputComponent> PlayerInputComponent = nullptr;
 	TWeakObjectPtr<UBTAgentComponent> BTAgentComponent = nullptr;
 	TWeakObjectPtr<UBlackboardComponent> BlackboardComponent = nullptr;
 	TWeakObjectPtr<USpringArmComponent> SpringArmComponent = nullptr;
@@ -92,6 +88,11 @@ protected:
 	float CameraPitch = 10.0f;
 	float CameraTimeSinceLookInput = 1000.0f;
 	bool bCameraLookInputThisFrame = false;
+	// steering(±1) 이 목표 heading 을 forward 에서 얼마나 옆으로 편향시킬지. 1.0 이면 ±45°.
+	UPROPERTY(Edit, Save, Category = "Horse|Input", DisplayName = "Steer Strength", Min = 0.0f, Max = 4.0f, Speed = 0.05f)
+	float SteerStrength = 1.0f;
+
+	// InputComponent axis 콜백이 매 frame 채우는 현재 입력(0 포함). Tick 이 MovementComponent 로 라우팅.
 	float LastThrottleInput = 0.0f;
 	float LastSteeringInput = 0.0f;
 

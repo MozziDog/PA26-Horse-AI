@@ -199,9 +199,6 @@
     <Filter Include="Source\Engine\Component\Gameplay">
       <UniqueIdentifier>{7a0dfd6e-631f-e1df-8158-ac0ef8a6bda1}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source\Engine\Component\Horse">
-      <UniqueIdentifier>{b671fe7a-d48f-11e3-6197-488e096d9afd}</UniqueIdentifier>
-    </Filter>
     <Filter Include="Source\Engine\Component\Input">
       <UniqueIdentifier>{c109288a-de76-dae8-58c7-55ec458f3d0c}</UniqueIdentifier>
     </Filter>
@@ -1304,9 +1301,6 @@
     <ClCompile Include="Source\Engine\Component\Gameplay\RagdollForceHitscanComponent.cpp">
       <Filter>Source\Engine\Component\Gameplay</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Engine\Component\Horse\HorsePlayerInputComponent.cpp">
-      <Filter>Source\Engine\Component\Horse</Filter>
-    </ClCompile>
     <ClCompile Include="Source\Engine\Component\Input\ActionComponent.cpp">
       <Filter>Source\Engine\Component\Input</Filter>
     </ClCompile>
@@ -1334,16 +1328,16 @@
     <ClCompile Include="Source\Engine\Component\Movement\CharacterMovementComponent.cpp">
       <Filter>Source\Engine\Component\Movement</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Engine\Component\Movement\PawnMovementComponent.cpp">
+    <ClCompile Include="Source\Engine\Component\Movement\FloatingPawnMovementComponent.cpp">
       <Filter>Source\Engine\Component\Movement</Filter>
     </ClCompile>
     <ClCompile Include="Source\Engine\Component\Movement\HorseMovementComponent.cpp">
       <Filter>Source\Engine\Component\Movement</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Engine\Component\Movement\FloatingPawnMovementComponent.cpp">
+    <ClCompile Include="Source\Engine\Component\Movement\MovementComponent.cpp">
       <Filter>Source\Engine\Component\Movement</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Engine\Component\Movement\MovementComponent.cpp">
+    <ClCompile Include="Source\Engine\Component\Movement\PawnMovementComponent.cpp">
       <Filter>Source\Engine\Component\Movement</Filter>
     </ClCompile>
     <ClCompile Include="Source\Engine\Component\Movement\PendulumMovementComponent.cpp">
@@ -2846,9 +2840,6 @@
     <ClInclude Include="Source\Engine\Component\Gameplay\RagdollForceHitscanComponent.h">
       <Filter>Source\Engine\Component\Gameplay</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Engine\Component\Horse\HorsePlayerInputComponent.h">
-      <Filter>Source\Engine\Component\Horse</Filter>
-    </ClInclude>
     <ClInclude Include="Source\Engine\Component\Input\ActionComponent.h">
       <Filter>Source\Engine\Component\Input</Filter>
     </ClInclude>
@@ -2876,16 +2867,16 @@
     <ClInclude Include="Source\Engine\Component\Movement\CharacterMovementComponent.h">
       <Filter>Source\Engine\Component\Movement</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Engine\Component\Movement\PawnMovementComponent.h">
+    <ClInclude Include="Source\Engine\Component\Movement\FloatingPawnMovementComponent.h">
       <Filter>Source\Engine\Component\Movement</Filter>
     </ClInclude>
     <ClInclude Include="Source\Engine\Component\Movement\HorseMovementComponent.h">
       <Filter>Source\Engine\Component\Movement</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Engine\Component\Movement\FloatingPawnMovementComponent.h">
+    <ClInclude Include="Source\Engine\Component\Movement\MovementComponent.h">
       <Filter>Source\Engine\Component\Movement</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Engine\Component\Movement\MovementComponent.h">
+    <ClInclude Include="Source\Engine\Component\Movement\PawnMovementComponent.h">
       <Filter>Source\Engine\Component\Movement</Filter>
     </ClInclude>
     <ClInclude Include="Source\Engine\Component\Movement\PendulumMovementComponent.h">

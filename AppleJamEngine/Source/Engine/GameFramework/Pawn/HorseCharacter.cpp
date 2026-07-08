@@ -4,7 +4,6 @@
 #include "Component/Camera/CameraComponent.h"
 #include "Component/Camera/SpringArmComponent.h"
 #include "Component/Input/InputComponent.h"
-#include "Component/Horse/HorsePlayerInputComponent.h"
 #include "Component/Movement/HorseMovementComponent.h"
 #include "Component/AI/BTAgentComponent.h"
 #include "Component/AI/BlackboardComponent.h"
@@ -83,8 +82,6 @@ void AHorseCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 
 	// 실제 이동 담당. 입력 소비·지면 스냅·낙하를 자기 tick 에서 처리.
 	MovementComponent = AddComponent<UHorseMovementComponent>();
-	// 플레이어 입력 어댑터(현재는 입력 기록 stub — 추후 MovementComponent 로 라우팅).
-	PlayerInputComponent = AddComponent<UHorsePlayerInputComponent>();
 
 	BlackboardComponent = AddComponent<UBlackboardComponent>();
 
@@ -121,34 +118,17 @@ void AHorseCharacter::SetupInputComponent()
 		return;
 	}
 
-	if (PlayerInputComponent)
-	{
-		InputComponent->AddAxisMapping("HorseThrottle", "W", 1.0f);
-		InputComponent->AddAxisMapping("HorseThrottle", "S", -1.0f);
-		InputComponent->AddAxisMapping("HorseSteering", "D", 1.0f);
-		InputComponent->AddAxisMapping("HorseSteering", "A", -1.0f);
+	// 키보드(디지털) + 게임패드 좌스틱(아날로그). BindAxis 콜백은 매 frame 합산값(0 포함)으로 호출되므로
+	// 멤버에 그대로 저장만 하고, 실제 MovementComponent 라우팅은 Tick 에서 한다.
+	InputComponent->AddAxisMapping("HorseThrottle", "W", 1.0f);
+	InputComponent->AddAxisMapping("HorseThrottle", "S", -1.0f);
+	InputComponent->AddAxisMapping("HorseSteering", "D", 1.0f);
+	InputComponent->AddAxisMapping("HorseSteering", "A", -1.0f);
+	InputComponent->AddGamepadAxisMapping("HorseThrottle", EInputAxisSourceType::GamepadLeftStickY, 1.0f);
+	InputComponent->AddGamepadAxisMapping("HorseSteering", EInputAxisSourceType::GamepadLeftStickX, 1.0f);
 
-		InputComponent->BindAxis("HorseThrottle", [this](float Value)
-		{
-			if (!PlayerInputComponent)
-			{
-				return;
-			}
-
-			LastThrottleInput = Value;
-			PlayerInputComponent->SetThrottleInput(Value);
-			PlayerInputComponent->SetBrakeInput(0.0f);
-		});
-
-		InputComponent->BindAxis("HorseSteering", [this](float Value)
-		{
-			LastSteeringInput = Value;
-			if (PlayerInputComponent)
-			{
-				PlayerInputComponent->SetSteeringInput(Value);
-			}
-		});
-	}
+	InputComponent->BindAxis("HorseThrottle", [this](float Value) { LastThrottleInput = Value; });
+	InputComponent->BindAxis("HorseSteering", [this](float Value) { LastSteeringInput = Value; });
 
 	if (bAutoInputCamera)
 	{
@@ -188,7 +168,6 @@ void AHorseCharacter::RebindComponents()
 {
 	MeshComponent = GetComponentByClass<USkeletalMeshComponent>();
 	MovementComponent = GetComponentByClass<UHorseMovementComponent>();
-	PlayerInputComponent = GetComponentByClass<UHorsePlayerInputComponent>();
 	BTAgentComponent = GetComponentByClass<UBTAgentComponent>();
 	BlackboardComponent = GetComponentByClass<UBlackboardComponent>();
 	SpringArmComponent = GetComponentByClass<USpringArmComponent>();
@@ -212,6 +191,27 @@ void AHorseCharacter::BeginPlay()
 void AHorseCharacter::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+
+	// 플레이어 입력(throttle/steering) → MovementComponent. 플레이어도 BT task 와 동일한 AddInputVector 경로.
+	// throttle=전진 세기, steering=목표 heading 편향. throttle<=0 이면 무입력(Movement 가 braking 감속).
+	if (MovementComponent)
+	{
+		const float Throttle = std::clamp(LastThrottleInput, 0.0f, 1.0f);
+		const float Steering = std::clamp(LastSteeringInput, -1.0f, 1.0f);
+		if (Throttle > 0.0f)
+		{
+			FVector Forward = GetActorForward();
+			FVector Right   = GetActorRight();
+			Forward.Z = 0.0f;
+			Right.Z   = 0.0f;
+			FVector Desired = Forward + Right * (Steering * SteerStrength);
+			if (!Desired.IsNearlyZero())
+			{
+				MovementComponent->AddInputVector(Desired.Normalized() * Throttle, 1.0f);
+			}
+		}
+	}
+
 	UpdateCameraReturn(DeltaTime);
 	UpdateCameraControlRotation();
 
