@@ -171,6 +171,9 @@ void AHorseCharacter::SetupInputComponent()
 	InputComponent->AddActionMapping("HorseGiddyup", "W");
 	InputComponent->AddActionMapping("HorseSlowDown", "S");
 	InputComponent->AddActionMapping("HorseStop", "X");
+	InputComponent->AddActionMapping("HorseGiddyup", "GamepadFaceButtonBottom");	// Xbox 패드 기준 A 버튼
+	InputComponent->AddActionMapping("HorseSlowDown", "GamepadFaceButtonRight");	// B 버튼
+	InputComponent->AddActionMapping("HorseStop", "GamepadFaceButtonLeft");			// X 버튼
 	InputComponent->BindAction("HorseGiddyup", EInputEvent::Pressed, [this]()
 	{
 		if (LocomotionComponent) LocomotionComponent->RequestGiddyup();
