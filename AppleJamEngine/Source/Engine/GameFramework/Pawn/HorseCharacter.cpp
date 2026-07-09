@@ -104,7 +104,7 @@ void AHorseCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 	BTAgentComponent = AddComponent<UBTAgentComponent>();
 	if (BTAgentComponent)
 	{
-		BTAgentComponent->SetBehaviorTreeScript("BT/HorseTest.lua");
+		BTAgentComponent->SetBehaviorTreeScript("BT/HorseBT.lua");
 	}
 
 	SpringArmComponent = AddComponent<USpringArmComponent>();

@@ -6,7 +6,7 @@
 #include "GameFramework/AActor.h"
 #include "Runtime/EngineInitHooks.h"
 
-// 말 전용 BT behavior(task/condition) 정의. Lua BT(BT/HorseTest.lua)가 이 이름들을 참조.
+// 말 전용 BT behavior(task/condition) 정의. Lua BT(BT/HorseBT.lua)가 이 이름들을 참조.
 // FEngineInitHooks 로 엔진 부팅 시 1회 자동 등록 → 등록 타이밍/순서 무관.
 namespace
 {
@@ -48,6 +48,11 @@ namespace
 		FBTBehaviorRegistry::RegisterTask(FName("Idle"), [SetDesiredGait](FBTContext& Ctx)
 			{
 				SetDesiredGait(Ctx, EHorseGait::Stop);
+				return EBTResult::Running;
+			});
+		FBTBehaviorRegistry::RegisterTask(FName("Travel"), [](FBTContext& Ctx)
+			{
+				// 아무것도 안하고 Running 상태 유지. 구체적인 동작은 HorseLocomotionComponent에서 수행
 				return EBTResult::Running;
 			});
 	}
