@@ -54,45 +54,43 @@ void UObstacleFanSensorComponent::TickComponent(float DeltaTime, ELevelTick Tick
 
 	const FVector Origin = GetWorldLocation();
 
-	// ── 부채꼴 clearance ──
-	float CenterClear = ProbeRange;
+	// ── 부채꼴 clearance ── 
+	// NOTE: sweep 거리는 벽 면보다 반경만큼 앞에서 멈춤에 유의
+	const FCollisionShape BodyShape = FCollisionShape::MakeSphere(BodyRadius);
 	for (int i = 0; i < HorseBBKeys::ObsFanCount; ++i)
 	{
 		const FVector Dir = RotateAroundZ(Forward, HorseBBKeys::ObsFanAngles[i]);
+		const FVector End = Origin + Dir * ProbeRange;
 
 		FHitResult Hit;
-		Physics->Raycast(Origin, Dir, ProbeRange, Hit, ECollisionChannel::WorldStatic, Owner);   // 자기 몸통 box 제외.
+		Physics->Sweep(Origin, End, FQuat::Identity, BodyShape, Hit, ECollisionChannel::WorldStatic, Owner);   // 자기 몸통 box 제외.
 		const float Clear = Hit.bHit ? Hit.Distance : ProbeRange;
 
 		BlackboardComp->GetBlackboard().SetFloat(HorseBBKeys::ObsClear[i], Clear);
-		
-		if (HorseBBKeys::ObsFanAngles[i] == 0.0f)
-		{
-			CenterClear = Clear;
-		}
 
 		if (bDrawDebug)
 		{
-			const FVector End = Hit.bHit ? Hit.WorldHitLocation : Origin + Dir * ProbeRange;
-			DrawDebugLine(World, Origin, End, Hit.bHit ? FColor::Red() : FColor::Green());
-			if (Hit.bHit)
-			{
-				DrawDebugSphere(World, End, 0.15f, 12, FColor::Red());
-			}
+			const FVector StopCenter = Origin + Dir * Clear;   // sweep 이 멈춘 sphere 중심.
+			DrawDebugLine(World, Origin, StopCenter, Hit.bHit ? FColor::Red() : FColor::Green());
+			DrawDebugSphere(World, StopCenter, BodyRadius, 12, Hit.bHit ? FColor::Red() : FColor::Green());
 		}
 	}
 
-	// ── 점프 가능 판정 ── center 를 JumpProbeUp 만큼 올려 쏴서, 낮은 장애물 지점 너머가 뚫려 있으면 넘을 수 있다.
+	// ── 점프 가능 판정 ── 
+	FHitResult LowHit;
+	Physics->Raycast(Origin, Forward, ProbeRange, LowHit, ECollisionChannel::WorldStatic, Owner);   // 자기 몸통 box 제외.
+	const float LowClear = LowHit.bHit ? LowHit.Distance : ProbeRange;
+
 	const FVector HighOrigin = Origin + FVector(0.0f, 0.0f, JumpProbeUp);
 	FHitResult HighHit;
 	Physics->Raycast(HighOrigin, Forward, ProbeRange, HighHit, ECollisionChannel::WorldStatic, Owner);   // 자기 몸통 box 제외.
 	const float HighClear = HighHit.bHit ? HighHit.Distance : ProbeRange;
 
-	const bool bObstacleAhead = CenterClear < ProbeRange - 1.e-3f;
-	const bool bJumpable      = bObstacleAhead && (HighClear > CenterClear + 0.3f);
+	const bool bObstacleAhead = LowClear < ProbeRange - 1.e-3f;
+	const float MinJumpUpSpace = 0.3f;	// NOTE: 적당히 고른 임시값. 튜닝 필요
+	const bool bJumpable      = bObstacleAhead && (HighClear > LowClear + MinJumpUpSpace);
 
-	// TODO: 전방 장애물 판정 기준 재구현 (말의 몸통 폭 고려)
-	BlackboardComp->GetBlackboard().SetFloat(HorseBBKeys::ObsFwdDist, CenterClear);
+	BlackboardComp->GetBlackboard().SetFloat(HorseBBKeys::ObsFwdDist, LowClear);
 	BlackboardComp->GetBlackboard().SetBool(HorseBBKeys::ObsJumpable, bJumpable);
 
 	if (bDrawDebug)
@@ -108,12 +106,14 @@ void UObstacleFanSensorComponent::ContributeSelectedVisuals(FScene& Scene) const
 {
 	FVector RayOrigin = GetWorldLocation();
 	FVector Forward = Owner->GetActorForward();
-	// ── 스티어링 판단용 부채꼴 센서 ──
+	// ── 스티어링 판단용 부채꼴 sphere sweep 센서 ── 끝점에 BodyRadius sphere 로 폭을 표시.
 	for (int i = 0; i < HorseBBKeys::ObsFanCount; i++)
 	{
 		FVector RayDir = RotateAroundZ(Forward, HorseBBKeys::ObsFanAngles[i]);
 		const FVector RayStart = GetWorldLocation();
-		Scene.AddDebugLine(RayStart, RayStart + RayDir * ProbeRange, FColor::Green());
+		const FVector RayEnd = RayStart + RayDir * ProbeRange;
+		Scene.AddDebugLine(RayStart, RayEnd, FColor::Green());
+		Scene.AddDebugSphere(RayEnd, BodyRadius, 12, FColor::Green());
 	}
 	// ── 점프 가능 판정 센서 ──
 	FVector RayStart = RayOrigin + FVector(0.0f, 0.0f, JumpProbeUp);
