@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "ObstacleFanSensorComponent.h"
 
 #include "AI/HorseBlackboardKeys.h"
@@ -6,17 +6,18 @@
 #include "GameFramework/AActor.h"
 #include "GameFramework/World.h"
 #include "Physics/IPhysicsScene.h"
+#include "Math/MathUtils.h"
 
 #include <cmath>
 
 namespace
 {
-	// V 를 world +Z 축 기준 Deg(도) 만큼 회전(수평 부채꼴용). Z 성분은 보존.
+	// V 를 world +Z 축 기준 Deg(도) 만큼 회전
 	FVector RotateAroundZ(const FVector& V, float Deg)
 	{
-		const float R = Deg * (3.14159265358979f / 180.0f);
-		const float C = std::cos(R);
-		const float S = std::sin(R);
+		const float Rad = Deg * DEG_TO_RAD;
+		const float C = std::cos(Rad);
+		const float S = std::sin(Rad);
 		return FVector(V.X * C - V.Y * S, V.X * S + V.Y * C, V.Z);
 	}
 }
@@ -32,14 +33,12 @@ void UObstacleFanSensorComponent::TickComponent(float DeltaTime, ELevelTick Tick
 {
 	(void)DeltaTime; (void)TickType; (void)ThisTickFunction;
 
-	UWorld* W = World.Get();
-	if (!W || !Owner)
+	if (!World.IsValid() || !Owner)
 	{
 		return;
 	}
-	IPhysicsScene* Physics = W->GetPhysicsScene();
-	UBlackboardComponent* BBComp = BlackboardComp.Get();
-	if (!Physics)
+	IPhysicsScene* Physics = World->GetPhysicsScene();
+	if (!Physics || !BlackboardComp.IsValid())
 	{
 		return;
 	}
@@ -65,10 +64,8 @@ void UObstacleFanSensorComponent::TickComponent(float DeltaTime, ELevelTick Tick
 		Physics->Raycast(Origin, Dir, ProbeRange, Hit, ECollisionChannel::WorldStatic, Owner);   // 자기 몸통 box 제외.
 		const float Clear = Hit.bHit ? Hit.Distance : ProbeRange;
 
-		if (BBComp)
-		{
-			BBComp->GetBlackboard().SetFloat(HorseBBKeys::ObsClear[i], Clear);
-		}
+		BlackboardComp->GetBlackboard().SetFloat(HorseBBKeys::ObsClear[i], Clear);
+		
 		if (HorseBBKeys::ObsFanAngles[i] == 0.0f)
 		{
 			CenterClear = Clear;
@@ -77,10 +74,10 @@ void UObstacleFanSensorComponent::TickComponent(float DeltaTime, ELevelTick Tick
 		if (bDrawDebug)
 		{
 			const FVector End = Hit.bHit ? Hit.WorldHitLocation : Origin + Dir * ProbeRange;
-			DrawDebugLine(W, Origin, End, Hit.bHit ? FColor::Red() : FColor::Green());
+			DrawDebugLine(World, Origin, End, Hit.bHit ? FColor::Red() : FColor::Green());
 			if (Hit.bHit)
 			{
-				DrawDebugSphere(W, End, 0.15f, 12, FColor::Red());
+				DrawDebugSphere(World, End, 0.15f, 12, FColor::Red());
 			}
 		}
 	}
@@ -94,16 +91,32 @@ void UObstacleFanSensorComponent::TickComponent(float DeltaTime, ELevelTick Tick
 	const bool bObstacleAhead = CenterClear < ProbeRange - 1.e-3f;
 	const bool bJumpable      = bObstacleAhead && (HighClear > CenterClear + 0.3f);
 
-	if (BBComp)
-	{
-		BBComp->GetBlackboard().SetFloat(HorseBBKeys::ObsFwdDist, CenterClear);
-		BBComp->GetBlackboard().SetBool(HorseBBKeys::ObsJumpable, bJumpable);
-	}
+	// TODO: 전방 장애물 판정 기준 재구현 (말의 몸통 폭 고려)
+	BlackboardComp->GetBlackboard().SetFloat(HorseBBKeys::ObsFwdDist, CenterClear);
+	BlackboardComp->GetBlackboard().SetBool(HorseBBKeys::ObsJumpable, bJumpable);
 
 	if (bDrawDebug)
 	{
 		const FVector End = HighHit.bHit ? HighHit.WorldHitLocation : HighOrigin + Forward * ProbeRange;
 		// 점프 가능하면 노란색(넘어라), 아니면 회색.
-		DrawDebugLine(W, HighOrigin, End, bJumpable ? FColor::Yellow() : FColor::Gray());
+		DrawDebugLine(World, HighOrigin, End, bJumpable ? FColor::Yellow() : FColor::Gray());
 	}
+}
+
+// 에디터 타임 중 센서 범위 프리뷰
+void UObstacleFanSensorComponent::ContributeSelectedVisuals(FScene& Scene) const
+{
+	FVector RayOrigin = GetWorldLocation();
+	FVector Forward = Owner->GetActorForward();
+	// ── 스티어링 판단용 부채꼴 센서 ──
+	for (int i = 0; i < HorseBBKeys::ObsFanCount; i++)
+	{
+		FVector RayDir = RotateAroundZ(Forward, HorseBBKeys::ObsFanAngles[i]);
+		const FVector RayStart = GetWorldLocation();
+		Scene.AddDebugLine(RayStart, RayStart + RayDir * ProbeRange, FColor::Green());
+	}
+	// ── 점프 가능 판정 센서 ──
+	FVector RayStart = RayOrigin + FVector(0.0f, 0.0f, JumpProbeUp);
+	FVector RayEnd = RayStart + Owner->GetActorForward() * ProbeRange;
+	Scene.AddDebugLine(RayStart, RayEnd, FColor::Yellow());
 }

@@ -19,6 +19,9 @@ public:
 
 	void BeginPlay() override;
 
+	// Editor time preview
+	void ContributeSelectedVisuals(FScene& Scene) const override;
+
 protected:
 	void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction& ThisTickFunction) override;
 
