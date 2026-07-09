@@ -1,4 +1,4 @@
-#include "Editor/EditorEngine.h"
+﻿#include "Editor/EditorEngine.h"
 
 #include "Profiling/StartupProfiler.h"
 #include "Core/Logging/Notification.h"
@@ -6,6 +6,7 @@
 #include "Engine/Serialization/SceneSaveManager.h"
 #include "Engine/Platform/DirectoryWatcher.h"
 #include "Engine/Runtime/EngineInitHooks.h"
+#include "Profiling/Time/Timer.h"
 #include "Component/Camera/CameraComponent.h"
 #include "Component/Debug/GizmoComponent.h"
 #include "Render/Types/MinimalViewInfo.h"
@@ -483,6 +484,14 @@ void UEditorEngine::StartPlayInEditorSession(const FRequestPlaySessionParams& Pa
 	//    UWorld::BeginPlay가 bHasBegunPlay를 먼저 세팅하므로 BeginPlay 도중
 	//    SpawnActor로 만든 신규 액터도 자동으로 BeginPlay된다.
 	PIEWorld->BeginPlay();
+
+	// Timer 리셋 — destroy + load + BeginPlay 가 한 frame 안에서 통째로 일어나면 다음
+	// Tick 의 dt 가 그 로드 시간만큼 부풀어 PhysX 가 거대한 step (예: 2~3 초) 을 한 번에
+	// integrate → tunneling 발생. LastTime 을 지금으로 맞춰 다음 frame 의 dt 를 정상 회귀.
+	if (FTimer* T = GetTimer())
+	{
+		T->Initialize();
+	}
 }
 
 void UEditorEngine::EndPlayMap()
