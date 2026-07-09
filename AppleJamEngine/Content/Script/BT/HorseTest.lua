@@ -29,7 +29,8 @@ return selector {
         -- 여기서 바로 로직을 수정하며 hot-reload 로 반복 가능.
         task(function(ctx)
             if ctx.blackboard then
-                ctx.blackboard:set_int("DesiredGait", 4)  -- 4 = Gallop: 위협 회피는 전력 질주
+                --ctx.blackboard:set_int("DesiredGait", 4)  -- 4 = Gallop: 위협 회피는 전력 질주
+                ctx.blackboard:set_int("DesiredGait", 2) -- 2 = Trot
             end
             return BT.Running
         end, "Run"),

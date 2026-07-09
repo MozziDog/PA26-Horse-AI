@@ -238,6 +238,16 @@ void UHorseMovementComponent::TickSliding(float DeltaTime)
 	}
 }
 
+void UHorseMovementComponent::Jump()
+{
+	if (MoveMode != EHorseMoveMode::Grounded)
+	{
+		return;   // 공중/미끄러짐 중엔 재점프 불가.
+	}
+	Velocity.Z = JumpSpeed;
+	MoveMode   = EHorseMoveMode::Falling;
+}
+
 FVector UHorseMovementComponent::GetGravity() const
 {
 	if (const UWorld* World = GetWorld())
@@ -363,4 +373,5 @@ void UHorseMovementComponent::Serialize(FArchive& Ar)
 	Ar << SlideGroundProbe;
 	Ar << bTorsoCollision;
 	Ar << TorsoSkin;
+	Ar << JumpSpeed;
 }

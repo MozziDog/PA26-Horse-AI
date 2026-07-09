@@ -1214,6 +1214,9 @@
     <ClCompile Include="Source\Engine\Component\AI\BlackboardComponent.cpp">
       <Filter>Source\Engine\Component\AI</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Engine\Component\AI\ObstacleFanSensorComponent.cpp">
+      <Filter>Source\Engine\Component\AI</Filter>
+    </ClCompile>
     <ClCompile Include="Source\Engine\Component\AI\RaycastSensorComponent.cpp">
       <Filter>Source\Engine\Component\AI</Filter>
     </ClCompile>
@@ -2525,6 +2528,9 @@
     <ClInclude Include="Source\Engine\AI\Blackboard.h">
       <Filter>Source\Engine\AI</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Engine\AI\HorseBlackboardKeys.h">
+      <Filter>Source\Engine\AI</Filter>
+    </ClInclude>
     <ClInclude Include="Source\Engine\AI\BT\BTBehaviorRegistry.h">
       <Filter>Source\Engine\AI\BT</Filter>
     </ClInclude>
@@ -2754,6 +2760,9 @@
       <Filter>Source\Engine\Component\AI</Filter>
     </ClInclude>
     <ClInclude Include="Source\Engine\Component\AI\BlackboardComponent.h">
+      <Filter>Source\Engine\Component\AI</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Engine\Component\AI\ObstacleFanSensorComponent.h">
       <Filter>Source\Engine\Component\AI</Filter>
     </ClInclude>
     <ClInclude Include="Source\Engine\Component\AI\RaycastSensorComponent.h">

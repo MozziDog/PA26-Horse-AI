@@ -12,6 +12,7 @@
 #include "Component/Shape/BoxComponent.h"
 #include "Core/Types/CollisionTypes.h"
 #include "AI/Blackboard.h"
+#include "AI/HorseBlackboardKeys.h"
 #include "Mesh/MeshManager.h"
 #include "Runtime/Engine.h"
 
@@ -133,17 +134,36 @@ void AHorseCharacter::SetupInputComponent()
 		return;
 	}
 
-	// 조향(아날로그): 좌우 축 → LocomotionComponent 로 직접 전달. 게임패드 좌스틱 X 도 함께.
+	// 조향(아날로그): 좌우 축 → BB UserMoveDir 로 기록. Locomotion 이 직접 조종당하지 않고 arbiter 가
+	// 이를 하나의 interest 로 소비(간접 반영 원칙). 게임패드 좌스틱 X 도 함께.
 	InputComponent->AddAxisMapping("HorseSteering", "D", 1.0f);
 	InputComponent->AddAxisMapping("HorseSteering", "A", -1.0f);
 	InputComponent->AddGamepadAxisMapping("HorseSteering", EInputAxisSourceType::GamepadLeftStickX, 1.0f);
 	InputComponent->BindAxis("HorseSteering", [this](float Value)
 	{
 		LastSteeringInput = Value;
-		if (LocomotionComponent)
+		if (!BlackboardComponent)
 		{
-			LocomotionComponent->SetSteeringInput(Value);
+			return;
 		}
+		// 스칼라(±1, 좌우) → forward 에서 옆으로 최대 45° 편향된 world 목표 방향, 크기 = 입력 강도.
+		// 매 프레임 현재 forward 기준이라 말이 회전해도 "우측으로 계속 밀기" 가 유지된다. 무입력(0)이면
+		// 영벡터를 써 arbiter 가 유저 영향을 무시(도로/관성 자율 주행)한다.
+		FVector Move(0.0f, 0.0f, 0.0f);
+		const float Strength = std::clamp(std::abs(Value), 0.0f, 1.0f);
+		if (Strength > 1.e-3f)
+		{
+			FVector Forward = GetActorForward();
+			FVector Right   = GetActorRight();
+			Forward.Z = 0.0f;
+			Right.Z   = 0.0f;
+			const FVector Dir = Forward + Right * Value;
+			if (!Dir.IsNearlyZero())
+			{
+				Move = Dir.Normalized() * Strength;
+			}
+		}
+		BlackboardComponent->GetBlackboard().SetVector(HorseBBKeys::UserMoveDir, Move);
 	});
 
 	// 보법(gait) 변속: W=한 단계 가속(쿨타임 있음), S=한 단계 감속, X=정지.
@@ -231,18 +251,6 @@ void AHorseCharacter::Tick(float DeltaTime)
 
 	UpdateCameraReturn(DeltaTime);
 	UpdateCameraControlRotation();
-
-	// TODO: [테스트] 센서 스탠드인 — 시간 기반으로 블랙보드에 판단 입력을 써 준다. 실제 센서 컴포넌트로 대체 예정.
-	//        actor(TG_PrePhysics) 가 BT 컴포넌트(TG_PostPhysics) 보다 먼저 틱하므로 같은 프레임 내 읽기 전에 써진다.
-	if (BlackboardComponent)
-	{
-		BTTestElapsed += DeltaTime;
-		const float P = std::fmod(BTTestElapsed, 12.0f);
-		FBlackboard& Blackboard = BlackboardComponent->GetBlackboard();
-		Blackboard.SetFloat(FName("Phase"), P);
-		Blackboard.SetBool(FName("ThreatNear"), P >= 8.0f && P < 11.0f);
-		Blackboard.SetBool(FName("Hungry"), P < 5.0f);
-	}
 }
 
 void AHorseCharacter::PostDuplicate()

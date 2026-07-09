@@ -33,10 +33,6 @@ public:
 	void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction& ThisTickFunction) override;
 	void Serialize(FArchive& Ar) override;
 
-	// 조향 입력(-1 ~ 1)
-	UFUNCTION(Callable, Category="Locomotion|Steering")
-	void SetSteeringInput(float Value);
-
 	// gait 요청 API
 	// NOTE: 컴포넌트의 판단에 따라 '요청'은 무시될 수 있음
 	UFUNCTION(Callable, Category="Locomotion|Gait")
@@ -64,9 +60,19 @@ protected:
 	// BT가 Blackboard 에 쓴 DesiredGait 등을 읽고 움직임에 반영
 	UBlackboardComponent* BlackboardComp = nullptr;
 
-	// ── 조향 튜닝 ──
-	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Steer Strength", Min=0.0f, Max=4.0f, Speed=0.05f)
-	float SteerStrength = 1.0f;   // steering(±1)이 목표 heading 을 forward 에서 옆으로 편향. 1.0 이면 ±45°.
+	// ── context-steering arbiter 튜닝 ──
+	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Safe Distance", Min=0.0f, Max=20.0f, Speed=0.05f)
+	float SafeDistance = 2.0f;    // m — 부채꼴 clearance 가 이 값 미만이면 막힌 방향으로 보고 veto.
+	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="User Weight", Min=0.0f, Max=10.0f, Speed=0.05f)
+	float UserWeight = 2.0f;      // 유저 입력 방향 interest 가중(최상위 — 우회 좌/우 tie-break).
+	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Road Weight", Min=0.0f, Max=10.0f, Speed=0.05f)
+	float RoadWeight = 1.0f;      // 도로 방향 interest 가중.
+	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Inertia Weight", Min=0.0f, Max=10.0f, Speed=0.05f)
+	float InertiaWeight = 0.5f;   // 현재 진행(forward) 유지 관성 가중(최하위).
+	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Jump Trigger Dist", Min=0.0f, Max=20.0f, Speed=0.05f)
+	float JumpTriggerDist = 2.5f; // m — 정면 장애물이 이 거리 안이고 점프 가능(ObsJumpable)하면 도약.
+	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Draw Steering Debug")
+	bool  bDrawSteeringDebug = true;
 
 	// ── gait별 목표 속도(m/s). Stop은 당연히 0 ──
 	UPROPERTY(Edit, Save, Category="Locomotion|Gait", DisplayName="Walk Speed", Min=0.0f, Max=50.0f, Speed=0.1f)
@@ -86,5 +92,4 @@ protected:
 	EHorseGait MinGait  = EHorseGait::Stop;
 	EHorseGait MaxGait  = EHorseGait::Gallop;
 	float      GaitUpTimer   = 0.0f;   // >0 이면 up-shift 대기 중.
-	float      SteeringInput = 0.0f;
 };

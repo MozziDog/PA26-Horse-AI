@@ -50,6 +50,11 @@ public:
 	UFUNCTION(Pure, Category="HorseMovement")
 	bool    CanAccelerate() const { return MoveMode != EHorseMoveMode::Falling; }
 
+	// 점프 — 접지 상태에서만 수직 임펄스(JumpSpeed)를 주고 Falling 으로 전환. Locomotion 이 장애물
+	// 회피 게이트에서 트리거한다(점프 여부/시점 판단은 Locomotion, 실제 도약은 Movement 소관).
+	UFUNCTION(Callable, Category="HorseMovement")
+	void    Jump();
+
 	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Max Speed", Min=0.0f, Max=50.0f, Speed=0.1f)
 	float MaxSpeed = 8.0f;             // m/s — gallop 최고 속도
 	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Max Acceleration", Min=0.0f, Max=100.0f, Speed=0.1f)
@@ -78,6 +83,9 @@ public:
 	bool  bTorsoCollision = true;      // 몸통 box(root) sweep 으로 벽/절벽 관통·비비기(rubbing climb) 차단
 	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Torso Skin", Min=0.0f, Max=1.0f, Speed=0.001f)
 	float TorsoSkin = 0.05f;           // Torso box에 여유 줘서 벽 근처에서 지형과 캐릭터 메시 교차 방지
+
+	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Jump Speed", Min=0.0f, Max=30.0f, Speed=0.1f)
+	float JumpSpeed = 5.0f;            // m/s — 점프 시 초기 상향 속도. h≈v²/2g (5m/s → 약 1.3m)
 
 protected:
 	FVector GetGravity() const;

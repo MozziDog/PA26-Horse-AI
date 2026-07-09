@@ -1,18 +1,30 @@
 ﻿#include "HorseLocomotionComponent.h"
 
 #include "HorseMovementComponent.h"
+#include "AI/HorseBlackboardKeys.h"
 #include "Component/AI/BlackboardComponent.h"
 #include "Core/TickFunction.h"
+#include "Debug/DrawDebugHelpers.h"
 #include "GameFramework/AActor.h"
 #include "Serialization/Archive.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace
 {
 	EHorseGait GaitStep(EHorseGait Gait, int Delta)
 	{
 		return static_cast<EHorseGait>(static_cast<uint8>(Gait) + Delta);
+	}
+
+	// V 를 world +Z 축 기준 Deg(도) 만큼 회전(수평 부채꼴 slot 생성용). Z 성분 보존.
+	FVector RotateAroundZ(const FVector& V, float Deg)
+	{
+		const float R = Deg * (3.14159265358979f / 180.0f);
+		const float C = std::cos(R);
+		const float S = std::sin(R);
+		return FVector(V.X * C - V.Y * S, V.X * S + V.Y * C, V.Z);
 	}
 }
 
@@ -36,9 +48,8 @@ void UHorseLocomotionComponent::BeginPlay()
 		Movement       = Owner->GetComponentByClass<UHorseMovementComponent>();
 		BlackboardComp = Owner->GetComponentByClass<UBlackboardComponent>();
 	}
-	Gait          = EHorseGait::Stop;
-	GaitUpTimer   = 0.0f;
-	SteeringInput = 0.0f;
+	Gait        = EHorseGait::Stop;
+	GaitUpTimer = 0.0f;
 }
 
 void UHorseLocomotionComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction& ThisTickFunction)
@@ -56,7 +67,7 @@ void UHorseLocomotionComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 	if (BlackboardComp)
 	{
 		int Desired = 0;
-		if (BlackboardComp->GetBlackboard().TryGetInt(FName("DesiredGait"), Desired))
+		if (BlackboardComp->GetBlackboard().TryGetInt(HorseBBKeys::DesiredGait, Desired))
 		{
 			const int Cur  = static_cast<int>(Gait);
 			const int Want = std::clamp(Desired, 0, static_cast<int>(EHorseGait::Gallop));
@@ -74,25 +85,105 @@ void UHorseLocomotionComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 		return;   // 정지 상태면 무입력 → Movement 가 braking 감속.
 	}
 
-	// 조향은 단순 yaw 변화로 구현된 상태
-	// 주행 속도 별 조향각은 튜닝 필요
 	FVector Forward = Owner->GetActorForward();
-	FVector Right   = Owner->GetActorRight();
 	Forward.Z = 0.0f;
-	Right.Z   = 0.0f;
-	FVector Dir = Forward + Right * (SteeringInput * SteerStrength);
-	if (Dir.IsNearlyZero())
+	if (Forward.IsNearlyZero())
 	{
 		return;
 	}
+	Forward = Forward.Normalized();
+
+	const FVector Loc = Owner->GetActorLocation();
+	UWorld*       W   = Owner->GetWorld();
+	FBlackboard*  BB  = BlackboardComp ? &BlackboardComp->GetBlackboard() : nullptr;
+
+	// ── influence 소스 수집 ── 없으면 무영향(기본 = 직진). 우선순위는 가중치로 표현:
+	//    User(최상) > Road > Inertia. 장애물은 아래 slot veto 로 이들 모두를 hard 하게 이긴다.
+	FVector UserDir(0.0f, 0.0f, 0.0f);
+	float   UserMag = 0.0f;
+	FVector RoadDir(0.0f, 0.0f, 0.0f);
+	bool    bRoad   = false;
+	if (BB)
+	{
+		FVector V;
+		if (BB->TryGetVector(HorseBBKeys::UserMoveDir, V) && !V.IsNearlyZero())
+		{
+			UserMag = std::clamp(V.Length(), 0.0f, 1.0f);
+			V.Z = 0.0f;
+			if (!V.IsNearlyZero()) { UserDir = V.Normalized(); }
+			else                   { UserMag = 0.0f; }
+		}
+		if (BB->TryGetVector(HorseBBKeys::RoadDir, V) && !V.IsNearlyZero())
+		{
+			V.Z = 0.0f;
+			if (!V.IsNearlyZero()) { RoadDir = V.Normalized(); bRoad = true; }
+		}
+	}
+
+	// ── 점프 게이트 ── 정면 장애물이 점프 가능(ObsJumpable)하고 트리거 거리 안이면 도약(heading 유지).
+	if (BB)
+	{
+		bool  bJumpable = false;
+		float FwdDist   = 0.0f;
+		if (BB->TryGetBool(HorseBBKeys::ObsJumpable, bJumpable) && bJumpable
+			&& BB->TryGetFloat(HorseBBKeys::ObsFwdDist, FwdDist) && FwdDist < JumpTriggerDist)
+		{
+			Movement->Jump();
+		}
+	}
+
+	// ── context steering ── 부채꼴 slot 마다 danger veto 후 interest 최고 방향 선택.
+	//    두 우회 방향이 모두 열려 있으면 interest(User>Road>Inertia)가 tie 를 깨 좌/우가 자연히 결정된다.
+	const FVector DebugBase = Loc + FVector(0.0f, 0.0f, 0.3f);
+	float   BestScore = -1.0f;
+	FVector BestDir   = Forward;
+	bool    bAnyOpen  = false;
+	for (int i = 0; i < HorseBBKeys::ObsFanCount; ++i)
+	{
+		const FVector SlotDir = RotateAroundZ(Forward, HorseBBKeys::ObsFanAngles[i]);
+
+		float      Clear    = 0.0f;
+		const bool bBlocked = BB && BB->TryGetFloat(HorseBBKeys::ObsClear[i], Clear) && Clear < SafeDistance;
+
+		float Interest = InertiaWeight * std::max(0.0f, SlotDir.Dot(Forward));
+		if (UserMag > 0.0f) { Interest += UserWeight * UserMag * std::max(0.0f, SlotDir.Dot(UserDir)); }
+		if (bRoad)          { Interest += RoadWeight * std::max(0.0f, SlotDir.Dot(RoadDir)); }
+
+		if (bDrawSteeringDebug && W)
+		{
+			const FColor  Col = bBlocked ? FColor::Red() : FColor::Green();
+			DrawDebugLine(W, DebugBase, DebugBase + SlotDir * (1.0f + Interest), Col);
+		}
+
+		if (bBlocked)
+		{
+			continue;   // 막힌 방향 veto.
+		}
+		bAnyOpen = true;
+		if (Interest > BestScore)
+		{
+			BestScore = Interest;
+			BestDir   = SlotDir;
+		}
+	}
+
+	if (!bAnyOpen)
+	{
+		// 모든 방향 막힘(점프도 불가) → 급브레이크: 입력 미부여 시 Movement 가 감속.
+		if (bDrawSteeringDebug && W)
+		{
+			DrawDebugSphere(W, DebugBase, 0.4f, 12, FColor::Red());
+		}
+		return;
+	}
+
+	if (bDrawSteeringDebug && W)
+	{
+		DrawDebugLine(W, DebugBase, DebugBase + BestDir * 3.0f, FColor::Blue());   // 선택된 heading.
+	}
 
 	// gait → scale([0,1]). Movement 는 MaxSpeed*scale 을 목표속도로 삼는다.
-	Movement->AddInputVector(Dir.Normalized(), GetGaitScaledSpeed());
-}
-
-void UHorseLocomotionComponent::SetSteeringInput(float Value)
-{
-	SteeringInput = std::clamp(Value, -1.0f, 1.0f);
+	Movement->AddInputVector(BestDir.Normalized(), GetGaitScaledSpeed());
 }
 
 void UHorseLocomotionComponent::RequestGiddyup()
@@ -170,10 +261,15 @@ float UHorseLocomotionComponent::GetGaitScaledSpeed() const
 void UHorseLocomotionComponent::Serialize(FArchive& Ar)
 {
 	Super::Serialize(Ar);
-	Ar << SteerStrength;
 	Ar << WalkSpeed;
 	Ar << TrotSpeed;
 	Ar << CanterSpeed;
 	Ar << GallopSpeed;
 	Ar << GaitUpCooldown;
+	Ar << SafeDistance;
+	Ar << UserWeight;
+	Ar << RoadWeight;
+	Ar << InertiaWeight;
+	Ar << JumpTriggerDist;
+	Ar << bDrawSteeringDebug;
 }

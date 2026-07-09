@@ -82,10 +82,7 @@ protected:
 	bool bCameraLookInputThisFrame = false;
 
 	// steering 축 콜백이 매 frame 채우는 값(0 포함). 카메라 자동복귀의 "입력 활성" 판정에 쓴다.
-	// 실제 조향 라우팅은 콜백에서 LocomotionComponent 로 직접 전달한다.
+	// 실제 조향은 콜백에서 BB UserMoveDir 로 기록되어 Locomotion arbiter 가 소비한다.
 	float LastSteeringInput = 0.0f;
-
-	// TODO: [테스트] 센서 스탠드인용 누적 시간 — 실제 센서 컴포넌트 도입 시 제거.
-	float BTTestElapsed = 0.0f;
 };
 
