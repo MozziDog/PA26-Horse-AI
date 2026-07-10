@@ -136,8 +136,10 @@ void UHorseLocomotionComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 	if (SteerDir.IsNearlyZero()) { SteerDir = Forward; }
 
 	constexpr int N = HorseBBKeys::ObsFanCount;
+	static_assert(N <= MaxFanSlots, "PrevDanger 버퍼(MaxFanSlots)보다 fan slot 이 많음");
 
-	// 1) slot 별 raw danger(2단계). clear>=Safe → 0, Hard~Safe → 0..1 램프, clear<=Hard → 1(하드 제외).
+	// 1) slot 별 danger(2단계). clear>=Safe → 0, Hard~Safe → 0..1 램프, clear<=Hard → 1(하드 제외).
+	//    hard-block(bHardBlk)은 안전 제외라 항상 즉응. soft danger 는 아래에서 slow-release 로 감쇠.
 	float   Danger[N]  = {};
 	bool    bHardBlk[N] = {};
 	FVector SlotDir[N];
@@ -152,6 +154,18 @@ void UHorseLocomotionComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 		if      (Clear <= HardBlockDistance) { Danger[i] = 1.0f; bHardBlk[i] = true; }
 		else if (Clear <  SafeDistance)      { Danger[i] = (SafeDistance - Clear) / RampSpan; }
 		else                                 { Danger[i] = 0.0f; }
+	}
+
+	// 1b) danger persistence(fast-attack/slow-release) — 올릴 땐 즉시(max), 내릴 땐 초당 ReleaseRate 로만
+	//     감쇠. 회전 중 장애물이 sweep 경계를 들락거려 danger 가 튀는 걸 흡수(조향 떨림 억제). 반응 지연은
+	//     내려갈 때만 생기므로 회피 반응은 늦어지지 않는다. 토글 off 면 이전 값을 관측치로 리셋만 한다.
+	for (int i = 0; i < N; ++i)
+	{
+		if (bDangerPersistence)
+		{
+			Danger[i] = std::max(Danger[i], PrevDanger[i] - DangerReleaseRate * DeltaTime);
+		}
+		PrevDanger[i] = Danger[i];
 	}
 
 	// 2) 이웃으로 danger 확산 → 장애물에 걸렸을 때 조금 더 넓게 회피
@@ -170,6 +184,15 @@ void UHorseLocomotionComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 	float DangerActivation = 0.0f;
 	for (int i = 0; i < N; ++i) { DangerActivation = std::max(DangerActivation, SpreadDanger[i]); }
 
+	// forward-lane guard: 정면(현재 heading, 0°) slot 은 옆 slot spread 로 페널티받지 않고 자기 lane 의 raw
+	// danger 만 본다. 정면 sweep 이 BodyRadius 폭까지 뚫려 있으면 직진은 실제로 안전하므로, 통로 탈출 시 남은
+	// 벽의 spread 가 직진을 눌러 열린 쪽으로 홱 꺾이는 현상을 없앤다. ForwardLaneGuard=0 이면 기존 동작.
+	int CenterIdx = 0;
+	for (int i = 1; i < N; ++i)
+	{
+		if (std::abs(HorseBBKeys::ObsFanAngles[i]) < std::abs(HorseBBKeys::ObsFanAngles[CenterIdx])) { CenterIdx = i; }
+	}
+
 	float Score[N];
 	int   BestIdx = -1;
 	for (int i = 0; i < N; ++i)
@@ -178,8 +201,12 @@ void UHorseLocomotionComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 		if (UserMag > 0.0f) { Interest += UserWeight * UserMag * std::max(0.0f, SlotDir[i].Dot(UserDir)); }
 		if (bRoad)          { Interest += RoadWeight * std::max(0.0f, SlotDir[i].Dot(RoadDir)); }
 
+		// 정면 slot 은 spread 오염분을 ForwardLaneGuard 비율만큼 걷어내 raw danger 로 되돌린다.
+		float EffDanger = SpreadDanger[i];
+		if (i == CenterIdx) { EffDanger -= (SpreadDanger[i] - Danger[i]) * ForwardLaneGuard; }
+
 		const float Commit = CommitWeight * DangerActivation * std::max(0.0f, SlotDir[i].Dot(SteerDir));
-		Score[i] = bHardBlk[i] ? -FLT_MAX : (Interest - DangerWeight * SpreadDanger[i] + Commit);
+		Score[i] = bHardBlk[i] ? -FLT_MAX : (Interest - DangerWeight * EffDanger + Commit);
 
 		if (BestIdx < 0 || Score[i] > Score[BestIdx]) { BestIdx = i; }
 
@@ -195,8 +222,8 @@ void UHorseLocomotionComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 	// 뚫린 방향이 있다면
 	if (BestIdx >= 0 && !bHardBlk[BestIdx])
 	{
-		// 4) sub-slot 포물선 보간 — 최고점 slot 과 양옆 score 로 연속 heading 을 구해 20° 스냅 떨림을 없앤다.
-		float Angle = HorseBBKeys::ObsFanAngles[BestIdx];
+		// 4) sub-slot 포물선 보간 — 최고점 slot 과 양옆 score 로 연속 목표 조향각을 구해 20° 스냅 떨림을 없앤다.
+		float TargetAngle = HorseBBKeys::ObsFanAngles[BestIdx];
 		if (BestIdx > 0 && BestIdx < N - 1 && !bHardBlk[BestIdx - 1] && !bHardBlk[BestIdx + 1])
 		{
 			const float sL = Score[BestIdx - 1];
@@ -207,11 +234,22 @@ void UHorseLocomotionComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 			{
 				const float Offset = std::clamp(0.5f * (sL - sR) / Denom, -1.0f, 1.0f);   // [-1,1] slot 단위.
 				const float Step   = HorseBBKeys::ObsFanAngles[BestIdx + 1] - HorseBBKeys::ObsFanAngles[BestIdx];
-				Angle += Offset * Step;
+				TargetAngle += Offset * Step;
 			}
 		}
 
-		const FVector Heading = RotateAroundZ(Forward, Angle).Normalized();
+		// 5) 조향각 slew — 목표각이 튀어도 초당 SteerRateLimit 이하로만 따라가 잔여 떨림을 뭉갠다.
+		if (bSmoothSteering)
+		{
+			const float MaxStep = SteerRateLimit * DeltaTime;
+			SteerAngle += std::clamp(TargetAngle - SteerAngle, -MaxStep, MaxStep);
+		}
+		else
+		{
+			SteerAngle = TargetAngle;
+		}
+
+		const FVector Heading = RotateAroundZ(Forward, SteerAngle).Normalized();
 		SteerDir = Heading;   // 다음 프레임 커밋 기준.
 
 		if (bDrawSteeringDebug && World.IsValid())
@@ -349,4 +387,9 @@ void UHorseLocomotionComponent::Serialize(FArchive& Ar)
 	Ar << DangerWeight;
 	Ar << DangerSpread;
 	Ar << CommitWeight;
+	Ar << bDangerPersistence;
+	Ar << DangerReleaseRate;
+	Ar << bSmoothSteering;
+	Ar << SteerRateLimit;
+	Ar << ForwardLaneGuard;
 }

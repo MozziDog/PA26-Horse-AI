@@ -68,11 +68,13 @@ protected:
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Safe Distance", Min=0.0f, Max=20.0f, Speed=0.05f)
 	float SafeDistance = 2.0f;    // m — clearance 가 이 값부터 danger 가 붙기 시작(램프 상단).
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Hard Block Distance", Min=0.0f, Max=20.0f, Speed=0.05f)
-	float HardBlockDistance = 0.8f;   // m — 이 값 이하 clearance 인 slot 은 danger=1 이며 절대 선택 안 함(안전 바닥).
+	float HardBlockDistance = 0.8f;   // m — 이 값 이하 clearance 인 slot 은 danger=1 이며 절대 선택 안 함
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Danger Weight", Min=0.0f, Max=20.0f, Speed=0.05f)
 	float DangerWeight = 3.0f;    // danger 가 interest 를 깎는 강도. interest 합보다 커야 실제로 회피한다.
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Danger Spread", Min=0.0f, Max=1.0f, Speed=0.02f)
-	float DangerSpread = 0.5f;    // 이웃 slot 으로 번지는 danger 비율(0=번짐 없음). 장애물에 여유를 두고 필드를 매끄럽게.
+	float DangerSpread = 0.5f;    // 이웃 slot 으로 번지는 danger 비율(0=번짐 없음). danger field 를 공간적으로 매끄럽게 해 판단 떨림 완화.
+	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Forward Lane Guard", Min=0.0f, Max=1.0f, Speed=0.02f)
+	float ForwardLaneGuard = 1.0f;   // 정면 slot 에서 걷어낼 spread 오염 비율(1=완전 제거, 0=off). 통로 탈출 시 과민 조향(lurch) 억제.
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="User Weight", Min=0.0f, Max=10.0f, Speed=0.05f)
 	float UserWeight = 2.0f;      // 유저 입력 방향 interest 가중(최상위 — 우회 좌/우 tie-break).
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Road Weight", Min=0.0f, Max=10.0f, Speed=0.05f)
@@ -81,8 +83,22 @@ protected:
 	float InertiaWeight = 0.5f;   // 현재 진행(forward) 유지 관성 가중(최하위).
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Commit Weight", Min=0.0f, Max=10.0f, Speed=0.05f)
 	float CommitWeight = 0.75f;   // 직전 선택 heading 을 유지하려는 히스테리시스. 좌/우 argmax 핑퐁(떨림) 억제.
-	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Jump Trigger Dist", Min=0.0f, Max=20.0f, Speed=0.05f)
-	float JumpTriggerDist = 2.5f; // m — 정면 장애물이 이 거리 안이고 점프 가능(ObsJumpable)하면 도약.
+	// danger persistence(fast-attack/slow-release): 회전 중 장애물이 sweep 경계를 들락거려 clearance 가
+	// 튈 때, danger를 천천히 감쇠시켜 조향 떨림을 억제. 
+	// danger의 증가는 장애물 회피 반응성 고려해서 즉시 반영되는 상태 유지
+	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Danger Persistence")
+	bool  bDangerPersistence = true;
+	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Danger Release Rate", Min=0.0f, Max=20.0f, Speed=0.05f)
+	float DangerReleaseRate = 3.0f;   // danger/sec — danger 가 내려갈 때 초당 감쇠량. 클수록 빨리 잊음(0=영구 유지).
+
+	// 조향각 slew — 목표 heading(상대 조향각)이 튀어도 초당 SteerRateLimit 이하로만 바꿔 Movement 가 쫓는
+	// 레퍼런스를 매끄럽게 한다. 장애물이 sweep 에 "나타나는" 순간의 잔여 떨림을 뭉갠다. 
+	// 낮출수록 반응성↓·스무딩↑
+	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Smooth Steering")
+	bool  bSmoothSteering = true;
+	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Steer Rate Limit", Min=0.0f, Max=720.0f, Speed=1.0f)
+	float SteerRateLimit = 90.0f;     // 조향각 변화 상한치(deg/s) — 자연스러운 조향 변화 연출용
+
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Draw Steering Debug")
 	bool  bDrawSteeringDebug = true;
 
@@ -99,10 +115,16 @@ protected:
 	UPROPERTY(Edit, Save, Category="Locomotion|Gait", DisplayName="Gait Up Cooldown", Min=0.0f, Max=5.0f, Speed=0.01f)
 	float GaitUpCooldown = 0.6f; 	// 가속 쿨타임(초 단위)
 
+	UPROPERTY(Edit, Save, Category = "Locomotion|Jump", DisplayName = "Jump Trigger Dist", Min = 0.0f, Max = 20.0f, Speed = 0.05f)
+	float JumpTriggerDist = 2.5f; // m — 정면 장애물이 이 거리 안이고 점프 가능(ObsJumpable)하면 도약.
+
 	// ── runtime states ──
+	static constexpr int MaxFanSlots = 8;   // PrevDanger 버퍼 상한. cpp 에서 ObsFanCount <= 이 값 검증.
 	EHorseGait Gait     = EHorseGait::Stop;
 	EHorseGait MinGait  = EHorseGait::Stop;
 	EHorseGait MaxGait  = EHorseGait::Gallop;
 	float      GaitUpTimer   = 0.0f;   // >0 이면 up-shift 대기 중.
 	FVector    SteerDir      = FVector(0.0f, 0.0f, 0.0f);   // 직전 프레임에 선택한 회피 heading(커밋 히스테리시스용). 0=미초기화.
+	float      PrevDanger[MaxFanSlots] = {};   // slot 별 직전 프레임 danger(slow-release 감쇠용).
+	float      SteerAngle    = 0.0f;   // 현재 조향각(forward 기준 deg). 목표각으로 slew 되는 상태값.
 };

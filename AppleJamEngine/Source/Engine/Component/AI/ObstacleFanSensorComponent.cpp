@@ -55,7 +55,7 @@ void UObstacleFanSensorComponent::TickComponent(float DeltaTime, ELevelTick Tick
 	const FVector Origin = GetWorldLocation();
 
 	// ── 부채꼴 clearance ── 
-	// NOTE: sweep 거리는 벽 면보다 반경만큼 앞에서 멈춤에 유의
+	// NOTE: sphere sweep 거리는 벽 면보다 radius만큼 앞에서 멈춤에 유의
 	const FCollisionShape BodyShape = FCollisionShape::MakeSphere(BodyRadius);
 	for (int i = 0; i < HorseBBKeys::ObsFanCount; ++i)
 	{
