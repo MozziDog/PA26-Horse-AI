@@ -54,6 +54,10 @@ public:
 	// 회피 게이트에서 트리거한다(점프 여부/시점 판단은 Locomotion, 실제 도약은 Movement 소관).
 	UFUNCTION(Callable, Category="HorseMovement")
 	void    Jump();
+	// 정지 - AddInputVector()를 호출하지 않으면 알아서 멈춘다.
+	// 현재로써는 명시적으로 멈춘다고 표시하기 위한 Placeholder 역할
+	UFUNCTION(Callable, Category = "HorseMovement")
+	void	Brake();
 
 	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Max Speed", Min=0.0f, Max=50.0f, Speed=0.1f)
 	float MaxSpeed = 8.0f;             // m/s — gallop 최고 속도

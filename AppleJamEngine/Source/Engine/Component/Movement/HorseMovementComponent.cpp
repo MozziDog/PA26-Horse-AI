@@ -248,6 +248,12 @@ void UHorseMovementComponent::Jump()
 	MoveMode   = EHorseMoveMode::Falling;
 }
 
+void UHorseMovementComponent::Brake()
+{
+	// 아무것도 안해도 자연적으로 BrakingDecleration 적용됨.
+	// 정지 시의 별도 로직 필요하면 여기에 작성 (e.g. 애니메이션, 먼지 효과 등등)
+}
+
 FVector UHorseMovementComponent::GetGravity() const
 {
 	if (const UWorld* World = GetWorld())

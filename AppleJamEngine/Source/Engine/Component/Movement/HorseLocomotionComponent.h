@@ -53,22 +53,34 @@ public:
 	float GetGaitTargetSpeed() const;   // 현재 gait 의 목표 속도(m/s)
 
 protected:
-	float GetGaitScaledSpeed() const; // 목표속도 / Movement MaxSpeed 를 [0,1] 로.
+	float GetGaitScaledSpeed() const; // 목표속도 / Movement MaxSpeed 를 [0,1] 로
+	void UpdateGait();
 	void  ClampGaitToEnvelope();
 
-	UHorseMovementComponent* Movement = nullptr;
+	TWeakObjectPtr<UHorseMovementComponent> Movement = nullptr;
 	// BT가 Blackboard 에 쓴 DesiredGait 등을 읽고 움직임에 반영
-	UBlackboardComponent* BlackboardComp = nullptr;
+	TWeakObjectPtr<UBlackboardComponent> BlackboardComp = nullptr;
+	TWeakObjectPtr<UWorld> World = nullptr;		// 디버깅 시각화에 필요
 
 	// ── context-steering arbiter 튜닝 ──
+	// 회피는 binary veto 가 아니라 graded danger(2단계): SafeDistance~HardBlockDistance 구간은
+	// danger 0→1 선형 램프(soft penalty), HardBlockDistance 이하는 danger=1 이며 해당 slot 을 하드 제외.
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Safe Distance", Min=0.0f, Max=20.0f, Speed=0.05f)
-	float SafeDistance = 2.0f;    // m — 부채꼴 clearance 가 이 값 미만이면 막힌 방향으로 보고 veto.
+	float SafeDistance = 2.0f;    // m — clearance 가 이 값부터 danger 가 붙기 시작(램프 상단).
+	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Hard Block Distance", Min=0.0f, Max=20.0f, Speed=0.05f)
+	float HardBlockDistance = 0.8f;   // m — 이 값 이하 clearance 인 slot 은 danger=1 이며 절대 선택 안 함(안전 바닥).
+	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Danger Weight", Min=0.0f, Max=20.0f, Speed=0.05f)
+	float DangerWeight = 3.0f;    // danger 가 interest 를 깎는 강도. interest 합보다 커야 실제로 회피한다.
+	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Danger Spread", Min=0.0f, Max=1.0f, Speed=0.02f)
+	float DangerSpread = 0.5f;    // 이웃 slot 으로 번지는 danger 비율(0=번짐 없음). 장애물에 여유를 두고 필드를 매끄럽게.
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="User Weight", Min=0.0f, Max=10.0f, Speed=0.05f)
 	float UserWeight = 2.0f;      // 유저 입력 방향 interest 가중(최상위 — 우회 좌/우 tie-break).
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Road Weight", Min=0.0f, Max=10.0f, Speed=0.05f)
 	float RoadWeight = 1.0f;      // 도로 방향 interest 가중.
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Inertia Weight", Min=0.0f, Max=10.0f, Speed=0.05f)
 	float InertiaWeight = 0.5f;   // 현재 진행(forward) 유지 관성 가중(최하위).
+	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Commit Weight", Min=0.0f, Max=10.0f, Speed=0.05f)
+	float CommitWeight = 0.75f;   // 직전 선택 heading 을 유지하려는 히스테리시스. 좌/우 argmax 핑퐁(떨림) 억제.
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Jump Trigger Dist", Min=0.0f, Max=20.0f, Speed=0.05f)
 	float JumpTriggerDist = 2.5f; // m — 정면 장애물이 이 거리 안이고 점프 가능(ObsJumpable)하면 도약.
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Draw Steering Debug")
@@ -92,4 +104,5 @@ protected:
 	EHorseGait MinGait  = EHorseGait::Stop;
 	EHorseGait MaxGait  = EHorseGait::Gallop;
 	float      GaitUpTimer   = 0.0f;   // >0 이면 up-shift 대기 중.
+	FVector    SteerDir      = FVector(0.0f, 0.0f, 0.0f);   // 직전 프레임에 선택한 회피 heading(커밋 히스테리시스용). 0=미초기화.
 };

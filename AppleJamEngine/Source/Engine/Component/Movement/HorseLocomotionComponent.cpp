@@ -9,6 +9,7 @@
 #include "Serialization/Archive.h"
 
 #include <algorithm>
+#include <cfloat>
 #include <cmath>
 
 namespace
@@ -48,6 +49,8 @@ void UHorseLocomotionComponent::BeginPlay()
 		Movement       = Owner->GetComponentByClass<UHorseMovementComponent>();
 		BlackboardComp = Owner->GetComponentByClass<UBlackboardComponent>();
 	}
+	World = GetWorld();
+
 	Gait        = EHorseGait::Stop;
 	GaitUpTimer = 0.0f;
 }
@@ -58,31 +61,19 @@ void UHorseLocomotionComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 	(void)TickType;
 	(void)ThisTickFunction;
 
+	// 가속 쿨타임 타이머 처리
 	if (GaitUpTimer > 0.0f)
 	{
 		GaitUpTimer = std::max(0.0f, GaitUpTimer - DeltaTime);
 	}
 
-	// BT에서 요청한 DesiredGait를 쿨타임 등 고려 후 실제 Gait에 반영
-	if (BlackboardComp)
-	{
-		int Desired = 0;
-		if (BlackboardComp->GetBlackboard().TryGetInt(HorseBBKeys::DesiredGait, Desired))
-		{
-			const int Cur  = static_cast<int>(Gait);
-			const int Want = std::clamp(Desired, 0, static_cast<int>(EHorseGait::Gallop));
-			if (Want > Cur)      RequestGiddyup();
-			else if (Want < Cur) RequestSlowDown();
-		}
-	}
-
-	// BT등에서 결정한 범위로 현재의 gait 클램핑
-	ClampGaitToEnvelope();   
+	// BT 요청 등 고려해서 gait 업데이트
+	UpdateGait();
 
 	AActor* Owner = GetOwner();
 	if (!Movement || !Owner || Gait == EHorseGait::Stop)
 	{
-		return;   // 정지 상태면 무입력 → Movement 가 braking 감속.
+		return;   // 정지 상태면 Movement에 입력 전달하지 않음 → 자연 감속
 	}
 
 	FVector Forward = Owner->GetActorForward();
@@ -93,30 +84,36 @@ void UHorseLocomotionComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 	}
 	Forward = Forward.Normalized();
 
-	const FVector Loc = Owner->GetActorLocation();
-	UWorld*       W   = Owner->GetWorld();
+	const FVector Location = Owner->GetActorLocation();
 	FBlackboard*  BB  = BlackboardComp ? &BlackboardComp->GetBlackboard() : nullptr;
 
-	// ── influence 소스 수집 ── 없으면 무영향(기본 = 직진). 우선순위는 가중치로 표현:
-	//    User(최상) > Road > Inertia. 장애물은 아래 slot veto 로 이들 모두를 hard 하게 이긴다.
+	// ── influence 소스 수집 ── 없으면 기본 직진. 
+	// 우선순위는 가중치로 표현: User(최상) > Road > Inertia. 
+	// 장애물이 HardBlockDistance 보다 가까우면 아래 slot hard refuse로 위 우선순위 무시함
 	FVector UserDir(0.0f, 0.0f, 0.0f);
 	float   UserMag = 0.0f;
 	FVector RoadDir(0.0f, 0.0f, 0.0f);
 	bool    bRoad   = false;
 	if (BB)
 	{
-		FVector V;
-		if (BB->TryGetVector(HorseBBKeys::UserMoveDir, V) && !V.IsNearlyZero())
+		FVector Temp;
+		if (BB->TryGetVector(HorseBBKeys::UserMoveDir, Temp) && !Temp.IsNearlyZero())
 		{
-			UserMag = std::clamp(V.Length(), 0.0f, 1.0f);
-			V.Z = 0.0f;
-			if (!V.IsNearlyZero()) { UserDir = V.Normalized(); }
-			else                   { UserMag = 0.0f; }
+			UserMag = std::clamp(Temp.Length(), 0.0f, 1.0f);
+			Temp.Z = 0.0f;
+			if (!Temp.IsNearlyZero()) 
+				UserDir = Temp.Normalized();
+			else                   
+				UserMag = 0.0f;
 		}
-		if (BB->TryGetVector(HorseBBKeys::RoadDir, V) && !V.IsNearlyZero())
+		if (BB->TryGetVector(HorseBBKeys::RoadDir, Temp) && !Temp.IsNearlyZero())
 		{
-			V.Z = 0.0f;
-			if (!V.IsNearlyZero()) { RoadDir = V.Normalized(); bRoad = true; }
+			Temp.Z = 0.0f;
+			if (!Temp.IsNearlyZero()) 
+			{
+				RoadDir = Temp.Normalized(); 
+				bRoad = true; 
+			}
 		}
 	}
 
@@ -132,58 +129,134 @@ void UHorseLocomotionComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 		}
 	}
 
-	// ── context steering ── 부채꼴 slot 마다 danger veto 후 interest 최고 방향 선택.
-	//    두 우회 방향이 모두 열려 있으면 interest(User>Road>Inertia)가 tie 를 깨 좌/우가 자연히 결정된다.
-	const FVector DebugBase = Loc + FVector(0.0f, 0.0f, 0.3f);
-	float   BestScore = -1.0f;
-	FVector BestDir   = Forward;
-	bool    bAnyOpen  = false;
-	for (int i = 0; i < HorseBBKeys::ObsFanCount; ++i)
+	// ── context steering ── 각 slot 의 interest 에서 graded danger 를 빼 최고점 방향을 고르고,
+	//    sub-slot 보간으로 연속 heading 을 만든다(20° 스냅 떨림 제거). 커밋은 danger 로 게이팅해
+	//    장애물 앞에서만 좌/우 핑퐁을 억제하고 열린 공간에선 forward 로 복귀한다. 미초기화면 forward.
+	const FVector DebugBase = Location + FVector(0.0f, 0.0f, 0.3f);
+	if (SteerDir.IsNearlyZero()) { SteerDir = Forward; }
+
+	constexpr int N = HorseBBKeys::ObsFanCount;
+
+	// 1) slot 별 raw danger(2단계). clear>=Safe → 0, Hard~Safe → 0..1 램프, clear<=Hard → 1(하드 제외).
+	float   Danger[N]  = {};
+	bool    bHardBlk[N] = {};
+	FVector SlotDir[N];
+	const float RampSpan = std::max(1.e-3f, SafeDistance - HardBlockDistance);
+	for (int i = 0; i < N; ++i)
 	{
-		const FVector SlotDir = RotateAroundZ(Forward, HorseBBKeys::ObsFanAngles[i]);
+		SlotDir[i] = RotateAroundZ(Forward, HorseBBKeys::ObsFanAngles[i]);
 
-		float      Clear    = 0.0f;
-		const bool bBlocked = BB && BB->TryGetFloat(HorseBBKeys::ObsClear[i], Clear) && Clear < SafeDistance;
+		float Clear = SafeDistance;   // 값을 못 읽으면 열린 것으로 간주.
+		if (BB) { BB->TryGetFloat(HorseBBKeys::ObsClear[i], Clear); }
 
-		float Interest = InertiaWeight * std::max(0.0f, SlotDir.Dot(Forward));
-		if (UserMag > 0.0f) { Interest += UserWeight * UserMag * std::max(0.0f, SlotDir.Dot(UserDir)); }
-		if (bRoad)          { Interest += RoadWeight * std::max(0.0f, SlotDir.Dot(RoadDir)); }
+		if      (Clear <= HardBlockDistance) { Danger[i] = 1.0f; bHardBlk[i] = true; }
+		else if (Clear <  SafeDistance)      { Danger[i] = (SafeDistance - Clear) / RampSpan; }
+		else                                 { Danger[i] = 0.0f; }
+	}
 
-		if (bDrawSteeringDebug && W)
+	// 2) 이웃으로 danger 확산 → 장애물에 걸렸을 때 조금 더 넓게 회피
+	float SpreadDanger[N];
+	for (int i = 0; i < N; ++i)
+	{
+		float D = Danger[i];
+		if (i > 0)     { D = std::max(D, DangerSpread * Danger[i - 1]); }
+		if (i < N - 1) { D = std::max(D, DangerSpread * Danger[i + 1]); }
+		SpreadDanger[i] = D;
+	}
+
+	// 3) Score = interest - danger + (danger 로 게이팅된) 커밋. 하드 제외 slot 은 후보에서 뺀다.
+	//    커밋은 장애물이 있을 때(DangerActivation>0)만 켜져 좌/우 핑퐁을 억제하고, 열린 공간에선
+	//    0 이 되어 관성이 이겨 forward 로 복귀한다 → 조향 고착/나선 방지.
+	float DangerActivation = 0.0f;
+	for (int i = 0; i < N; ++i) { DangerActivation = std::max(DangerActivation, SpreadDanger[i]); }
+
+	float Score[N];
+	int   BestIdx = -1;
+	for (int i = 0; i < N; ++i)
+	{
+		float Interest = InertiaWeight * std::max(0.0f, SlotDir[i].Dot(Forward));
+		if (UserMag > 0.0f) { Interest += UserWeight * UserMag * std::max(0.0f, SlotDir[i].Dot(UserDir)); }
+		if (bRoad)          { Interest += RoadWeight * std::max(0.0f, SlotDir[i].Dot(RoadDir)); }
+
+		const float Commit = CommitWeight * DangerActivation * std::max(0.0f, SlotDir[i].Dot(SteerDir));
+		Score[i] = bHardBlk[i] ? -FLT_MAX : (Interest - DangerWeight * SpreadDanger[i] + Commit);
+
+		if (BestIdx < 0 || Score[i] > Score[BestIdx]) { BestIdx = i; }
+
+		if (bDrawSteeringDebug && World.IsValid())
 		{
-			const FColor  Col = bBlocked ? FColor::Red() : FColor::Green();
-			DrawDebugLine(W, DebugBase, DebugBase + SlotDir * (1.0f + Interest), Col);
-		}
-
-		if (bBlocked)
-		{
-			continue;   // 막힌 방향 veto.
-		}
-		bAnyOpen = true;
-		if (Interest > BestScore)
-		{
-			BestScore = Interest;
-			BestDir   = SlotDir;
+			// 초록(열림)→빨강(위험) 그라데이션으로 danger 를 표시.
+			const uint8  R   = static_cast<uint8>(std::clamp(SpreadDanger[i], 0.0f, 1.0f) * 255.0f);
+			const FColor Col = bHardBlk[i] ? FColor::Red() : FColor(R, static_cast<uint8>(255 - R), 0, 255);
+			DrawDebugLine(World, DebugBase, DebugBase + SlotDir[i] * (1.0f + std::max(0.0f, Score[i])), Col);
 		}
 	}
 
-	if (!bAnyOpen)
+	// 뚫린 방향이 있다면
+	if (BestIdx >= 0 && !bHardBlk[BestIdx])
 	{
-		// 모든 방향 막힘(점프도 불가) → 급브레이크: 입력 미부여 시 Movement 가 감속.
-		if (bDrawSteeringDebug && W)
+		// 4) sub-slot 포물선 보간 — 최고점 slot 과 양옆 score 로 연속 heading 을 구해 20° 스냅 떨림을 없앤다.
+		float Angle = HorseBBKeys::ObsFanAngles[BestIdx];
+		if (BestIdx > 0 && BestIdx < N - 1 && !bHardBlk[BestIdx - 1] && !bHardBlk[BestIdx + 1])
 		{
-			DrawDebugSphere(W, DebugBase, 0.4f, 12, FColor::Red());
+			const float sL = Score[BestIdx - 1];
+			const float sC = Score[BestIdx];
+			const float sR = Score[BestIdx + 1];
+			const float Denom = sL - 2.0f * sC + sR;
+			if (Denom < -1.e-4f)   // 아래로 볼록(진짜 peak)일 때만 보간.
+			{
+				const float Offset = std::clamp(0.5f * (sL - sR) / Denom, -1.0f, 1.0f);   // [-1,1] slot 단위.
+				const float Step   = HorseBBKeys::ObsFanAngles[BestIdx + 1] - HorseBBKeys::ObsFanAngles[BestIdx];
+				Angle += Offset * Step;
+			}
+		}
+
+		const FVector Heading = RotateAroundZ(Forward, Angle).Normalized();
+		SteerDir = Heading;   // 다음 프레임 커밋 기준.
+
+		if (bDrawSteeringDebug && World.IsValid())
+		{
+			DrawDebugLine(World, DebugBase, DebugBase + Heading * 3.0f, FColor::Blue());   // 선택된 heading.
+		}
+
+		// gait → scale([0,1]). Movement 는 MaxSpeed*scale 을 목표속도로 삼는다(yaw 선회율은 Movement 가 제한).
+		Movement->AddInputVector(Heading, GetGaitScaledSpeed());
+	}
+	// 모든 slot 이 하드 제외면(막다른 벽) 급브레이크
+	else
+	{
+		Movement->Brake();
+		if (bDrawSteeringDebug && World.IsValid())
+		{
+			DrawDebugSphere(World, DebugBase, 0.4f, 12, FColor::Red());
 		}
 		return;
 	}
+}
 
-	if (bDrawSteeringDebug && W)
+void UHorseLocomotionComponent::UpdateGait()
+{
+	// BT에서 요청한 DesiredGait를 쿨타임 등 고려 후 실제 Gait에 반영
+	if (BlackboardComp)
 	{
-		DrawDebugLine(W, DebugBase, DebugBase + BestDir * 3.0f, FColor::Blue());   // 선택된 heading.
+		int Desired = 0;
+		if (BlackboardComp->GetBlackboard().TryGetInt(HorseBBKeys::DesiredGait, Desired))
+		{
+			const int CurGait = static_cast<int>(Gait);
+			const int TargetGait = std::clamp(Desired, 0, static_cast<int>(EHorseGait::Gallop));
+			if (TargetGait > CurGait)
+			{
+				RequestGiddyup();
+			}
+			else if (TargetGait < CurGait)
+			{
+				RequestSlowDown();
+			}
+		}
 	}
 
-	// gait → scale([0,1]). Movement 는 MaxSpeed*scale 을 목표속도로 삼는다.
-	Movement->AddInputVector(BestDir.Normalized(), GetGaitScaledSpeed());
+	// BT등에서 결정한 범위로 현재의 gait 클램핑
+	ClampGaitToEnvelope();
 }
 
 void UHorseLocomotionComponent::RequestGiddyup()
@@ -272,4 +345,8 @@ void UHorseLocomotionComponent::Serialize(FArchive& Ar)
 	Ar << InertiaWeight;
 	Ar << JumpTriggerDist;
 	Ar << bDrawSteeringDebug;
+	Ar << HardBlockDistance;
+	Ar << DangerWeight;
+	Ar << DangerSpread;
+	Ar << CommitWeight;
 }

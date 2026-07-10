@@ -7,6 +7,7 @@
 #include "Component/Movement/HorseMovementComponent.h"
 #include "Component/Movement/HorseLocomotionComponent.h"
 #include "Component/AI/BTAgentComponent.h"
+#include "Component/AI/ObstacleFanSensorComponent.h"
 #include "Component/AI/BlackboardComponent.h"
 #include "Component/Primitive/SkeletalMeshComponent.h"
 #include "Component/Shape/BoxComponent.h"
@@ -81,7 +82,7 @@ void AHorseCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 	CollisionComponent->SetCollisionObjectType(ECollisionChannel::Pawn);
 	CollisionComponent->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 
-	// 실제 이동 담당. root(box)를 UpdatedComponent 로 자동 등록. 지면 스냅 높이(StandHeight) 소유.
+	// 이동 담당
 	MovementComponent = AddComponent<UHorseMovementComponent>();
 
 	// SkeletalMesh 는 box 자식으로, 발바닥이 지면에 닿도록 StandHeight 만큼 아래로 offset.
@@ -96,11 +97,16 @@ void AHorseCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 		MeshComponent->SetSkeletalMesh(Asset);
 	}
 
-	// 조향·보법(gait) 계층. 플레이어/BT 입력을 받아 매 tick MovementComponent 로 라우팅.
-	LocomotionComponent = AddComponent<UHorseLocomotionComponent>();
-
+	// ── AI 관련 ──
+	// 플레이어/BT 입력을 받아 매 tick MovementComponent 로 라우팅.
+	LocomotionComponent = AddComponent<UHorseLocomotionComponent>(); 
 	BlackboardComponent = AddComponent<UBlackboardComponent>();
-
+	ObstacleFanSensorComponent = AddComponent<UObstacleFanSensorComponent>();
+	if(ObstacleFanSensorComponent)
+	{
+		ObstacleFanSensorComponent->AttachToComponent(CollisionComponent);
+		ObstacleFanSensorComponent->SetRelativeLocation(FVector(1.0f, 0.0f, -0.6f));
+	}
 	BTAgentComponent = AddComponent<UBTAgentComponent>();
 	if (BTAgentComponent)
 	{
