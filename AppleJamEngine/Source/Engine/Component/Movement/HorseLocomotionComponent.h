@@ -88,13 +88,13 @@ protected:
 
 	// ── gait별 목표 속도(m/s). Stop은 당연히 0 ──
 	UPROPERTY(Edit, Save, Category="Locomotion|Gait", DisplayName="Walk Speed", Min=0.0f, Max=50.0f, Speed=0.1f)
-	float WalkSpeed = 1.6f;
+	float WalkSpeed = 1.8f;
 	UPROPERTY(Edit, Save, Category="Locomotion|Gait", DisplayName="Trot Speed", Min=0.0f, Max=50.0f, Speed=0.1f)
-	float TrotSpeed = 3.5f;
+	float TrotSpeed = 3.7f;
 	UPROPERTY(Edit, Save, Category="Locomotion|Gait", DisplayName="Canter Speed", Min=0.0f, Max=50.0f, Speed=0.1f)
 	float CanterSpeed = 5.5f;
 	UPROPERTY(Edit, Save, Category="Locomotion|Gait", DisplayName="Gallop Speed", Min=0.0f, Max=50.0f, Speed=0.1f)
-	float GallopSpeed = 8.0f;
+	float GallopSpeed = 16.6f;
 
 	UPROPERTY(Edit, Save, Category="Locomotion|Gait", DisplayName="Gait Up Cooldown", Min=0.0f, Max=5.0f, Speed=0.01f)
 	float GaitUpCooldown = 0.6f; 	// 가속 쿨타임(초 단위)

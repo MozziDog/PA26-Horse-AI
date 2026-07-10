@@ -60,7 +60,7 @@ public:
 	void	Brake();
 
 	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Max Speed", Min=0.0f, Max=50.0f, Speed=0.1f)
-	float MaxSpeed = 8.0f;             // m/s — gallop 최고 속도
+	float MaxSpeed = 20.0f;             // m/s — gallop 최고 속도
 	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Max Acceleration", Min=0.0f, Max=100.0f, Speed=0.1f)
 	float MaxAcceleration = 10.0f;     // m/s^2
 	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Braking Deceleration", Min=0.0f, Max=100.0f, Speed=0.1f)
@@ -89,7 +89,7 @@ public:
 	float TorsoSkin = 0.05f;           // Torso box에 여유 줘서 벽 근처에서 지형과 캐릭터 메시 교차 방지
 
 	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Jump Speed", Min=0.0f, Max=30.0f, Speed=0.1f)
-	float JumpSpeed = 5.0f;            // m/s — 점프 시 초기 상향 속도. h≈v²/2g (5m/s → 약 1.3m)
+	float JumpSpeed = 5.8f;            // m/s — 점프 시 초기 상향 속도. h≈v²/2g (5m/s → 약 1.3m)
 
 protected:
 	FVector GetGravity() const;
