@@ -336,6 +336,16 @@ bool FAnimationManager::ImportAnimationForSkeleton(const FAnimationImportRequest
     FFbxAnimationImportOptions ImportOptions;
     ImportOptions.SelectedStackIndices = Request.SelectedAnimationStackIndices;
 
+    // Provide the target skeleton's bone names so the importer can pick up animation-only FBX whose
+    // joints are exported as plain transform (eNull) nodes rather than eSkeleton attributes.
+    if (USkeleton* TargetSkeleton = FSkeletonManager::Get().LoadSkeleton(Request.TargetSkeletonPath))
+    {
+        for (const FReferenceBone& Bone : TargetSkeleton->GetReferenceSkeleton().Bones)
+        {
+            ImportOptions.ReferenceBoneNames.insert(Bone.Name);
+        }
+    }
+
     FFbxAnimationImportResult ImportResult;
     FString                   FbxMessage;
     if (!FFbxImporter::ImportAnimationOnly(Request.SourceFbxPath, ImportResult, &ImportOptions, &FbxMessage))

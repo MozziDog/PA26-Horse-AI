@@ -29,9 +29,20 @@ bool FFbxSkeletonImporter::ImportSkeleton(FbxScene* Scene, FFbxImportContext& Co
 	Context.BoneNodeToIndex.clear();
 	Context.ReferenceSkeleton.Bones.clear();
 
+	const bool bUseNameFilter = !Context.ReferenceBoneNames.empty();
+
 	for (FbxNode* Node : Context.AllNodes)
 	{
-		if (!FFbxSceneQuery::IsSkeletonNode(Node))
+		if (bUseNameFilter)
+		{
+			// Animation-only FBX exports joints as eNull nodes, so match against the target
+			// skeleton's bone names instead of the eSkeleton attribute type.
+			if (!Node || Context.ReferenceBoneNames.find(Node->GetName()) == Context.ReferenceBoneNames.end())
+			{
+				continue;
+			}
+		}
+		else if (!FFbxSceneQuery::IsSkeletonNode(Node))
 		{
 			continue;
 		}
@@ -58,7 +69,12 @@ bool FFbxSkeletonImporter::ImportSkeleton(FbxScene* Scene, FFbxImportContext& Co
 
 	if (Context.Bones.empty())
 	{
-		if (OutMessage) *OutMessage = "FBX skeletal import failed: no skeleton nodes found.";
+		if (OutMessage)
+		{
+			*OutMessage = bUseNameFilter
+				? "FBX skeletal import failed: no scene nodes matched the target skeleton's bone names."
+				: "FBX skeletal import failed: no skeleton nodes found.";
+		}
 		return false;
 	}
 

@@ -29,6 +29,11 @@ struct FFbxImportContext
 	TMap<FbxNode*, int32> BoneNodeToIndex;
 	FReferenceSkeleton ReferenceSkeleton;
 
+	// When non-empty, the skeleton importer selects bone nodes by matching these names instead of
+	// relying on FbxNodeAttribute::eSkeleton. Needed for animation-only FBX whose joints are
+	// exported as plain transform (eNull) nodes; the names come from the target skeleton.
+	TSet<FString> ReferenceBoneNames;
+
 	TArray<FVertexPNCTBW>         SkeletalVertices;
 	TArray<uint32>                SkeletalIndices;
 	TArray<FSkeletalMeshSection>  SkeletalSections;

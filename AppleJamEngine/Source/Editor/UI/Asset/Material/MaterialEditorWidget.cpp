@@ -2170,6 +2170,12 @@ void FMaterialEditorWidget::RenderNodeInspector(UMaterial* Material, FMaterialGr
             {
                 if (ImGui::Selectable(MaterialTextureSlot::ToString(s).c_str(), Slot == s))
                 {
+                    // 이름이 기본값(슬롯 이름)이면 새 슬롯 이름으로 동기화. 사용자가 직접 지은 이름은 보존.
+                    const FString OldSlotName = MaterialTextureSlot::ToString(Slot);
+                    if (Node.ParameterName.empty() || Node.ParameterName == OldSlotName)
+                    {
+                        Node.ParameterName = MaterialTextureSlot::ToString(s);
+                    }
                     Node.TextureSlot = static_cast<EMaterialTextureSlot>(s);
                     MarkMaterialSourceEdited();
                 }

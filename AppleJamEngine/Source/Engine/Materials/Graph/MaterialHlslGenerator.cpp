@@ -755,7 +755,9 @@ namespace
                 return It->second.HlslName;
             }
 
-            const FString Name     = Node.ParameterName.empty() ? FString(ToString(Slot)) : Node.ParameterName;
+            // HLSL 변수 이름은 슬롯에서 파생한다. 선언/register가 슬롯당 1개(TexturesBySlot)이므로 항상 유일하며,
+            // ParameterName(표시용, 노드 생성 시 "Diffuse"로 하드코딩됨)에서 뽑으면 슬롯이 달라도 이름이 겹쳐 redefinition이 난다.
+            const FString Name     = FString(ToString(Slot));
             const FString HlslName = "Tex_" + SanitizeIdentifier(Name);
 
             FTextureDecl Decl;
