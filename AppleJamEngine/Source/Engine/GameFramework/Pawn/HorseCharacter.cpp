@@ -4,11 +4,16 @@
 #include "Component/Camera/CameraComponent.h"
 #include "Component/Camera/SpringArmComponent.h"
 #include "Component/Input/InputComponent.h"
-#include "Component/Horse/HorsePlayerInputComponent.h"
+#include "Component/Movement/HorseMovementComponent.h"
+#include "Component/Movement/HorseLocomotionComponent.h"
 #include "Component/AI/BTAgentComponent.h"
+#include "Component/AI/ObstacleFanSensorComponent.h"
 #include "Component/AI/BlackboardComponent.h"
 #include "Component/Primitive/SkeletalMeshComponent.h"
+#include "Component/Shape/BoxComponent.h"
+#include "Core/Types/CollisionTypes.h"
 #include "AI/Blackboard.h"
+#include "AI/HorseBlackboardKeys.h"
 #include "Mesh/MeshManager.h"
 #include "Runtime/Engine.h"
 
@@ -69,9 +74,21 @@ namespace
 
 void AHorseCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 {
-	// NOTE: Mesh가 Root여도 되는지 검증 필요
+	// 몸통 collider 를 root 로: Movement 의 sweep(관통/비비기 차단)·에디터 시각화·향후 물리의 단일 바디.
+	// (직립 capsule 이 아닌 quadruped 전제라 torso box 형상 사용.) Pawn 채널, 지금은 query 전용.
+	CollisionComponent = AddComponent<UBoxComponent>();
+	SetRootComponent(CollisionComponent);
+	CollisionComponent->SetBoxExtent(FVector(0.8f, 0.3f, 0.3f));   // half-extents(전방X/측방Y/상하Z)
+	CollisionComponent->SetCollisionObjectType(ECollisionChannel::Pawn);
+	CollisionComponent->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+
+	// 이동 담당
+	MovementComponent = AddComponent<UHorseMovementComponent>();
+
+	// SkeletalMesh 는 box 자식으로, 발바닥이 지면에 닿도록 StandHeight 만큼 아래로 offset.
 	MeshComponent = AddComponent<USkeletalMeshComponent>();
-	SetRootComponent(MeshComponent);
+	MeshComponent->AttachToComponent(CollisionComponent);
+	MeshComponent->SetRelativeLocation(FVector(0.0f, 0.0f, -MovementComponent->GetStandHeight()));
 
 	ID3D11Device* Device = GEngine->GetRenderer().GetFD3DDevice().GetDevice();
 	if (!SkeletalMeshFileName.empty())
@@ -80,18 +97,24 @@ void AHorseCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 		MeshComponent->SetSkeletalMesh(Asset);
 	}
 
-	HorseMovementComponent = AddComponent<UHorsePlayerInputComponent>();
-
+	// ── AI 관련 ──
+	// 플레이어/BT 입력을 받아 매 tick MovementComponent 로 라우팅.
+	LocomotionComponent = AddComponent<UHorseLocomotionComponent>(); 
 	BlackboardComponent = AddComponent<UBlackboardComponent>();
-
+	ObstacleFanSensorComponent = AddComponent<UObstacleFanSensorComponent>();
+	if(ObstacleFanSensorComponent)
+	{
+		ObstacleFanSensorComponent->AttachToComponent(CollisionComponent);
+		ObstacleFanSensorComponent->SetRelativeLocation(FVector(1.0f, 0.0f, -0.6f));
+	}
 	BTAgentComponent = AddComponent<UBTAgentComponent>();
 	if (BTAgentComponent)
 	{
-		BTAgentComponent->SetBehaviorTreeScript("BT/HorseTest.lua");
+		BTAgentComponent->SetBehaviorTreeScript("BT/HorseBT.lua");
 	}
 
 	SpringArmComponent = AddComponent<USpringArmComponent>();
-	SpringArmComponent->AttachToComponent(MeshComponent);
+	SpringArmComponent->AttachToComponent(CollisionComponent);   // root(box) 기준으로 카메라 추종
 	SpringArmComponent->TargetArmLength = 7.0f;
 	SpringArmComponent->SocketOffset = FVector(0.0f, 0.0f, 2.5f);
 	SpringArmComponent->bEnableCameraLag = true;
@@ -117,34 +140,58 @@ void AHorseCharacter::SetupInputComponent()
 		return;
 	}
 
-	if (HorseMovementComponent)
+	// 조향(아날로그): 좌우 축 → BB UserMoveDir 로 기록. Locomotion 이 직접 조종당하지 않고 arbiter 가
+	// 이를 하나의 interest 로 소비(간접 반영 원칙). 게임패드 좌스틱 X 도 함께.
+	InputComponent->AddAxisMapping("HorseSteering", "D", 1.0f);
+	InputComponent->AddAxisMapping("HorseSteering", "A", -1.0f);
+	InputComponent->AddGamepadAxisMapping("HorseSteering", EInputAxisSourceType::GamepadLeftStickX, 1.0f);
+	InputComponent->BindAxis("HorseSteering", [this](float Value)
 	{
-		InputComponent->AddAxisMapping("HorseThrottle", "W", 1.0f);
-		InputComponent->AddAxisMapping("HorseThrottle", "S", -1.0f);
-		InputComponent->AddAxisMapping("HorseSteering", "D", 1.0f);
-		InputComponent->AddAxisMapping("HorseSteering", "A", -1.0f);
-		
-		InputComponent->BindAxis("HorseThrottle", [this](float Value)
+		LastSteeringInput = Value;
+		if (!BlackboardComponent)
 		{
-			if (!HorseMovementComponent)
-			{
-				return;
-			}
-
-			LastThrottleInput = Value;
-			HorseMovementComponent->SetThrottleInput(Value);
-			HorseMovementComponent->SetBrakeInput(0.0f);
-		});
-
-		InputComponent->BindAxis("HorseSteering", [this](float Value)
+			return;
+		}
+		// 스칼라(±1, 좌우) → forward 에서 옆으로 최대 45° 편향된 world 목표 방향, 크기 = 입력 강도.
+		// 매 프레임 현재 forward 기준이라 말이 회전해도 "우측으로 계속 밀기" 가 유지된다. 무입력(0)이면
+		// 영벡터를 써 arbiter 가 유저 영향을 무시(도로/관성 자율 주행)한다.
+		FVector Move(0.0f, 0.0f, 0.0f);
+		const float Strength = std::clamp(std::abs(Value), 0.0f, 1.0f);
+		if (Strength > 1.e-3f)
 		{
-			LastSteeringInput = Value;
-			if (HorseMovementComponent)
+			FVector Forward = GetActorForward();
+			FVector Right   = GetActorRight();
+			Forward.Z = 0.0f;
+			Right.Z   = 0.0f;
+			const FVector Dir = Forward + Right * Value;
+			if (!Dir.IsNearlyZero())
 			{
-				HorseMovementComponent->SetSteeringInput(Value);
+				Move = Dir.Normalized() * Strength;
 			}
-		});
-	}
+		}
+		BlackboardComponent->GetBlackboard().SetVector(HorseBBKeys::UserMoveDir, Move);
+	});
+
+	// 보법(gait) 변속: W=한 단계 가속(쿨타임 있음), S=한 단계 감속, X=정지.
+	// gait는 기어 변속 개념, 무입력 시 현재 gait 유지 => 순항
+	InputComponent->AddActionMapping("HorseGiddyup", "W");
+	InputComponent->AddActionMapping("HorseSlowDown", "S");
+	InputComponent->AddActionMapping("HorseStop", "X");
+	InputComponent->AddActionMapping("HorseGiddyup", "GamepadFaceButtonBottom");	// Xbox 패드 기준 A 버튼
+	InputComponent->AddActionMapping("HorseSlowDown", "GamepadFaceButtonRight");	// B 버튼
+	InputComponent->AddActionMapping("HorseStop", "GamepadFaceButtonLeft");			// X 버튼
+	InputComponent->BindAction("HorseGiddyup", EInputEvent::Pressed, [this]()
+	{
+		if (LocomotionComponent) LocomotionComponent->RequestGiddyup();
+	});
+	InputComponent->BindAction("HorseSlowDown", EInputEvent::Pressed, [this]()
+	{
+		if (LocomotionComponent) LocomotionComponent->RequestSlowDown();
+	});
+	InputComponent->BindAction("HorseStop", EInputEvent::Pressed, [this]()
+	{
+		if (LocomotionComponent) LocomotionComponent->RequestStop();
+	});
 
 	if (bAutoInputCamera)
 	{
@@ -182,8 +229,10 @@ void AHorseCharacter::SetupInputComponent()
 
 void AHorseCharacter::RebindComponents()
 {
+	CollisionComponent = GetComponentByClass<UBoxComponent>();
 	MeshComponent = GetComponentByClass<USkeletalMeshComponent>();
-	HorseMovementComponent = GetComponentByClass<UHorsePlayerInputComponent>();
+	MovementComponent = GetComponentByClass<UHorseMovementComponent>();
+	LocomotionComponent = GetComponentByClass<UHorseLocomotionComponent>();
 	BTAgentComponent = GetComponentByClass<UBTAgentComponent>();
 	BlackboardComponent = GetComponentByClass<UBlackboardComponent>();
 	SpringArmComponent = GetComponentByClass<USpringArmComponent>();
@@ -197,7 +246,6 @@ void AHorseCharacter::BeginPlay()
 	CameraYawOffset = 0.0f;
 	CameraTimeSinceLookInput = CameraReturnDelay;
 	bCameraLookInputThisFrame = false;
-	LastThrottleInput = 0.0f;
 	LastSteeringInput = 0.0f;
 	UpdateCameraControlRotation();
 
@@ -207,20 +255,11 @@ void AHorseCharacter::BeginPlay()
 void AHorseCharacter::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+
+	// 이동 입력은 LocomotionComponent 가 자기 tick 에서 Movement 로 라우팅한다(여기서 하지 않음).
+
 	UpdateCameraReturn(DeltaTime);
 	UpdateCameraControlRotation();
-
-	// TODO: [테스트] 센서 스탠드인 — 시간 기반으로 블랙보드에 판단 입력을 써 준다. 실제 센서 컴포넌트로 대체 예정.
-	//        actor(TG_PrePhysics) 가 BT 컴포넌트(TG_PostPhysics) 보다 먼저 틱하므로 같은 프레임 내 읽기 전에 써진다.
-	if (BlackboardComponent)
-	{
-		BTTestElapsed += DeltaTime;
-		const float P = std::fmod(BTTestElapsed, 12.0f);
-		FBlackboard& Blackboard = BlackboardComponent->GetBlackboard();
-		Blackboard.SetFloat(FName("Phase"), P);
-		Blackboard.SetBool(FName("ThreatNear"), P >= 8.0f && P < 11.0f);
-		Blackboard.SetBool(FName("Hungry"), P < 5.0f);
-	}
 }
 
 void AHorseCharacter::PostDuplicate()
@@ -271,11 +310,9 @@ void AHorseCharacter::UpdateCameraReturn(float DeltaTime)
 
 	CameraTimeSinceLookInput += DeltaTime;
 
-	const bool bInputActive =
-		std::abs(LastThrottleInput) > 0.01f ||
-		std::abs(LastSteeringInput) > 0.01f;
+	const bool bInputActive = std::abs(LastSteeringInput) > 0.01f;
 	const bool bMoving =
-		HorseMovementComponent && std::abs(HorseMovementComponent->GetForwardSpeed()) > CameraMovingReturnSpeedThreshold;
+		MovementComponent && std::abs(MovementComponent->GetForwardSpeed()) > CameraMovingReturnSpeedThreshold;
 
 	const bool bCameraReturnRequested = bInputActive || bMoving;
 	if (!bCameraReturnRequested || CameraTimeSinceLookInput < CameraReturnDelay)

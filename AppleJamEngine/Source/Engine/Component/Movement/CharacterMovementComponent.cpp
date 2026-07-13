@@ -45,17 +45,6 @@ UCharacterMovementComponent::UCharacterMovementComponent()
 	PrimaryComponentTick.SetEndTickGroup(TG_DuringPhysics);
 }
 
-void UCharacterMovementComponent::AddInputVector(const FVector& WorldDirection, float ScaleValue)
-{
-	AccumulatedInput = AccumulatedInput + WorldDirection * ScaleValue;
-}
-
-void UCharacterMovementComponent::ConsumeInputVector(FVector& Out)
-{
-	Out = AccumulatedInput;
-	AccumulatedInput = FVector(0.0f, 0.0f, 0.0f);
-}
-
 void UCharacterMovementComponent::AddRootMotionDelta(const FTransform& LocalDelta)
 {
 	if (!bHasPendingRootMotion)

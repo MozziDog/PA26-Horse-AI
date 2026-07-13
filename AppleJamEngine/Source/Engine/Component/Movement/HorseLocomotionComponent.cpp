@@ -89,7 +89,7 @@ void UHorseLocomotionComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 
 	// ── influence 소스 수집 ── 없으면 기본 직진. 
 	// 우선순위는 가중치로 표현: User(최상) > Road > Inertia. 
-	// 장애물이 HardBlockDistance 보다 가까우면 hard refuse로 위 우선순위 무시함
+	// 장애물이 HardBlockDistance 보다 가까우면 아래 slot hard refuse로 위 우선순위 무시함
 	FVector UserDir(0.0f, 0.0f, 0.0f);
 	float   UserMag = 0.0f;
 	FVector RoadDir(0.0f, 0.0f, 0.0f);

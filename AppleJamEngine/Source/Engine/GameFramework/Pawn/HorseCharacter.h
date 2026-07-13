@@ -5,8 +5,11 @@
 #include "Source/Engine/GameFramework/Pawn/HorseCharacter.generated.h"
 
 class USkeletalMeshComponent;
-class UHorsePlayerInputComponent;
+class UBoxComponent;
+class UHorseMovementComponent;
+class UHorseLocomotionComponent;
 class UBTAgentComponent;
+class UObstacleFanSensorComponent;
 class UBlackboardComponent;
 class USpringArmComponent;
 class UCameraComponent;
@@ -27,17 +30,6 @@ public:
 protected:
 	void OnPostLoad(FArchive& Ar) override; // Re-Initialize after save & load
 
-public:
-	// Component Getters
-	UFUNCTION(Pure, Category = "Horse|Components")
-	USkeletalMeshComponent* GetMeshComponent() const { return MeshComponent; }
-	UFUNCTION(Pure, Category = "Horse|Components")
-	UHorsePlayerInputComponent* GetHorseMovementComponent() const { return HorseMovementComponent; }
-	UFUNCTION(Pure, Category = "Horse|Components")
-	USpringArmComponent* GetSpringArmComponent() const { return SpringArmComponent; }
-	UFUNCTION(Pure, Category = "Horse|Components")
-	UCameraComponent* GetCameraComponent() const { return CameraComponent; }
-
 protected:
 	void SetupInputComponent() override;
 	void RebindComponents();
@@ -46,10 +38,13 @@ protected:
 	float GetCameraBaseYaw() const;
 
 protected:
+	TWeakObjectPtr<UBoxComponent> CollisionComponent = nullptr;
 	TWeakObjectPtr<USkeletalMeshComponent> MeshComponent = nullptr;
-	TWeakObjectPtr<UHorsePlayerInputComponent> HorseMovementComponent = nullptr;
+	TWeakObjectPtr<UHorseMovementComponent> MovementComponent = nullptr;
+	TWeakObjectPtr<UHorseLocomotionComponent> LocomotionComponent = nullptr;
 	TWeakObjectPtr<UBTAgentComponent> BTAgentComponent = nullptr;
 	TWeakObjectPtr<UBlackboardComponent> BlackboardComponent = nullptr;
+	TWeakObjectPtr<UObstacleFanSensorComponent> ObstacleFanSensorComponent = nullptr;
 	TWeakObjectPtr<USpringArmComponent> SpringArmComponent = nullptr;
 	TWeakObjectPtr<UCameraComponent> CameraComponent = nullptr;
 
@@ -87,10 +82,9 @@ protected:
 	float CameraPitch = 10.0f;
 	float CameraTimeSinceLookInput = 1000.0f;
 	bool bCameraLookInputThisFrame = false;
-	float LastThrottleInput = 0.0f;
-	float LastSteeringInput = 0.0f;
 
-	// TODO: [테스트] 센서 스탠드인용 누적 시간 — 실제 센서 컴포넌트 도입 시 제거.
-	float BTTestElapsed = 0.0f;
+	// steering 축 콜백이 매 frame 채우는 값(0 포함). 카메라 자동복귀의 "입력 활성" 판정에 쓴다.
+	// 실제 조향은 콜백에서 BB UserMoveDir 로 기록되어 Locomotion arbiter 가 소비한다.
+	float LastSteeringInput = 0.0f;
 };
 

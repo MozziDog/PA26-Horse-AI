@@ -1,6 +1,6 @@
 #pragma once
 
-#include "MovementComponent.h"
+#include "PawnMovementComponent.h"
 #include "Core/Types/CollisionTypes.h"   // FHitResult
 #include "Math/Vector.h"
 #include "Math/Transform.h"
@@ -26,17 +26,14 @@ enum class EMovementMode : uint8
 #include "Source/Engine/Component/Movement/CharacterMovementComponent.generated.h"
 
 UCLASS()
-class UCharacterMovementComponent : public UMovementComponent
+class UCharacterMovementComponent : public UPawnMovementComponent
 {
 public:
 	GENERATED_BODY()
 	UCharacterMovementComponent();
 	~UCharacterMovementComponent() override = default;
 
-	// Controller 등 외부에서 매 frame 누적. TickComponent 가 ConsumeInputVector 로 비움.
-	UFUNCTION(Callable, Category="CharacterMovement|Input")
-	void AddInputVector(const FVector& WorldDirection, float ScaleValue = 1.0f);
-	void ConsumeInputVector(FVector& OutAccumulated);
+	// 입력 누적/소비(AddInputVector/ConsumeInputVector)는 UPawnMovementComponent 로 이관.
 
 	// Root motion delta 입력 — local 좌표계 (root 본 기준) 의 한 프레임 분.
 	// 호출자 (보통 ACharacter::Tick 또는 CMC 가 직접 mesh anim instance 에서) 가 매 frame 누적.
@@ -136,7 +133,7 @@ protected:
     bool  SafeMoveUpdatedComponent(const FVector& Delta, FHitResult* OutHit = nullptr);
 	float GetCapsuleHalfHeight() const;
 
-	FVector       AccumulatedInput = FVector(0.0f, 0.0f, 0.0f);
+	// AccumulatedInput 은 UPawnMovementComponent 로 이관 (protected 라 이 클래스에서 계속 접근 가능).
 	FVector       Velocity         = FVector(0.0f, 0.0f, 0.0f);
 	// 시작 시 floor 잡힐 때까지 Falling — 첫 frame TickFalling 이 raycast 후 자동 Walking 전환.
 	EMovementMode MovementMode     = EMovementMode::Falling;
