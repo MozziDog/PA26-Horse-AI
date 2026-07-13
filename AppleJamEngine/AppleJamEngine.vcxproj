@@ -261,6 +261,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClCompile Include="Source\Engine\Animation\Graph\AnimGraphCompiler.cpp" />
     <ClCompile Include="Source\Engine\Animation\Graph\AnimGraphInstance.cpp" />
     <ClCompile Include="Source\Engine\Animation\Graph\AnimGraphManager.cpp" />
+    <ClCompile Include="Source\Engine\Animation\Graph\BlendSpaceTriangulation.cpp" />
     <ClCompile Include="Source\Engine\Animation\Instance\AnimSingleNodeInstance.cpp" />
     <ClCompile Include="Source\Engine\Animation\Instance\CharacterAnimGraphInstance.cpp" />
     <ClCompile Include="Source\Engine\Animation\Instance\CharacterAnimInstance.cpp" />
@@ -268,6 +269,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClCompile Include="Source\Engine\Animation\Montage\AnimMontage.cpp" />
     <ClCompile Include="Source\Engine\Animation\Montage\AnimMontageInstance.cpp" />
     <ClCompile Include="Source\Engine\Animation\Nodes\AnimNode_BlendListByEnum.cpp" />
+    <ClCompile Include="Source\Engine\Animation\Nodes\AnimNode_BlendSpace.cpp" />
     <ClCompile Include="Source\Engine\Animation\Nodes\AnimNode_LayeredBlendPerBone.cpp" />
     <ClCompile Include="Source\Engine\Animation\Nodes\AnimNode_Root.cpp" />
     <ClCompile Include="Source\Engine\Animation\Nodes\AnimNode_SequencePlayer.cpp" />
@@ -809,6 +811,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClInclude Include="Source\Engine\Animation\Graph\AnimGraphInstance.h" />
     <ClInclude Include="Source\Engine\Animation\Graph\AnimGraphManager.h" />
     <ClInclude Include="Source\Engine\Animation\Graph\AnimGraphTypes.h" />
+    <ClInclude Include="Source\Engine\Animation\Graph\BlendSpaceTriangulation.h" />
     <ClInclude Include="Source\Engine\Animation\Instance\AnimSingleNodeInstance.h" />
     <ClInclude Include="Source\Engine\Animation\Instance\CharacterAnimGraphInstance.h" />
     <ClInclude Include="Source\Engine\Animation\Instance\CharacterAnimInstance.h" />
@@ -818,6 +821,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClInclude Include="Source\Engine\Animation\Nodes\AnimNodeContexts.h" />
     <ClInclude Include="Source\Engine\Animation\Nodes\AnimNode_Base.h" />
     <ClInclude Include="Source\Engine\Animation\Nodes\AnimNode_BlendListByEnum.h" />
+    <ClInclude Include="Source\Engine\Animation\Nodes\AnimNode_BlendSpace.h" />
     <ClInclude Include="Source\Engine\Animation\Nodes\AnimNode_LayeredBlendPerBone.h" />
     <ClInclude Include="Source\Engine\Animation\Nodes\AnimNode_RefPose.h" />
     <ClInclude Include="Source\Engine\Animation\Nodes\AnimNode_Root.h" />

@@ -53,6 +53,7 @@ namespace
 			case EAnimGraphNodeType::BlendListByEnum:     return "Blend List By Enum";
 			case EAnimGraphNodeType::VariableGet:         return "Variable Get";
 			case EAnimGraphNodeType::RefPose:             return "Ref Pose";
+			case EAnimGraphNodeType::BlendSpace:          return "Blend Space";
 		}
 		return "Node";
 	}
@@ -67,6 +68,7 @@ namespace
 			case EAnimGraphNodeType::Slot:                return ImVec4(0.60f, 0.95f, 0.65f, 1.0f); // 녹색 — montage 진입점
 			case EAnimGraphNodeType::LayeredBlendPerBone: return ImVec4(0.75f, 0.60f, 0.95f, 1.0f); // 연보라 — blender
 			case EAnimGraphNodeType::BlendListByEnum:     return ImVec4(0.70f, 0.70f, 0.95f, 1.0f); // 연보라
+			case EAnimGraphNodeType::BlendSpace:          return ImVec4(0.55f, 0.80f, 0.95f, 1.0f); // 하늘 — 2D blender
 			case EAnimGraphNodeType::StateMachine:        return ImVec4(0.90f, 0.55f, 0.95f, 1.0f); // 보라 — FSM
 			case EAnimGraphNodeType::VariableGet:         return ImVec4(0.95f, 0.85f, 0.40f, 1.0f); // 노랑 — data
 			case EAnimGraphNodeType::RefPose:             return ImVec4(0.70f, 0.70f, 0.70f, 1.0f); // 회색 — neutral leaf
@@ -155,6 +157,7 @@ namespace
 			case EAnimGraphNodeType::Slot:                return ImVec4(0.62f, 0.96f, 0.70f, 1.0f);
 			case EAnimGraphNodeType::LayeredBlendPerBone: return ImVec4(0.82f, 0.68f, 1.00f, 1.0f);
 			case EAnimGraphNodeType::BlendListByEnum:     return ImVec4(0.78f, 0.70f, 1.00f, 1.0f);
+			case EAnimGraphNodeType::BlendSpace:          return ImVec4(0.66f, 0.86f, 1.00f, 1.0f);
 			case EAnimGraphNodeType::VariableGet:         return ImVec4(0.42f, 1.00f, 0.24f, 1.0f);
 			case EAnimGraphNodeType::RefPose:             return ImVec4(0.78f, 0.78f, 0.78f, 1.0f);
 		}
@@ -171,6 +174,7 @@ namespace
 			case EAnimGraphNodeType::Slot:                return ImVec4(0.12f, 0.28f, 0.16f, 1.0f);
 			case EAnimGraphNodeType::LayeredBlendPerBone: return ImVec4(0.25f, 0.18f, 0.36f, 1.0f);
 			case EAnimGraphNodeType::BlendListByEnum:     return ImVec4(0.23f, 0.19f, 0.38f, 1.0f);
+			case EAnimGraphNodeType::BlendSpace:          return ImVec4(0.14f, 0.26f, 0.34f, 1.0f);
 			case EAnimGraphNodeType::VariableGet:         return ImVec4(0.08f, 0.25f, 0.08f, 1.0f);
 			case EAnimGraphNodeType::RefPose:             return ImVec4(0.20f, 0.20f, 0.20f, 1.0f);
 		}
@@ -404,6 +408,7 @@ namespace
 			case EAnimGraphNodeType::Slot:                return "몽타주 삽입";
 			case EAnimGraphNodeType::LayeredBlendPerBone: return "본별 블렌드";
 			case EAnimGraphNodeType::BlendListByEnum:     return "값으로 포즈 선택";
+			case EAnimGraphNodeType::BlendSpace:          return "2D 방향 블렌드";
 			case EAnimGraphNodeType::VariableGet:         return "변수 읽기";
 			case EAnimGraphNodeType::RefPose:             return "기준 포즈";
 		}
@@ -426,6 +431,8 @@ namespace
 				return "Base Pose와 Blend Pose를 섞습니다. Root Bone을 지정하면 해당 본 이하만 섞습니다.";
 			case EAnimGraphNodeType::BlendListByEnum:
 				return "Selector 값으로 여러 Pose 중 하나를 고릅니다. 현재 구현에서는 숫자 입력 기반입니다.";
+			case EAnimGraphNodeType::BlendSpace:
+				return "AxisX/AxisY 값에 따라 산점 샘플 클립들을 삼각분할+무게중심 가중으로 연속 블렌드합니다. 방향 locomotion(예: 좌우 strafe × 전후)에 사용. 한 축만 연결하면 자동 1D로 퇴화합니다. State의 SubGraph로도 사용 가능합니다.";
 			case EAnimGraphNodeType::VariableGet:
 				return "AnimGraph 변수 또는 Owner AnimInstance 속성을 읽는 데이터 노드입니다. Lua BP/C++에서 갱신한 값을 여기서 읽습니다.";
 			case EAnimGraphNodeType::RefPose:
@@ -992,7 +999,8 @@ namespace
 			}
 			for (const FAnimGraphNode& N : AllNodes)
 			{
-				if (N.Type != EAnimGraphNodeType::StateMachine) continue;
+				// nested StateMachine 또는 BlendSpace(방향 locomotion) 를 sub-graph 로 허용(설계 §3.4).
+				if (N.Type != EAnimGraphNodeType::StateMachine && N.Type != EAnimGraphNodeType::BlendSpace) continue;
 				if (N.NodeId == OwnerNodeId) continue; // 자기 자신 제외 (직접 self-ref 금지)
 				char Buf[64];
 				std::snprintf(Buf, sizeof(Buf), "%s #%u", N.DisplayName.ToString().c_str(), N.NodeId);
@@ -1664,6 +1672,109 @@ namespace
 				break;
 			}
 
+			case EAnimGraphNodeType::BlendSpace:
+			{
+				// ── 임시 숫자입력 인스펙터 (Build 3.5). Build 4 에서 2D 캔버스와 병행 유지. ──
+				ImGui::TextDisabled("AxisX/AxisY 핀에 Variable Get(Float)을 연결해 축값 공급.");
+				ImGui::TextDisabled("한 축만 연결 시 자동 1D 퇴화. 미연결 축=0.");
+				ImGui::Spacing();
+
+				// 축 범위(에디터/정규화 참고). 삼각분할은 실제 좌표를 그대로 사용.
+				if (ImGui::CollapsingHeader("Axis Range", ImGuiTreeNodeFlags_DefaultOpen))
+				{
+					float RangeX[2] = { Node.AxisMinX, Node.AxisMaxX };
+					ImGui::SetNextItemWidth(-1.0f);
+					if (ImGui::DragFloat2("##AxisRangeX", RangeX, 0.05f, -100.0f, 100.0f, "X [%.2f"))
+					{
+						Node.AxisMinX = RangeX[0]; Node.AxisMaxX = RangeX[1]; bChanged = true;
+					}
+					float RangeY[2] = { Node.AxisMinY, Node.AxisMaxY };
+					ImGui::SetNextItemWidth(-1.0f);
+					if (ImGui::DragFloat2("##AxisRangeY", RangeY, 0.05f, -100.0f, 100.0f, "Y [%.2f"))
+					{
+						Node.AxisMinY = RangeY[0]; Node.AxisMaxY = RangeY[1]; bChanged = true;
+					}
+				}
+
+				ImGui::Spacing();
+
+				// ── Samples ──
+				char BSHeader[64];
+				std::snprintf(BSHeader, sizeof(BSHeader), "Samples (%zu)###BSSamples", Node.BlendSamples.size());
+				if (ImGui::CollapsingHeader(BSHeader, ImGuiTreeNodeFlags_DefaultOpen))
+				{
+					if (ImGui::Button("Add Sample"))
+					{
+						Node.BlendSamples.push_back(FBlendSample{});
+						bChanged = true;
+					}
+
+					int32 PendingDeleteIdx = -1;
+					for (int32 i = 0; i < static_cast<int32>(Node.BlendSamples.size()); ++i)
+					{
+						FBlendSample& Sample = Node.BlendSamples[i];
+						ImGui::PushID(i);
+						ImGui::Separator();
+
+						// 클립 피커 (SequencePlayer 노드와 동일 패턴).
+						const FString PreviewStem = Sample.SequencePath.empty() ? FString("None") : GetStemFromPath(Sample.SequencePath);
+						ImGui::TextUnformatted("Clip");
+						ImGui::SameLine();
+						ImGui::SetNextItemWidth(-1.0f);
+						if (ImGui::BeginCombo("##BSClip", PreviewStem.c_str()))
+						{
+							const bool bSelNone = Sample.SequencePath.empty();
+							if (ImGui::Selectable("None", bSelNone))
+							{
+								if (!Sample.SequencePath.empty()) bChanged = true;
+								Sample.SequencePath.clear();
+							}
+							const TArray<FAssetListItem>& AnimFiles = FAssetRegistry::ListByTypeName("UAnimSequence");
+							for (const FAssetListItem& Item : AnimFiles)
+							{
+								const bool bSel = (Sample.SequencePath == Item.FullPath);
+								if (ImGui::Selectable(Item.DisplayName.c_str(), bSel))
+								{
+									if (Sample.SequencePath != Item.FullPath) bChanged = true;
+									Sample.SequencePath = Item.FullPath;
+								}
+								if (bSel) ImGui::SetItemDefaultFocus();
+							}
+							ImGui::EndCombo();
+						}
+
+						// PosX/PosY — DragFloatN 은 포맷을 컴포넌트마다 따로 적용(컴포넌트당 %f 1개)하므로
+						// X/Y 를 별도 DragFloat 2개로 분리(포맷에 %f 2개 넣으면 두 번째가 스택 쓰레기값 읽음).
+						ImGui::SetNextItemWidth(-1.0f);
+						if (ImGui::DragFloat("##BSPosX", &Sample.PosX, 0.02f, -100.0f, 100.0f, "PosX %.2f"))
+						{
+							bChanged = true;
+						}
+						ImGui::SetNextItemWidth(-1.0f);
+						if (ImGui::DragFloat("##BSPosY", &Sample.PosY, 0.02f, -100.0f, 100.0f, "PosY %.2f"))
+						{
+							bChanged = true;
+						}
+
+						// PlayRate.
+						ImGui::SetNextItemWidth(-1.0f);
+						if (ImGui::DragFloat("##BSPlayRate", &Sample.PlayRate, 0.02f, 0.0f, 4.0f, "PlayRate %.2f"))
+						{
+							bChanged = true;
+						}
+
+						if (ImGui::Button("Delete##BSSample")) PendingDeleteIdx = i;
+						ImGui::PopID();
+					}
+					if (PendingDeleteIdx >= 0)
+					{
+						Node.BlendSamples.erase(Node.BlendSamples.begin() + PendingDeleteIdx);
+						bChanged = true;
+					}
+				}
+				break;
+			}
+
 			default:
 				ImGui::TextDisabled("(no editable properties yet)");
 				break;
@@ -2239,10 +2350,13 @@ namespace
 	}
 
 
+	// State.SubGraphNodeId 가 가리켜도 되는 노드 — nested StateMachine 또는 BlendSpace(방향 locomotion).
+	// UAnimState::SubGraphOverride 가 임의 위임을 지원(설계 §3.4).
 	bool IsStateMachineNodeRefValid(const UAnimGraphAsset& Asset, uint32 NodeId)
 	{
 		const FAnimGraphNode* Node = Asset.FindNode(NodeId);
-		return Node && Node->Type == EAnimGraphNodeType::StateMachine;
+		return Node && (Node->Type == EAnimGraphNodeType::StateMachine ||
+		                Node->Type == EAnimGraphNodeType::BlendSpace);
 	}
 
 	bool DoesStateMachineReachNode(const UAnimGraphAsset& Asset, uint32 CurrentNodeId, uint32 TargetNodeId, std::unordered_set<uint32>& Visiting)
@@ -2711,6 +2825,11 @@ bool FAnimGraphEditorWidget::CloneNodeFragment(UAnimGraphAsset* Asset, const TAr
 		NewNode->States = SrcNode.States;
 		NewNode->Transitions = SrcNode.Transitions;
 		NewNode->InitialStateName = SrcNode.InitialStateName;
+		NewNode->BlendSamples = SrcNode.BlendSamples;
+		NewNode->AxisMinX = SrcNode.AxisMinX;
+		NewNode->AxisMaxX = SrcNode.AxisMaxX;
+		NewNode->AxisMinY = SrcNode.AxisMinY;
+		NewNode->AxisMaxY = SrcNode.AxisMaxY;
 
 		const size_t PinCount = std::min(SrcNode.Pins.size(), NewPins.size());
 		for (size_t i = 0; i < PinCount; ++i)
@@ -3217,6 +3336,7 @@ void FAnimGraphEditorWidget::RenderPinSpawnMenu(UAnimGraphAsset* Asset)
 	{
 		AddContextItem(EAnimGraphNodeType::LayeredBlendPerBone, "Blend Layered Per Bone Pose");
 		AddContextItem(EAnimGraphNodeType::BlendListByEnum, "Blend List Enum Selector Pose");
+		AddContextItem(EAnimGraphNodeType::BlendSpace, "Blend Space 2D Directional Locomotion Pose");
 	}
 	if (ImGui::CollapsingHeader("State Machines", ImGuiTreeNodeFlags_DefaultOpen))
 	{
@@ -4662,6 +4782,7 @@ void FAnimGraphEditorWidget::Render(float DeltaTime)
 		{
 			bAddedNodeFromMenu |= RenderAddNodeAction(EAnimGraphNodeType::LayeredBlendPerBone, *Asset, PendingNewNodePosition, AddNodeSearchBuf, "Blend Layered Per Bone Pose");
 			bAddedNodeFromMenu |= RenderAddNodeAction(EAnimGraphNodeType::BlendListByEnum,     *Asset, PendingNewNodePosition, AddNodeSearchBuf, "Blend List Enum Selector Pose");
+			bAddedNodeFromMenu |= RenderAddNodeAction(EAnimGraphNodeType::BlendSpace,          *Asset, PendingNewNodePosition, AddNodeSearchBuf, "Blend Space 2D Directional Locomotion Pose");
 		}
 		if (ImGui::CollapsingHeader("State Machines", ImGuiTreeNodeFlags_DefaultOpen))
 		{

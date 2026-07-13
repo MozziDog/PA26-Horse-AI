@@ -36,6 +36,7 @@ enum class EAnimGraphNodeType : uint8
 	BlendListByEnum,
 	VariableGet,          // UAnimInstance UPROPERTY 참조
 	RefPose,              // FAnimNode_RefPose — mesh ref pose 출력. 보통 Slot/LayeredBlend 의 fallback 입력으로.
+	BlendSpace,           // FAnimNode_BlendSpace — 2D(및 1D 퇴화) 산점 샘플 연속 블렌드. 노드 내장 샘플 리스트.
 };
 
 
@@ -140,6 +141,20 @@ struct FAnimGraphTransition
 	friend FArchive& operator<<(FArchive& Ar, FAnimGraphTransition& T);
 };
 
+// ── BlendSpace 노드 보조 자료구조 ──
+// 독립 asset(UBlendSpace) 대신 노드에 산점 샘플을 내장(설계 §2-1). 각 샘플은 하나의 시퀀스와
+// 그 2D 좌표(PosX/PosY). 축 의미는 노드가 고정하지 않음 — 범용 (AxisX,AxisY). 좌표 공간 범위는
+// FAnimGraphNode 의 AxisMin/Max 필드가 정의(에디터 캔버스/정규화 참고용).
+struct FBlendSample
+{
+	FString SequencePath;      // 디스크 path. 컴파일러가 LoadAnimation 으로 내부 SequencePlayer 에 해상.
+	float   PosX     = 0.0f;   // AxisX 좌표.
+	float   PosY     = 0.0f;   // AxisY 좌표.
+	float   PlayRate = 1.0f;   // 샘플별 재생속도(보법 내 길이 정렬은 전제, 미세 조정용).
+
+	friend FArchive& operator<<(FArchive& Ar, FBlendSample& Sample);
+};
+
 struct FAnimGraphNode
 {
 	uint32                 NodeId = 0;
@@ -185,6 +200,15 @@ struct FAnimGraphNode
 	TArray<FAnimGraphState>      States;
 	TArray<FAnimGraphTransition> Transitions;
 	FName                        InitialStateName;
+
+	// BlendSpace 노드 — 내장 산점 샘플과 축 좌표 범위. 다른 노드 타입에선 미사용.
+	// 컴파일러가 각 샘플을 내부 FAnimNode_SequencePlayer 로, 좌표를 삼각망 입력으로 주입.
+	// X/Y Float 입력 핀(축값)은 그래프 링크(VariableGet → Float Variable)로 자립 해석(설계 §2-6).
+	TArray<FBlendSample>         BlendSamples;
+	float                        AxisMinX = -1.0f;
+	float                        AxisMaxX =  1.0f;
+	float                        AxisMinY = -1.0f;
+	float                        AxisMaxY =  1.0f;
 
 	friend FArchive& operator<<(FArchive& Ar, FAnimGraphNode& Node);
 };

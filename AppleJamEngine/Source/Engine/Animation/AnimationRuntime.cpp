@@ -76,6 +76,48 @@ void FPoseContext::ResetToRefPose()
 	MorphWeights.assign(Asset->MorphTargets.size(), 0.0f);
 }
 
+void FAnimationRuntime::BlendPosesTogether(
+	const TArray<const FPoseContext*>& Poses,
+	const TArray<float>&               Weights,
+	FPoseContext&                      Out)
+{
+	const size_t N = std::min(Poses.size(), Weights.size());
+
+	// 유효 항목(가중치 > 0 & non-null) 수집.
+	size_t FirstValid = N;
+	float  AccW       = 0.0f;
+	for (size_t i = 0; i < N; ++i)
+	{
+		if (Poses[i] && Weights[i] > 0.0f)
+		{
+			if (FirstValid == N) FirstValid = i;
+		}
+	}
+
+	if (FirstValid == N)
+	{
+		// 유효 없음 — ref pose fallback.
+		Out.ResetToRefPose();
+		return;
+	}
+
+	// 첫 유효 포즈로 초기화.
+	Out.Pose         = Poses[FirstValid]->Pose;
+	Out.MorphWeights = Poses[FirstValid]->MorphWeights;
+	AccW             = Weights[FirstValid];
+
+	for (size_t i = FirstValid + 1; i < N; ++i)
+	{
+		if (!Poses[i] || Weights[i] <= 0.0f) continue;
+		const float NewW = AccW + Weights[i];
+		const float Alpha = (NewW > 1e-8f) ? (Weights[i] / NewW) : 0.0f;
+		// acc(=Out) 과 다음 포즈를 alpha 로 블렌드해 in-place 갱신. BlendTwoPosesTogether 는
+		// Out 이 입력 A 와 같은 인스턴스여도 성분별 계산이라 안전(A 를 먼저 읽고 기록).
+		BlendTwoPosesTogether(Out, *Poses[i], Alpha, Out);
+		AccW = NewW;
+	}
+}
+
 void FAnimationRuntime::BlendTwoPosesTogether(
 	const FPoseContext& A,
 	const FPoseContext& B,

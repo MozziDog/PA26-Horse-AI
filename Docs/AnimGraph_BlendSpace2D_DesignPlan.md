@@ -53,34 +53,34 @@
 > 각 **Build N**은 그 자체로 컴파일이 되고 정의된 테스트(회귀/신규)로 끝나는 단위. 머신을 옮길 때는 Build 경계에서 넘기는 것을 권장.
 > 완료 시 `[ ]`→`[x]`. Build 헤더의 `상태`도 갱신.
 
-### Build 1 — 삼각분할 라이브러리 (독립 · 단위 테스트)  `상태: TODO`
+### Build 1 — 삼각분할 라이브러리 (독립 · 단위 테스트)  `상태: DONE (2026-07-13)`
 > 엔진 의존 없는 순수 수학. 회귀 위험 0, 알고리즘 리스크를 가장 먼저 격리.
-- [ ] **1.1** 신규 `Animation/Graph/BlendSpaceTriangulation.{h,cpp}` — 샘플 2D 좌표 → 삼각형 인덱스 목록(Bowyer–Watson 등)
-- [ ] **1.2** 포함 삼각형 탐색 + barycentric 3-weight
-- [ ] **1.3** convex hull 밖 질의 → 최근접 edge 투영(2-weight) / 최근접 vertex(1-weight) fallback
-- [ ] **1.4** 퇴화 처리: 샘플 1개=passthrough, 2개·공선=1D bracket-lerp (→ **1D 흡수 지점**. §2-7의 "미바인딩 축=0"과 함께 1D 사용을 코드 분기 없이 커버)
-- [ ] **1.5** **임시 테스트 코드** 작성(준비된 테스트 솔루션 없음 [열림-4 해소]) — 삼각형 내부/경계/hull 밖/공선/중복점에서 가중치 합=1·범위[0,1] 검증. 임시 진입점(예: `#ifdef` 가드 함수 또는 일회성 main 훅)
-- [ ] **▶ 테스트(신규):** 위 임시 코드 실행해 통과 확인 → **통과 후 임시 테스트 코드 제거**. **빌드 & 테스트 통과 시 Build 1 완료.**
+- [x] **1.1** 신규 `Animation/Graph/BlendSpaceTriangulation.{h,cpp}` — 샘플 2D 좌표 → 삼각형 인덱스 목록(Bowyer–Watson)
+- [x] **1.2** 포함 삼각형 탐색 + barycentric 3-weight
+- [x] **1.3** convex hull 밖 질의 → 최근접 edge 투영(2-weight) / 최근접 vertex(1-weight) fallback
+- [x] **1.4** 퇴화 처리: 샘플 1개=passthrough, 2개·공선=1D bracket-lerp (→ **1D 흡수 지점**. §2-7의 "미바인딩 축=0"과 함께 1D 사용을 코드 분기 없이 커버)
+- [x] **1.5** **임시 테스트 코드** 작성 — 엔진 트리 밖(scratchpad)에서 shim 타입으로 격리 컴파일. 사각형/랜덤산점20/공선/2샘플/1샘플/중복점/radial8 케이스에서 가중치 합=1·범위[0,1]·볼록조합 재구성 검증.
+- [x] **▶ 테스트(신규):** g++ -std=c++17 -Wall clean 컴파일 · 전 케이스 ALL TESTS PASSED. 임시 테스트 코드는 엔진 트리에 남기지 않음(외부 harness). **주의: 엔진 전체 컴파일(ReleaseBuild.bat, MSVC/Windows)은 이 환경(Linux)에서 실행 불가 → 사용자 머신에서 Build 3 배선 시 최종 확인 필요.**
 
-### Build 2 — 타입 & 직렬화 (회귀 체크)  `상태: TODO`
+### Build 2 — 타입 & 직렬화 (회귀 체크)  `상태: DONE (2026-07-13)`
 > 데이터 모델만 추가, 런타임 동작 없음. 목표는 "기존 asset이 안 깨진다".
-- [ ] **2.1** `EAnimGraphNodeType::BlendSpace` 추가 ([AnimGraphTypes.h:29-39](../AppleJamEngine/Source/Engine/Animation/Graph/AnimGraphTypes.h#L29-L39))
-- [ ] **2.2** `struct FBlendSample { FString SequencePath; float PosX; float PosY; float PlayRate=1; }` + `TArray<FBlendSample> BlendSamples` + 축 범위(`AxisMin/Max`) 필드를 `FAnimGraphNode`에 추가
-- [ ] **2.3** `operator<<(FArchive&, FAnimGraphNode&)` 신규 필드 직렬화 + `kAnimGraphAssetVersion` 3→4 + 구버전 로드 분기 [전제-C]
-- [ ] **▶ 테스트(회귀):** 빌드 후 기존 AnimGraph asset 로드→저장→컴파일 정상 · 기존 노드/재생 영향 없음 확인. **통과 시 Build 2 완료.**
+- [x] **2.1** `EAnimGraphNodeType::BlendSpace` 추가 (`AnimGraphTypes.h`). 기존 editor 스위치는 모두 switch 뒤 fallback return 보유 → 컴파일 안전.
+- [x] **2.2** `struct FBlendSample { FString SequencePath; float PosX; float PosY; float PlayRate=1; }` + `TArray<FBlendSample> BlendSamples` + 축 범위(`AxisMinX/MaxX/MinY/MaxY`) 필드를 `FAnimGraphNode`에 추가
+- [x] **2.3** `operator<<(FArchive&, FBlendSample&)` + `TArray<FBlendSample>` 명시 overload(memcpy 경로 회피) + `FAnimGraphNode` 신규 필드 직렬화 · `kAnimGraphAssetVersion` 3→4 · 구버전 로드 분기(`thread_local g_AnimGraphLoadVersion` + `FAnimGraphLoadVersionScope`, v<4 는 신규 필드 skip → 기본값 유지) [전제-C]
+- [x] **▶ 테스트(회귀):** mock-archive 격리 harness 로 (a) v4 roundtrip 전 필드 보존 (b) v3 구버전 로드 시 신규 필드 기본값 유지·바이트 over-read 없음 (c) 빈 BlendSamples 정상 — 전 케이스 통과. **엔진 전체 빌드/실 asset 로드는 사용자 머신(MSVC)에서 최종 확인 필요.**
 
-### Build 3 — 런타임 노드 + 컴파일러 + SM 통합 + 최소 저작 (신규 기능 e2e)  `상태: TODO`
+### Build 3 — 런타임 노드 + 컴파일러 + SM 통합 + 최소 저작 (신규 기능 e2e)  `상태: CODE-COMPLETE (2026-07-13, 엔진 e2e 검증은 사용자 머신 필요)`
 > 첫 playable. 임시 숫자입력 인스펙터로 노드를 만들어 실제 블렌드를 검증(2D 캔버스는 Build 4).
-- [ ] **3.1** `FAnimationRuntime` N-pose 가중 블렌드 헬퍼(`BlendTwoPosesTogether` 합성, weight 배열)
-- [ ] **3.2** 신규 `Animation/Nodes/AnimNode_BlendSpace.{h,cpp}` (`BlendListByEnum` 템플릿):
-  - [ ] Initialize: 샘플별 내부 `FAnimNode_SequencePlayer` 생성·init + 삼각망(Build 1) build
-  - [ ] Update: 공유 phase 진행 → 축값(AxisFn) → 활성 샘플·가중치 → 활성 child Update → 가중 RM lerp
-  - [ ] Evaluate: 활성 pose N-way 가중 블렌드 · AddReferencedObjects · GetLastRootMotionDelta
-- [ ] **3.3** `AnimGraphCompiler.cpp` `case BlendSpace`: FBlendSample→`LoadAnimation`→내부 SequencePlayer, 좌표/축범위 주입 · X/Y Float 핀→VariableGet(선언된 Float Variable)→`MakeFloatReader` 주입 · **미연결 축은 reader 미주입 → 0 평가**(§2-7)
-- [ ] **3.4** SubGraph 타입 제한 완화 ([AnimGraphCompiler.cpp:403](../AppleJamEngine/Source/Engine/Animation/Graph/AnimGraphCompiler.cpp#L403)): `StateMachine || BlendSpace`
-- [ ] **3.5** 최소 저작 경로: `AddNodeOfType` BlendSpace 케이스(AxisX/AxisY 입력 + Result 출력 핀) + 팔레트 등록 + **임시 숫자입력 인스펙터**(샘플 add/remove·클립 경로·PosX/PosY)
-- [ ] **3.6** SubGraph 콤보 필터 완화 ([AnimGraphEditorWidget.cpp:995](../AppleJamEngine/Source/Editor/UI/Asset/Animation/AnimGraphEditorWidget.cpp#L995))
-- [ ] **▶ 테스트(신규):** **실제 사용할 말 anim set 그대로** 노드 생성→샘플 배치→축 변수 배선 후 (a) 축값 변화에 pose 연속 블렌드 (b) **한 축만 바인딩 시 1D 퇴화 동작**(§2-7) (c) State SubGraph로 재생 (d) RM 정상 (e) 회귀: 기존 그래프 정상. **통과 시 Build 3 완료.**
+- [x] **3.1** `FAnimationRuntime::BlendPosesTogether(poses[], weights[], Out)` — `BlendTwoPosesTogether` incremental 합성으로 N-way 가중 평균(내부 정규화).
+- [x] **3.2** 신규 `Animation/Nodes/AnimNode_BlendSpace.{h,cpp}`:
+  - [x] Initialize: 샘플별 내부 `FAnimNode_SequencePlayer` init + 삼각망(Build 1) build. OnBecomeRelevant 에서 전 샘플 위상 정렬(LocalTime reset).
+  - [x] Update: 축값(AxisXFn/AxisYFn, 미설정=0) → 질의점 → 삼각망 가중치 → **전 샘플 player 동일 dt 진행**(길이 동일 전제 → 위상 자동 정렬, sync 인프라 불필요) · Notify 는 활성 가중치만 · 가중 RM lerp(위치 가중합, 회전 incremental slerp).
+  - [x] Evaluate: 활성 pose N-way 가중 블렌드(단일 활성은 passthrough) · AddReferencedObjects · GetLastRootMotionDelta override.
+- [x] **3.3** `AnimGraphCompiler.cpp` `case BlendSpace`: FBlendSample→`LoadAnimation`→내부 SequencePlayer, 좌표 주입 · AxisX/AxisY Float 핀→VariableGet(Float Variable)→`MakeFloatReader` 주입 · **미연결 축은 reader 미주입 → 0 평가**(§2-7).
+- [x] **3.4** SubGraph 타입 제한 완화 (`AnimGraphCompiler.cpp`): `StateMachine || BlendSpace`. + 로드 정규화(`AnimGraphAsset.cpp` `IsValidSubGraphNodeId`) 및 에디터 검증(`IsStateMachineNodeRefValid`)도 BlendSpace 허용하도록 동반 완화(안 하면 로드 시 SubGraphNodeId 리셋됨).
+- [x] **3.5** 최소 저작 경로: `AddNodeOfType` BlendSpace 케이스(AxisX/AxisY Float 입력 + Pose 출력 핀) + 팔레트 등록(우클릭 메뉴 2곳) + **임시 숫자입력 인스펙터**(샘플 add/remove·클립 피커·PosX/PosY·PlayRate·축범위) + 노드 색상/라벨/역할 테이블 등록 + 노드 복제 시 신규 필드 복사.
+- [x] **3.6** SubGraph 콤보 필터 완화 (`AnimGraphEditorWidget.cpp`): StateMachine/BlendSpace 모두 선택 가능.
+- [ ] **▶ 테스트(신규):** ⚠ **엔진 런타임 e2e 는 이 환경(Linux)에서 실행 불가 → 사용자 머신에서 수행 필요.** 절차: `GenerateProjectFiles.bat` → `ReleaseBuild.bat` 컴파일 확인 → 에디터에서 **실제 말 anim set** 으로 BlendSpace 노드 생성→샘플 배치→축 변수 배선 후 (a) 축값 변화에 pose 연속 블렌드 (b) 한 축만 바인딩 시 1D 퇴화 (c) State SubGraph 재생 (d) RM 정상 (e) 회귀: 기존 그래프 정상.
 
 ### Build 4 — 2D 캔버스 에디터 (신규 기능 + 회귀)  `상태: TODO`
 > 저작 UX 승격. 런타임은 그대로. **임시 숫자 인스펙터는 제거하지 않고 당분간 병행 유지 [열림-2 해소]** — 써보고 불필요/불만족 시 그때 대체·제거.
@@ -126,7 +126,13 @@
 - **[열림-3 → 해소]** e2e 테스트는 **실제 사용할 말 anim set 그대로** 사용(별도 최소 세트 불필요). 위상 정렬은 그 과정에서 자연 확인. → Build 3 테스트.
 - **[열림-4 → 해소]** 준비된 테스트 솔루션 없음 → **임시 테스트 코드 작성 후 통과 확인, 그 뒤 제거**. → Build 1.5 / Build 1 테스트.
 
-**남은 선행 액션:** 검토 승인 시 Build 1부터 착수.
+**남은 선행 액션:** Build 1~3 코드 완료(2026-07-13, 체크포인트). Build 4(2D 캔버스)는 보류 — 임시 숫자 인스펙터로 저작 가능하므로 우선 사용자 머신에서 컴파일·e2e 검증 후 필요 시 착수.
+
+### ⚠ 사용자 머신에서 할 일 (Build 3 검증, Linux 환경에서 미실행)
+1. `GenerateProjectFiles.bat` 실행 — 신규 파일 4개(`BlendSpaceTriangulation.{h,cpp}`, `AnimNode_BlendSpace.{h,cpp}`)를 sln/vcxproj 에 반영(Scripts 가 `Source/` 재귀 스캔).
+2. `ReleaseBuild.bat` 로 엔진 컴파일 확인.
+3. 에디터에서 실 말 anim set 으로 BlendSpace 노드 e2e 검증(위 Build 3 테스트 절차).
+4. 기존 AnimGraph asset 로드/저장(회귀) 확인 — v3→v4 마이그레이션.
 
 ---
 
@@ -137,3 +143,6 @@
 | 2026-07-13 | — | 설계 문서 최초 작성 | 검토 대기 |
 | 2026-07-13 | — | Phase 5(콘텐츠) 제외 · Phase→빌드/테스트 단위(Build 1~4) 재구성 | 검토 대기 |
 | 2026-07-13 | — | 열림 4건 해소 반영(범용 축·미바인딩0→1D · 임시 인스펙터 병행 · 실 anim set 테스트 · 임시 테스트코드) | 착수 승인 대기 |
+| 2026-07-13 | Linux(Cowork) | **Build 1 완료** — `BlendSpaceTriangulation.{h,cpp}` 신규(Bowyer–Watson Delaunay + barycentric + hull밖 edge/vertex 투영 + 공선/2/1샘플 퇴화). 외부 harness 단위테스트 전 케이스 통과. | 엔진 전체 빌드(MSVC)는 미확인 — Build 3 배선 시 확인 |
+| 2026-07-13 | Linux(Cowork) | **Build 2 완료** — enum `BlendSpace`, `FBlendSample`+`FAnimGraphNode` 필드, 직렬화 v3→v4 + 구버전 로드 분기. mock-archive 회귀 harness 통과. | 실 asset 로드/MSVC 빌드는 사용자 확인 |
+| 2026-07-13 | Linux(Cowork) | **Build 3 코드 완료** — `AnimNode_BlendSpace.{h,cpp}` 신규, `BlendPosesTogether` 헬퍼, 컴파일러 case+SubGraph 완화(컴파일러/로드/에디터검증 3곳), 최소 저작(팔레트·임시 인스펙터·색상/라벨·복제). | ⚠ 엔진 컴파일·런타임 e2e 미실행(Linux). 사용자 머신에서 GenerateProjectFiles→ReleaseBuild→에디터 검증 필요 |

@@ -26,12 +26,28 @@
 FArchive& operator<<(FArchive& Ar, FAnimGraphPin&        Pin);
 FArchive& operator<<(FArchive& Ar, FAnimGraphTransition& T);
 FArchive& operator<<(FArchive& Ar, FAnimGraphVariable&   Var);
+FArchive& operator<<(FArchive& Ar, FBlendSample&         Sample);
 
 namespace
 {
 	constexpr uint32 kAnimGraphAssetMagic   = 0x46475241u; // 'AGRF' - Anim Graph File
-	constexpr uint32 kAnimGraphAssetVersion = 3u;          // v3 adds AnimGraph-owned variables.
+	constexpr uint32 kAnimGraphAssetVersion = 4u;          // v4 adds BlendSpace node samples + axis ranges. v3 adds AnimGraph-owned variables.
 	thread_local bool g_LoadLegacyTransitionFormat = false;
+
+	// 로드 중인 자산의 버전 — FAnimGraphNode::operator<< 가 신규(v4) 필드 존재 여부를 판단하는 데 사용.
+	// 저장 시에는 항상 최신 버전으로 두어 모든 필드를 기록. 로드 시 Serialize 가 실제 버전으로 세팅.
+	thread_local uint32 g_AnimGraphLoadVersion = kAnimGraphAssetVersion;
+
+	struct FAnimGraphLoadVersionScope
+	{
+		explicit FAnimGraphLoadVersionScope(uint32 InVersion)
+			: Previous(g_AnimGraphLoadVersion)
+		{
+			g_AnimGraphLoadVersion = InVersion;
+		}
+		~FAnimGraphLoadVersionScope() { g_AnimGraphLoadVersion = Previous; }
+		uint32 Previous;
+	};
 
 	struct FLegacyTransitionFormatScope
 	{
@@ -75,6 +91,17 @@ inline FArchive& operator<<(FArchive& Ar, TArray<FAnimGraphVariable>& Array)
 	return Ar;
 }
 
+// FBlendSample 은 FString 을 보유해 non-trivially-copyable 이라 generic template 이 element-wise 로
+// 빠지지만, 명시 overload 로 경로를 고정한다(위 FAnimGraphPin 주석과 동일한 안전 장치).
+inline FArchive& operator<<(FArchive& Ar, TArray<FBlendSample>& Array)
+{
+	uint32 N = static_cast<uint32>(Array.size());
+	Ar << N;
+	if (Ar.IsLoading()) Array.resize(N);
+	for (auto& Item : Array) Ar << Item;
+	return Ar;
+}
+
 FArchive& operator<<(FArchive& Ar, FAnimGraphPin& Pin)
 {
 	Ar << Pin.PinId;
@@ -99,6 +126,15 @@ FArchive& operator<<(FArchive& Ar, FAnimGraphVariable& Var)
 	Ar << Var.Type;
 	Ar << Var.DefaultValue;
 	Ar << Var.Category;
+	return Ar;
+}
+
+FArchive& operator<<(FArchive& Ar, FBlendSample& Sample)
+{
+	Ar << Sample.SequencePath;
+	Ar << Sample.PosX;
+	Ar << Sample.PosY;
+	Ar << Sample.PlayRate;
 	return Ar;
 }
 
@@ -150,6 +186,17 @@ FArchive& operator<<(FArchive& Ar, FAnimGraphNode& Node)
 	Ar << Node.States;
 	Ar << Node.Transitions;
 	Ar << Node.InitialStateName;
+
+	// v4+ : BlendSpace 노드 샘플 + 축 범위. 구버전(로드) 자산에는 없으므로 스킵하고 기본값 유지.
+	// 저장 시 g_AnimGraphLoadVersion == 최신 → 항상 기록.
+	if (!Ar.IsLoading() || g_AnimGraphLoadVersion >= 4)
+	{
+		Ar << Node.BlendSamples;
+		Ar << Node.AxisMinX;
+		Ar << Node.AxisMaxX;
+		Ar << Node.AxisMinY;
+		Ar << Node.AxisMaxY;
+	}
 	return Ar;
 }
 
@@ -346,6 +393,16 @@ FAnimGraphNode* UAnimGraphAsset::AddNodeOfType(EAnimGraphNodeType Type, float X,
 		{
 			FAnimGraphNode* N = AddNode(Type, FName("Ref Pose"), X, Y);
 			AddPin(*N, EAnimGraphPinKind::Output, EAnimGraphPinType::Pose, FName("Pose"));
+			return N;
+		}
+		case EAnimGraphNodeType::BlendSpace:
+		{
+			// AxisX/AxisY 는 Float 입력(VariableGet 직결) — 미연결 시 0 평가로 1D 퇴화.
+			// 샘플 리스트/축 범위는 노드에 내장(FBlendSample), 인스펙터에서 편집.
+			FAnimGraphNode* N = AddNode(Type, FName("Blend Space"), X, Y);
+			AddPin(*N, EAnimGraphPinKind::Input,  EAnimGraphPinType::Float, FName("AxisX"));
+			AddPin(*N, EAnimGraphPinKind::Input,  EAnimGraphPinType::Float, FName("AxisY"));
+			AddPin(*N, EAnimGraphPinKind::Output, EAnimGraphPinType::Pose,  FName("Pose"));
 			return N;
 		}
 	}
@@ -574,6 +631,7 @@ void UAnimGraphAsset::Serialize(FArchive& Ar)
 
 	const bool bLegacyTransitions = Version < 2;
 	FLegacyTransitionFormatScope LegacyTransitionScope(bLegacyTransitions);
+	FAnimGraphLoadVersionScope   LoadVersionScope(Version); // FAnimGraphNode::operator<< 가 v4 필드 게이트에 사용.
 	Ar << Nodes;
 	Ar << Links;
 	Ar << OwnerClassName;
@@ -618,11 +676,14 @@ void UAnimGraphAsset::Serialize(FArchive& Ar)
 		return -1;
 	};
 
-	auto IsValidStateMachineNodeId = [&](uint32 NodeId) -> bool
+	// State 의 SubGraphNodeId 가 가리켜도 되는 노드 타입 — nested StateMachine 또는 BlendSpace
+	// (방향 locomotion). UAnimState::SubGraphOverride 가 임의 FAnimNode_Base 위임을 지원(설계 §3.4).
+	auto IsValidSubGraphNodeId = [&](uint32 NodeId) -> bool
 	{
 		if (NodeId == 0) return false;
 		const FAnimGraphNode* Node = FindNode(NodeId);
-		return Node && Node->Type == EAnimGraphNodeType::StateMachine;
+		return Node && (Node->Type == EAnimGraphNodeType::StateMachine ||
+		                Node->Type == EAnimGraphNodeType::BlendSpace);
 	};
 
 	for (FAnimGraphNode& Node : Nodes)
@@ -640,7 +701,7 @@ void UAnimGraphAsset::Serialize(FArchive& Ar)
 
 		for (FAnimGraphState& State : Node.States)
 		{
-			if (State.SubGraphNodeId == Node.NodeId || (State.SubGraphNodeId != 0 && !IsValidStateMachineNodeId(State.SubGraphNodeId)))
+			if (State.SubGraphNodeId == Node.NodeId || (State.SubGraphNodeId != 0 && !IsValidSubGraphNodeId(State.SubGraphNodeId)))
 			{
 				State.SubGraphNodeId = 0;
 			}

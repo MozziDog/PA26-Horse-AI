@@ -10,6 +10,7 @@
 #include "Animation/StateMachine/AnimState.h"
 #include "Animation/AnimationManager.h"
 #include "Animation/Nodes/AnimNode_BlendListByEnum.h"
+#include "Animation/Nodes/AnimNode_BlendSpace.h"
 #include "Animation/Nodes/AnimNode_LayeredBlendPerBone.h"
 #include "Animation/Nodes/AnimNode_RefPose.h"
 #include "Animation/Nodes/AnimNode_SequencePlayer.h"
@@ -400,13 +401,17 @@ namespace
 					if (Def.SubGraphNodeId != 0 && Def.SubGraphNodeId != Node.NodeId)
 					{
 						const FAnimGraphNode* SubNode = Graph.FindNode(Def.SubGraphNodeId);
-						if (SubNode && SubNode->Type == EAnimGraphNodeType::StateMachine)
+						// SubGraphOverride 는 임의 FAnimNode_Base 를 수용. StateMachine(nested SM) 에
+						// 더해 BlendSpace(방향 locomotion 블렌드)도 허용(설계 §3.4). State 가 시간 진행·
+						// pose 평가·RM 을 SubGraphOverride 에 위임하므로 두 타입 모두 그대로 동작.
+						if (SubNode && (SubNode->Type == EAnimGraphNodeType::StateMachine ||
+						                SubNode->Type == EAnimGraphNodeType::BlendSpace))
 						{
 							S->SubGraphOverride = CompileNode(Graph, Owner, *SubNode);
 						}
 						else
 						{
-							UE_LOG("AnimGraphCompiler: State '%s' 의 SubGraphNodeId=%u 가 StateMachine 노드 아님.",
+							UE_LOG("AnimGraphCompiler: State '%s' 의 SubGraphNodeId=%u 가 StateMachine/BlendSpace 노드 아님.",
 								Def.StateName.ToString().c_str(), Def.SubGraphNodeId);
 						}
 					}
@@ -435,6 +440,48 @@ namespace
 
 				SM->SetInitialState(Node.InitialStateName);
 				return SM;
+			}
+
+			case EAnimGraphNodeType::BlendSpace:
+			{
+				FAnimNode_BlendSpace* BS = Owner.MakeNode<FAnimNode_BlendSpace>();
+
+				// 각 내장 샘플 → 내부 SequencePlayer + 좌표. SequencePath 는 여기서 로드
+				// (StateMachine 의 state sequence 로드와 동일 경로).
+				for (const FBlendSample& Sample : Node.BlendSamples)
+				{
+					FAnimNode_SequencePlayer* SP = Owner.MakeNode<FAnimNode_SequencePlayer>();
+					SP->PlayRate = Sample.PlayRate;
+					SP->bLooping = true; // blend space 샘플은 보법 루프.
+					if (!Sample.SequencePath.empty() && Sample.SequencePath != "None")
+					{
+						SP->Sequence = FAnimationManager::Get().LoadAnimation(Sample.SequencePath);
+						if (!SP->Sequence)
+						{
+							UE_LOG("AnimGraphCompiler: BlendSpace 샘플 sequence 로드 실패. Path=%s",
+								Sample.SequencePath.c_str());
+						}
+					}
+					BS->SamplePlayers.push_back(SP);
+					BS->SampleCoords.push_back(FVector2(Sample.PosX, Sample.PosY));
+				}
+
+				// X/Y Float 입력 핀 source(VariableGet→Float Variable)를 MakeFloatReader 로 inline.
+				// 미연결 축은 reader 미주입 → 런타임에서 0 평가 → 자동 1D 퇴화(설계 §2-6, §2-7).
+				auto BindAxis = [&](const FName& PinName, TFunction<float(UAnimInstance*)>& OutFn)
+				{
+					const FAnimGraphPin* AxisPin = FindInputPinByName(Node, PinName);
+					if (!AxisPin) return;
+					const FAnimGraphNode* SrcNode = FindInputSourceNode(Graph, AxisPin->PinId);
+					if (SrcNode && SrcNode->Type == EAnimGraphNodeType::VariableGet)
+					{
+						OutFn = MakeFloatReader(SrcNode->VariableName);
+					}
+				};
+				BindAxis(FName("AxisX"), BS->AxisXFn);
+				BindAxis(FName("AxisY"), BS->AxisYFn);
+
+				return BS;
 			}
 
 			default:
