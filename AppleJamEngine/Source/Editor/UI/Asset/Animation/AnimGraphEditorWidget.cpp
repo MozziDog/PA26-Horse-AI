@@ -1924,7 +1924,7 @@ namespace
 					ImGui::SameLine();
 					float RangeX[2] = { Node.AxisMinX, Node.AxisMaxX };
 					ImGui::SetNextItemWidth(-1.0f);
-					if (ImGui::DragFloat2("##AxisRangeX", RangeX, 0.05f, -100.0f, 100.0f, "%.2f"))
+					if (ImGui::DragFloat2("##AxisRangeX", RangeX, 0.05f, -3600.0f, 3600.0f, "%.2f"))
 					{
 						Node.AxisMinX = RangeX[0]; Node.AxisMaxX = RangeX[1]; bChanged = true;
 					}
@@ -1932,7 +1932,7 @@ namespace
 					ImGui::SameLine();
 					float RangeY[2] = { Node.AxisMinY, Node.AxisMaxY };
 					ImGui::SetNextItemWidth(-1.0f);
-					if (ImGui::DragFloat2("##AxisRangeY", RangeY, 0.05f, -100.0f, 100.0f, "%.2f"))
+					if (ImGui::DragFloat2("##AxisRangeY", RangeY, 0.05f, -3600.0f, 3600.0f, "%.2f"))
 					{
 						Node.AxisMinY = RangeY[0]; Node.AxisMaxY = RangeY[1]; bChanged = true;
 					}
@@ -2007,12 +2007,12 @@ namespace
 							// PosX/PosY — DragFloatN 은 포맷을 컴포넌트마다 따로 적용(컴포넌트당 %f 1개)하므로
 							// X/Y 를 별도 DragFloat 2개로 분리(포맷에 %f 2개 넣으면 두 번째가 스택 쓰레기값 읽음).
 							ImGui::SetNextItemWidth(-1.0f);
-							if (ImGui::DragFloat("##BSPosX", &Sample.PosX, 0.02f, -100.0f, 100.0f, "PosX %.2f"))
+							if (ImGui::DragFloat("##BSPosX", &Sample.PosX, 0.02f, -3600.0f, 3600.0f, "PosX %.2f"))
 							{
 								bChanged = true;
 							}
 							ImGui::SetNextItemWidth(-1.0f);
-							if (ImGui::DragFloat("##BSPosY", &Sample.PosY, 0.02f, -100.0f, 100.0f, "PosY %.2f"))
+							if (ImGui::DragFloat("##BSPosY", &Sample.PosY, 0.02f, -3600.0f, 3600.0f, "PosY %.2f"))
 							{
 								bChanged = true;
 							}

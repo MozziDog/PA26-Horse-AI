@@ -77,57 +77,20 @@ bool FBlendSpaceTriangulation::Build(const TArray<FVector2>& InSamples)
 		// (1개는 CalculateWeightsDegenerate 에서 passthrough.)
 	}
 
-	// 공선성 판정: 모든 점이 한 직선 위에 있으면 삼각분할 불가 → 1D 퇴화.
-	if (n >= 3)
-	{
-		// 가장 멀리 떨어진 두 점을 기준선으로 삼아 수치 안정성 확보.
-		int32 iA = 0, iB = 1;
-		float best = -1.0f;
-		for (int32 i = 0; i < n; ++i)
-		{
-			for (int32 j = i + 1; j < n; ++j)
-			{
-				const float d = DistSq(Samples[i], Samples[j]);
-				if (d > best) { best = d; iA = i; iB = j; }
-			}
-		}
-		bool bAllCollinear = true;
-		if (best <= 1e-12f)
-		{
-			bAllCollinear = true; // 모든 점이 사실상 동일 위치.
-		}
-		else
-		{
-			const FVector2& A = Samples[iA];
-			const FVector2& B = Samples[iB];
-			// 기준선 길이로 정규화한 수직거리로 공선 판정.
-			const float baseLen = std::sqrt(best);
-			for (int32 k = 0; k < n; ++k)
-			{
-				const float area2 = std::fabs(Cross2D(A, B, Samples[k]));
-				const float perpDist = area2 / baseLen;
-				if (perpDist > 1e-4f)
-				{
-					bAllCollinear = false;
-					break;
-				}
-			}
-		}
-
-		if (bAllCollinear)
-		{
-			bDegenerate = true;
-		}
-	}
-
 	if (bDegenerate)
 	{
 		BuildCollinearOrder();
 		return true;
 	}
 
-	// ── Bowyer–Watson ──
-	// 모든 점을 감싸는 super-triangle 구성.
+	// ── 좌표 정규화 (predicate 안정화) ──
+	// 삼각분할 위상은 좌표 규모·축 단위와 무관해야 한다. 두 축을 같은 스케일(max span)로 나누면
+	// 축 단위가 다를 때(x=deg ±180, y=±1 등) 한 축이 짓눌려 near-collinear 슬리버가 생기고,
+	// 슬리버의 외접원 반지름은 밑변²/(8·높이) 규모로 커져 super-triangle 정점을 포함하게 된다.
+	// 그러면 hull 쪽 삼각형이 super 정점과 묶여 마지막 단계에서 함께 제거된다(바깥 샘플 소실 버그).
+	// → 축별(anisotropic) 정규화로 pts 를 [-0.5,0.5]² 에 펼쳐 predicate 를 수행한다.
+	//   축별 스케일링은 affine 이라 hull/포함관계/barycentric 가중치가 보존되므로, Triangles
+	//   인덱스를 원본 Samples 에 그대로 적용해도 CalculateWeights(원본 좌표)와 일관된다.
 	float minX = Samples[0].X, minY = Samples[0].Y;
 	float maxX = Samples[0].X, maxY = Samples[0].Y;
 	for (int32 i = 1; i < n; ++i)
@@ -137,25 +100,74 @@ bool FBlendSpaceTriangulation::Build(const TArray<FVector2>& InSamples)
 		maxX = std::max(maxX, Samples[i].X);
 		maxY = std::max(maxY, Samples[i].Y);
 	}
-	const float dx = maxX - minX;
-	const float dy = maxY - minY;
-	const float dmax = std::max(dx, dy);
-	const float midX = (minX + maxX) * 0.5f;
-	const float midY = (minY + maxY) * 0.5f;
-	const float margin = (dmax > 0.0f ? dmax : 1.0f) * 20.0f;
+	const float ctrX  = (minX + maxX) * 0.5f;
+	const float ctrY  = (minY + maxY) * 0.5f;
+	const float spanX = maxX - minX;
+	const float spanY = maxY - minY;
+	// 변화 없는 축은 0 으로 접는다 → 아래 공선 판정이 1D 퇴화로 걸러낸다.
+	const float invSpanX = (spanX > 1e-12f) ? (1.0f / spanX) : 0.0f;
+	const float invSpanY = (spanY > 1e-12f) ? (1.0f / spanY) : 0.0f;
 
-	// super-triangle 정점은 원본 배열 뒤에 붙인 임시 인덱스 n, n+1, n+2.
-	TArray<FVector2> pts = Samples;
-	pts.push_back(FVector2(midX - margin, midY - margin));
-	pts.push_back(FVector2(midX + margin, midY - margin));
-	pts.push_back(FVector2(midX,          midY + margin));
+	TArray<FVector2> pts;
+	pts.reserve(static_cast<size_t>(n) + 3);
+	for (int32 i = 0; i < n; ++i)
+	{
+		pts.push_back(FVector2((Samples[i].X - ctrX) * invSpanX, (Samples[i].Y - ctrY) * invSpanY));
+	}
+
+	// 공선성 판정 — 정규화 공간에서 수행해 좌표 규모/축 단위와 무관하게 만든다.
+	// 모든 점이 한 직선 위면 삼각분할 불가 → 1D 퇴화.
+	{
+		// 가장 멀리 떨어진 두 점을 기준선으로 삼아 수치 안정성 확보.
+		int32 iA = 0, iB = 1;
+		float best = -1.0f;
+		for (int32 i = 0; i < n; ++i)
+		{
+			for (int32 j = i + 1; j < n; ++j)
+			{
+				const float d = DistSq(pts[i], pts[j]);
+				if (d > best) { best = d; iA = i; iB = j; }
+			}
+		}
+		bool bAllCollinear = true; // best ≤ 1e-12: 모든 점이 사실상 동일 위치.
+		if (best > 1e-12f)
+		{
+			const FVector2& A = pts[iA];
+			const FVector2& B = pts[iB];
+			const float baseLen = std::sqrt(best);
+			for (int32 k = 0; k < n; ++k)
+			{
+				const float perpDist = std::fabs(Cross2D(A, B, pts[k])) / baseLen;
+				if (perpDist > 1e-4f) // 정규화 좌표(≤√2)라 사실상 상대 임계값.
+				{
+					bAllCollinear = false;
+					break;
+				}
+			}
+		}
+		if (bAllCollinear)
+		{
+			bDegenerate = true;
+			BuildCollinearOrder();
+			return true;
+		}
+	}
+
+	// ── Bowyer–Watson ──
+	// super-triangle margin 은 공선 필터(1e-4)를 통과한 최악 슬리버의 외접원 반지름
+	// (≈ baseLen/(8·1e-4) ≲ 1.8e3)보다 충분히 크게 — 외접원이 super 정점에 닿으면 안 된다.
+	const float margin = 1.0e4f;
+	pts.push_back(FVector2(-margin, -margin));
+	pts.push_back(FVector2( margin, -margin));
+	pts.push_back(FVector2( 0.0f,    margin));
 	const int32 s0 = n, s1 = n + 1, s2 = n + 2;
 
 	// 작업용 삼각형 목록(정점은 pts 인덱스). CCW 로 정규화해 저장.
 	struct FWorkTri { int32 A, B, C; };
 	auto MakeCCW = [&pts](int32 a, int32 b, int32 c) -> FWorkTri
 	{
-		if (Cross2D(pts[a], pts[b], pts[c]) < 0.0f)
+		const double orient = ((double)pts[b].X - pts[a].X) * ((double)pts[c].Y - pts[a].Y) - ((double)pts[b].Y - pts[a].Y) * ((double)pts[c].X - pts[a].X);
+		if (orient < 0.0)
 		{
 			std::swap(b, c);
 		}
@@ -171,14 +183,14 @@ bool FBlendSpaceTriangulation::Build(const TArray<FVector2>& InSamples)
 		const FVector2& A = pts[T.A];
 		const FVector2& B = pts[T.B];
 		const FVector2& C = pts[T.C];
-		const float ax = A.X - P.X, ay = A.Y - P.Y;
-		const float bx = B.X - P.X, by = B.Y - P.Y;
-		const float cx = C.X - P.X, cy = C.Y - P.Y;
-		const float det =
+		const double ax = (double)A.X - (double)P.X, ay = (double)A.Y - (double)P.Y;
+		const double bx = (double)B.X - (double)P.X, by = (double)B.Y - (double)P.Y;
+		const double cx = (double)C.X - (double)P.X, cy = (double)C.Y - (double)P.Y;
+		const double det =
 			(ax * ax + ay * ay) * (bx * cy - cx * by) -
 			(bx * bx + by * by) * (ax * cy - cx * ay) +
 			(cx * cx + cy * cy) * (ax * by - bx * ay);
-		return det > 1e-9f; // CCW 에서 >0 == 내부.
+		return det > 0.0; // CCW 에서 >0 == 내부.
 	};
 
 	// 점을 하나씩 삽입.
