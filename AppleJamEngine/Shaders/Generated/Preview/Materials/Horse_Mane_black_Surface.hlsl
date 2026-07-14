@@ -1,4 +1,4 @@
-// Generated from D:/InternProject/HorseAI/AppleJamEngine/Content/Material/Horse/Horse_Mane.uasset
+// Generated from D:/InternProject/HorseAI/AppleJamEngine/Content/Material/Horse/Horse_Mane_black.uasset
 // Domain: Surface
 
 #include "Common/ConstantBuffers.hlsli"
@@ -46,13 +46,13 @@ Texture2D Tex_Normal : register(t1);
 
 FMaterialResult EvaluateMaterial(FMaterialPixelInput Input)
 {
-    float4 n_115 = float4(0.260000f, 0.223000f, 0.216000f, 1.000000f);
+    float3 n_143 = float3(0.143460f, 0.132564f, 0.132564f);
     float4 n_120 = Tex_Diffuse.Sample(LinearWrapSampler, Input.UV0);
-    float4 n_130 = (n_115 * float4((n_120).rgb, 0.0f));
+    float3 n_130 = (n_143 * (n_120).rgb);
     float4 n_31 = Tex_Normal.Sample(LinearWrapSampler, Input.UV0);
     float n_139 = 0.100000f;
     FMaterialResult Result;
-    Result.BaseColor = (n_130).xyz;
+    Result.BaseColor = n_130;
     Result.Normal = (n_31).rgb;
     Result.Roughness = 0.5f;
     Result.Metallic = 0.0f;
