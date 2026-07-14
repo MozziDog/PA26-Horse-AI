@@ -19,6 +19,16 @@ static void SyncToPlayer(UAnimState& S, FAnimNode_SequencePlayer& Player)
 	Player.LocalTime = S.GetLocalTime();
 }
 
+void UAnimState::InitializeSubGraph(const FAnimationInitializeContext& Context)
+{
+	// Sequence 모드의 Player 는 build 단계가 없어 OnEnter 의 OnBecomeRelevant 로 충분 —
+	// SubGraphOverride (BlendSpace 삼각망 build, nested SM 재귀 등) 만 전파 대상.
+	if (SubGraphOverride)
+	{
+		SubGraphOverride->Initialize(Context);
+	}
+}
+
 void UAnimState::OnEnter(UAnimInstance* Instance)
 {
 	LocalTime = 0.0f;
