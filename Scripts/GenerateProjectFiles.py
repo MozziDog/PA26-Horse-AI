@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parent.parent
 PROJECT_NAME = "AppleJamEngine"
 PROJECT_DIR = ROOT / PROJECT_NAME
 PROJECT_GUID = "{55068e81-c0a0-49f9-ab7b-54aea968722b}"
-ROOT_NAMESPACE = "Week14"
+ROOT_NAMESPACE = "AppleJamEngine"
 
 SOLUTION_GUID = "{4EBC5DD2-CECA-4722-9D19-87C7CB5F481B}"
 VS_PROJECT_TYPE = "{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}"
@@ -318,6 +318,7 @@ def generate_vcxproj(files: dict[str, list[str]]):
     ET.SubElement(pg, "ProjectGuid").text = PROJECT_GUID
     ET.SubElement(pg, "RootNamespace").text = ROOT_NAMESPACE
     ET.SubElement(pg, "WindowsTargetPlatformVersion").text = "10.0"
+    ET.SubElement(pg, "PreferredToolArchitecture").text = "x64"
     # vcpkg user-wide integration 비활성화. PhysX 는 ThirdParty 에 체크인된 사본만 사용한다.
     ET.SubElement(pg, "VcpkgEnabled").text = "false"
 
