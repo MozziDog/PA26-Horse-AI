@@ -1887,7 +1887,25 @@ namespace
 
 			case EAnimGraphNodeType::BlendSpace:
 			{
-				// ── 2D 캔버스 인스펙터 (Build 4.1). 아래 숫자 인스펙터와 병행. ──
+				// 이름 — State 의 SubGraph 드롭다운에서 이 이름으로 지칭되므로 알아보기 쉽게.
+				{
+					char NameBuf[64];
+					const FString CurName = Node.DisplayName == FName::None ? FString() : Node.DisplayName.ToString();
+					std::snprintf(NameBuf, sizeof(NameBuf), "%s", CurName.c_str());
+					ImGui::TextUnformatted("Name");
+					ImGui::SameLine();
+					ImGui::SetNextItemWidth(-1.0f);
+					// 편집 중엔 버퍼만, 포커스 빠질 때 commit(빈 이름 = None → fallback 라벨).
+					ImGui::InputText("##BSName", NameBuf, sizeof(NameBuf));
+					if (ImGui::IsItemDeactivatedAfterEdit())
+					{
+						const FName NewName = (NameBuf[0] == '\0') ? FName::None : FName(NameBuf);
+						if (NewName != Node.DisplayName) { Node.DisplayName = NewName; bChanged = true; }
+					}
+				}
+
+				ImGui::Spacing();
+
 				if (ImGui::CollapsingHeader("2D Canvas", ImGuiTreeNodeFlags_DefaultOpen))
 				{
 					if (RenderBlendSpaceCanvas(Node)) bChanged = true;
@@ -2894,6 +2912,38 @@ bool FAnimGraphEditorWidget::RenderAnimBlueprintNavigator(UAnimGraphAsset& Asset
 				ImGui::TreePop();
 			}
 			ImGui::PopID();
+		}
+		ImGui::TreePop();
+	}
+
+	// Blend Space 노드 — State 의 SubGraph 로 지칭되므로 여기서 이름을 알아보기 쉽게 노출.
+	if (ImGui::TreeNodeEx("Blend Spaces", ImGuiTreeNodeFlags_DefaultOpen))
+	{
+		bool bAnyBlendSpace = false;
+		for (const FAnimGraphNode& Node : Asset.GetNodes())
+		{
+			if (Node.Type != EAnimGraphNodeType::BlendSpace) continue;
+			bAnyBlendSpace = true;
+			ImGui::PushID(static_cast<int>(Node.NodeId));
+			char BsLabel[160];
+			std::snprintf(BsLabel, sizeof(BsLabel), "%s  (%zu samples)",
+				NodeTitleForDisplay(Node).c_str(), Node.BlendSamples.size());
+			// 클릭하면 루트 그래프에서 이 노드를 선택·포커스 → 우측 inspector 가 편집 대상으로 잡는다.
+			const bool bBsSelected = (PendingNavigateNodeId == Node.NodeId);
+			if (ImGui::Selectable(BsLabel, bBsSelected))
+			{
+				ViewMode = EViewMode::RootAnimGraph;
+				OpenStateMachineNodeId = 0;
+				OpenStateIndex = -1;
+				OpenTransitionIndex = -1;
+				PendingNavigateNodeId = Node.NodeId;
+			}
+			if (ImGui::IsItemHovered()) ImGui::SetTooltip("2D 방향 블렌드 노드. 클릭하면 루트 그래프에서 선택되어 우측에서 편집·이름 변경할 수 있습니다.");
+			ImGui::PopID();
+		}
+		if (!bAnyBlendSpace)
+		{
+			ImGui::TextDisabled("Blend Space 없음");
 		}
 		ImGui::TreePop();
 	}
@@ -4005,16 +4055,39 @@ void FAnimGraphEditorWidget::RenderStateMachineEditor(UAnimGraphAsset& Asset, FA
 	const int StateMachineStyleColors = PushUnrealAnimGraphCanvasStyle();
 	ed::Begin("StateMachineCanvas");
 
+	// 첫 프레임(또는 상태 추가/삭제로 리셋된 뒤)에 자산에 저장된 위치를 ed 컨텍스트로 push.
+	// 저장 위치가 없는(bValid=false) 노드만 기본 레이아웃으로 초기화한 뒤 valid 로 승격 → 이후
+	// 프레임의 readback 이 드래그 위치를 자산에 되돌려 저장한다(root 그래프와 동일한 단방향 흐름).
 	if (!bStateMachinePositionsPushed)
 	{
-		ed::SetNodePosition(ToNodeId(MakeEntryNodeId(StateMachineNode.NodeId)), ImVec2(-360.0f, -55.0f));
-		ed::SetNodePosition(ToNodeId(MakeAnyStateNodeId(StateMachineNode.NodeId)), ImVec2(-360.0f, 115.0f));
+		if (!StateMachineNode.bStateMachineEditorPosValid)
+		{
+			StateMachineNode.EntryPosX    = -360.0f;
+			StateMachineNode.EntryPosY    =  -55.0f;
+			StateMachineNode.AnyStatePosX = -360.0f;
+			StateMachineNode.AnyStatePosY =  115.0f;
+			StateMachineNode.bStateMachineEditorPosValid = true;
+			MarkDirty();
+		}
+		ed::SetNodePosition(ToNodeId(MakeEntryNodeId(StateMachineNode.NodeId)),
+			ImVec2(StateMachineNode.EntryPosX, StateMachineNode.EntryPosY));
+		ed::SetNodePosition(ToNodeId(MakeAnyStateNodeId(StateMachineNode.NodeId)),
+			ImVec2(StateMachineNode.AnyStatePosX, StateMachineNode.AnyStatePosY));
+
 		for (int32 i = 0; i < static_cast<int32>(StateMachineNode.States.size()); ++i)
 		{
-			const int32 Col = i % 3;
-			const int32 Row = i / 3;
+			FAnimGraphState& State = StateMachineNode.States[i];
+			if (!State.bEditorPosValid)
+			{
+				const int32 Col = i % 3;
+				const int32 Row = i / 3;
+				State.EditorPosX = 0.0f + Col * 300.0f;
+				State.EditorPosY = Row * 170.0f;
+				State.bEditorPosValid = true;
+				MarkDirty();
+			}
 			ed::SetNodePosition(ToNodeId(MakeStateNodeId(StateMachineNode.NodeId, i)),
-				ImVec2(0.0f + Col * 300.0f, Row * 170.0f));
+				ImVec2(State.EditorPosX, State.EditorPosY));
 		}
 		bStateMachinePositionsPushed = true;
 	}
@@ -4277,6 +4350,9 @@ void FAnimGraphEditorWidget::RenderStateMachineEditor(UAnimGraphAsset& Asset, FA
 
 				const ImVec2 NewPos = ed::ScreenToCanvas(ImGui::GetMousePos());
 				ed::SetNodePosition(ToNodeId(MakeStateNodeId(StateMachineNode.NodeId, NewStateIdx)), NewPos);
+				StateMachineNode.States[NewStateIdx].EditorPosX = NewPos.x;
+				StateMachineNode.States[NewStateIdx].EditorPosY = NewPos.y;
+				StateMachineNode.States[NewStateIdx].bEditorPosValid = true;
 				Asset.BumpVersion();
 				CommitGraphEdit(&Asset);
 			}
@@ -4332,6 +4408,40 @@ void FAnimGraphEditorWidget::RenderStateMachineEditor(UAnimGraphAsset& Asset, FA
 		}
 	}
 	ed::EndDelete();
+
+	// ── 위치 동기화 (ed → model) — 드래그한 Entry/AnyState/State 노드 좌표를 자산에 반영해 영구 저장.
+	// State 노드 id 는 인덱스 기반이라, 상태 추가/삭제로 인덱스가 밀려 re-push 가 예약된(!Pushed)
+	// 프레임에는 ed 좌표가 최신 인덱스와 어긋난다 → 그 프레임은 readback 을 건너뛰어 오염을 막는다.
+	if (bStateMachinePositionsPushed)
+	{
+		auto SyncPos = [](float& X, float& Y, const ImVec2& P) -> bool
+		{
+			if (std::fabs(X - P.x) > 0.01f || std::fabs(Y - P.y) > 0.01f)
+			{
+				X = P.x;
+				Y = P.y;
+				return true;
+			}
+			return false;
+		};
+
+		bool bMoved = false;
+		bMoved |= SyncPos(StateMachineNode.EntryPosX, StateMachineNode.EntryPosY,
+			ed::GetNodePosition(ToNodeId(MakeEntryNodeId(StateMachineNode.NodeId))));
+		bMoved |= SyncPos(StateMachineNode.AnyStatePosX, StateMachineNode.AnyStatePosY,
+			ed::GetNodePosition(ToNodeId(MakeAnyStateNodeId(StateMachineNode.NodeId))));
+		for (int32 i = 0; i < static_cast<int32>(StateMachineNode.States.size()); ++i)
+		{
+			FAnimGraphState& State = StateMachineNode.States[i];
+			if (SyncPos(State.EditorPosX, State.EditorPosY,
+				ed::GetNodePosition(ToNodeId(MakeStateNodeId(StateMachineNode.NodeId, i)))))
+			{
+				State.bEditorPosValid = true;
+				bMoved = true;
+			}
+		}
+		if (bMoved) MarkDirty();
+	}
 
 	// Context menus.
 	ed::NodeId ContextNodeId = 0;
@@ -5076,6 +5186,18 @@ void FAnimGraphEditorWidget::Render(float DeltaTime)
 	ed::Resume();
 
 	ProcessQueuedRootGraphCommands(Asset);
+
+	// 네비게이터에서 요청한 노드(BlendSpace 등)를 이 프레임에 선택+포커스 — 아래 selection
+	// 캡쳐가 그대로 집어 inspector 에 반영된다.
+	if (PendingNavigateNodeId != 0)
+	{
+		if (Asset->FindNode(PendingNavigateNodeId))
+		{
+			SelectOnlyNodes(TArray<uint32>{ PendingNavigateNodeId });
+			ed::NavigateToSelection();
+		}
+		PendingNavigateNodeId = 0;
+	}
 
 	// ed::End 직전에 선택된 노드 캡쳐 (inspector pane 이 ed 컨텍스트 외부에서 참조).
 	{

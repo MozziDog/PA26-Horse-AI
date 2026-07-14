@@ -125,6 +125,13 @@ struct FAnimGraphState
 	// SubGraphNodeId 가 있으면 SequencePath 는 무시.
 	uint32   SubGraphNodeId = 0;
 
+	// StateMachine 내부 에디터에서의 이 state 노드 캔버스 위치. bEditorPosValid 가 false 면 첫 오픈
+	// 시 grid 로 자동 배치되고 true 로 승격된다. 이후 드래그 위치가 자산에 저장돼 재오픈/다른
+	// StateMachine 전환 후 복귀에도 레이아웃이 유지된다.
+	float    EditorPosX      = 0.0f;
+	float    EditorPosY      = 0.0f;
+	bool     bEditorPosValid = false;
+
 	friend FArchive& operator<<(FArchive& Ar, FAnimGraphState& State);
 };
 
@@ -200,6 +207,15 @@ struct FAnimGraphNode
 	TArray<FAnimGraphState>      States;
 	TArray<FAnimGraphTransition> Transitions;
 	FName                        InitialStateName;
+
+	// StateMachine 내부 에디터의 Entry / Any State pseudo 노드 위치(캔버스 좌표). 개별 State 노드
+	// 위치는 각 FAnimGraphState.EditorPos* 에 저장한다. bStateMachineEditorPosValid 가 false 면 첫
+	// 오픈 시 기본 위치로 초기화 후 true 로 승격 — 이후 드래그 위치가 자산에 저장돼 유지된다.
+	float                        EntryPosX    = -360.0f;
+	float                        EntryPosY    =  -55.0f;
+	float                        AnyStatePosX = -360.0f;
+	float                        AnyStatePosY =  115.0f;
+	bool                         bStateMachineEditorPosValid = false;
 
 	// BlendSpace 노드 — 내장 산점 샘플과 축 좌표 범위. 다른 노드 타입에선 미사용.
 	// 컴파일러가 각 샘플을 내부 FAnimNode_SequencePlayer 로, 좌표를 삼각망 입력으로 주입.

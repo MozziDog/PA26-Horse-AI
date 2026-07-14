@@ -31,7 +31,7 @@ FArchive& operator<<(FArchive& Ar, FBlendSample&         Sample);
 namespace
 {
 	constexpr uint32 kAnimGraphAssetMagic   = 0x46475241u; // 'AGRF' - Anim Graph File
-	constexpr uint32 kAnimGraphAssetVersion = 4u;          // v4 adds BlendSpace node samples + axis ranges. v3 adds AnimGraph-owned variables.
+	constexpr uint32 kAnimGraphAssetVersion = 5u;          // v5 adds StateMachine editor node positions (state/entry/anystate). v4 adds BlendSpace node samples + axis ranges. v3 adds AnimGraph-owned variables.
 	thread_local bool g_LoadLegacyTransitionFormat = false;
 
 	// 로드 중인 자산의 버전 — FAnimGraphNode::operator<< 가 신규(v4) 필드 존재 여부를 판단하는 데 사용.
@@ -145,6 +145,15 @@ FArchive& operator<<(FArchive& Ar, FAnimGraphState& State)
 	Ar << State.PlayRate;
 	Ar << State.bLooping;
 	Ar << State.SubGraphNodeId;
+
+	// v5+ : StateMachine 내부 에디터 위치. 구버전 자산엔 없으므로 스킵 → bEditorPosValid=false 유지 →
+	// 다음 오픈 시 grid 자동 배치.
+	if (!Ar.IsLoading() || g_AnimGraphLoadVersion >= 5)
+	{
+		Ar << State.EditorPosX;
+		Ar << State.EditorPosY;
+		Ar << State.bEditorPosValid;
+	}
 	return Ar;
 }
 
@@ -196,6 +205,17 @@ FArchive& operator<<(FArchive& Ar, FAnimGraphNode& Node)
 		Ar << Node.AxisMaxX;
 		Ar << Node.AxisMinY;
 		Ar << Node.AxisMaxY;
+	}
+
+	// v5+ : StateMachine 내부 에디터의 Entry / Any State pseudo 노드 위치. 구버전 자산엔 없으므로
+	// 스킵 → bStateMachineEditorPosValid=false 유지 → 다음 오픈 시 기본 위치로 초기화.
+	if (!Ar.IsLoading() || g_AnimGraphLoadVersion >= 5)
+	{
+		Ar << Node.EntryPosX;
+		Ar << Node.EntryPosY;
+		Ar << Node.AnyStatePosX;
+		Ar << Node.AnyStatePosY;
+		Ar << Node.bStateMachineEditorPosValid;
 	}
 	return Ar;
 }
