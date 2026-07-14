@@ -82,12 +82,14 @@
 - [x] **3.6** SubGraph 콤보 필터 완화 (`AnimGraphEditorWidget.cpp`): StateMachine/BlendSpace 모두 선택 가능.
 - [ ] **▶ 테스트(신규):** ⚠ **엔진 런타임 e2e 는 이 환경(Linux)에서 실행 불가 → 사용자 머신에서 수행 필요.** 절차: `GenerateProjectFiles.bat` → `ReleaseBuild.bat` 컴파일 확인 → 에디터에서 **실제 말 anim set** 으로 BlendSpace 노드 생성→샘플 배치→축 변수 배선 후 (a) 축값 변화에 pose 연속 블렌드 (b) 한 축만 바인딩 시 1D 퇴화 (c) State SubGraph 재생 (d) RM 정상 (e) 회귀: 기존 그래프 정상.
 
-### Build 4 — 2D 캔버스 에디터 (신규 기능 + 회귀)  `상태: TODO`
+### Build 4 — 2D 캔버스 에디터 (신규 기능 + 회귀)  `상태: CODE-COMPLETE (2026-07-14, 컴파일 확인 · e2e 저작 검증은 사용자 머신)`
 > 저작 UX 승격. 런타임은 그대로. **임시 숫자 인스펙터는 제거하지 않고 당분간 병행 유지 [열림-2 해소]** — 써보고 불필요/불만족 시 그때 대체·제거.
-- [ ] **4.1** **2D 캔버스 인스펙터** (임시 숫자 인스펙터와 **병행**): 샘플 드래그 배치, 축 범위 설정, 삼각망 edge draw, 축값 연동 라이브 프리뷰 십자선, 클립 피커(기존 [RenderStateRow](../AppleJamEngine/Source/Editor/UI/Asset/Animation/AnimGraphEditorWidget.cpp#L941) 리스트 편집 패턴 차용)
-- [ ] **4.2** 색상/라벨/역할 테이블 항목 정리
-- [ ] **4.3** (선택) 노드 body 미니 프리뷰 · Debug 위젯 인스펙션
-- [ ] **▶ 테스트(신규+회귀):** 캔버스로 저작한 blend space가 Build 3 런타임과 일치 · 저장/재로드 후 좌표 보존 · 기존 그래프 편집 무영향. **통과 시 Build 4 완료.**
+- [x] **4.1** **2D 캔버스 인스펙터** (임시 숫자 인스펙터와 **병행**): 샘플 드래그 배치, 축 범위 설정, 삼각망 edge draw, 축값 연동 라이브 프리뷰 십자선, 클립 피커(기존 [RenderStateRow](../AppleJamEngine/Source/Editor/UI/Asset/Animation/AnimGraphEditorWidget.cpp#L941) 리스트 편집 패턴 차용)
+  - `RenderBlendSpaceCanvas(FAnimGraphNode&)` 신규([AnimGraphEditorWidget.cpp](../AppleJamEngine/Source/Editor/UI/Asset/Animation/AnimGraphEditorWidget.cpp)): world↔screen 매핑(Y flip·degenerate 축 패딩), `InvisibleButton` 히트영역, **런타임과 동일한 `FBlendSpaceTriangulation`** 으로 삼각망 edge draw + 프리뷰 질의점 `CalculateWeights`. 점 드래그=샘플 좌표 이동(축범위 clamp, 변경 시 `BumpVersion`), 빈 곳 드래그=프리뷰 십자선 이동. 활성 샘플은 외곽 링/가중 선/하단 %리드아웃으로 표시 → Build 3 런타임 블렌드와 일치 육안 확인. 클립 stem 라벨. 에디터-only 상태(프리뷰/선택/드래그)는 NodeId 키 static map(비직렬화).
+  - BlendSpace 인스펙터 case 상단에 `2D Canvas` CollapsingHeader 로 삽입, 아래 임시 숫자 인스펙터와 병행.
+- [x] **4.2** 색상/라벨/역할 테이블 항목 정리 — Build 3.5 에서 이미 9개 테이블(Label/HeaderColor/TitleColor/HeaderTopColor/RoleShort/RoleLong/Card/Context/Add)에 BlendSpace 등록 완료·일관성 확인, 추가 정리 불필요.
+- [ ] **4.3** (선택) 노드 body 미니 프리뷰 · Debug 위젯 인스펙션 — **보류**(캔버스 프리뷰로 저작 충분, 필요 시 후속).
+- [ ] **▶ 테스트(신규+회귀):** ⚠ **엔진 e2e 는 running 에디터 필요 → 사용자 머신에서 수행.** 컴파일은 확인됨(MSVC Release x64, 전 TU 컴파일 성공 — 링크는 실행 중 엔진이 exe 잠금해 미완, 엔진 종료 후 `ReleaseBuild.bat` 재실행이면 통과). 절차: 캔버스로 저작한 blend space가 Build 3 런타임과 일치 · 저장/재로드 후 좌표 보존 · 기존 그래프 편집 무영향. **통과 시 Build 4 완료.**
 
 ---
 
@@ -146,3 +148,5 @@
 | 2026-07-13 | Linux(Cowork) | **Build 1 완료** — `BlendSpaceTriangulation.{h,cpp}` 신규(Bowyer–Watson Delaunay + barycentric + hull밖 edge/vertex 투영 + 공선/2/1샘플 퇴화). 외부 harness 단위테스트 전 케이스 통과. | 엔진 전체 빌드(MSVC)는 미확인 — Build 3 배선 시 확인 |
 | 2026-07-13 | Linux(Cowork) | **Build 2 완료** — enum `BlendSpace`, `FBlendSample`+`FAnimGraphNode` 필드, 직렬화 v3→v4 + 구버전 로드 분기. mock-archive 회귀 harness 통과. | 실 asset 로드/MSVC 빌드는 사용자 확인 |
 | 2026-07-13 | Linux(Cowork) | **Build 3 코드 완료** — `AnimNode_BlendSpace.{h,cpp}` 신규, `BlendPosesTogether` 헬퍼, 컴파일러 case+SubGraph 완화(컴파일러/로드/에디터검증 3곳), 최소 저작(팔레트·임시 인스펙터·색상/라벨·복제). | ⚠ 엔진 컴파일·런타임 e2e 미실행(Linux). 사용자 머신에서 GenerateProjectFiles→ReleaseBuild→에디터 검증 필요 |
+| 2026-07-14 | Windows(사용자) | **Build 3 e2e 검증 완료** — HorseAnimTest.uasset BP + HorseAnimGraph.uasset 애님그래프로 실 말 anim set 블렌드 정상 확인. | 사용자 확인 |
+| 2026-07-14 | Windows(사용자) | **Build 4 코드 완료** — `RenderBlendSpaceCanvas` 2D 캔버스 인스펙터 신규(삼각망 edge draw·샘플 드래그·프리뷰 십자선/가중치 리드아웃), 임시 숫자 인스펙터와 병행. 4.2 는 Build 3 등록분으로 충족, 4.3 보류. | MSVC Release x64 전 TU 컴파일 성공(링크는 실행 중 엔진 exe 잠금). 에디터 e2e 저작 검증은 엔진 재기동 후 사용자 수행 |

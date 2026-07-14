@@ -1,8 +1,9 @@
-#include "Editor/UI/Asset/Animation/AnimGraphEditorWidget.h"
+﻿#include "Editor/UI/Asset/Animation/AnimGraphEditorWidget.h"
 
 #include "Animation/Graph/AnimGraphAsset.h"
 #include "Animation/Graph/AnimGraphManager.h"
 #include "Animation/Graph/AnimGraphTypes.h"
+#include "Animation/Graph/BlendSpaceTriangulation.h"
 #include "Animation/AnimInstance.h"
 #include "Asset/AssetRegistry.h"
 #include "Core/Types/PropertyTypes.h"
@@ -1436,6 +1437,218 @@ namespace
 		return bChanged;
 	}
 
+	// BlendSpace 캔버스 ↔ 숫자 리스트가 공유하는 노드별 에디터-only UI 상태(직렬화 안 됨).
+	// 선택(Selected)을 공유해 한쪽에서 고른 샘플이 다른 쪽에서도 하이라이트된다.
+	struct FBSCanvasState
+	{
+		FVector2 Preview     = FVector2(0.0f, 0.0f);
+		int32    Selected    = -1;
+		int32    Dragging    = -1;
+		bool     bScrollToSel = false; // 캔버스에서 선택이 바뀌면 리스트를 그 샘플로 스크롤.
+	};
+	FBSCanvasState& GetBSCanvasState(uint32 NodeId)
+	{
+		static std::unordered_map<uint32, FBSCanvasState> States;
+		return States[NodeId];
+	}
+
+	// ── Build 4.1 : BlendSpace 2D 캔버스 인스펙터 ──────────────────────────────
+	// 임시 숫자 인스펙터와 병행. 샘플을 축 좌표 공간에 점으로 찍어 드래그 배치하고,
+	// 런타임과 동일한 FBlendSpaceTriangulation 으로 삼각망 edge 를 그린다.
+	// 프리뷰 십자선(빈 곳 드래그로 이동)은 그 질의점의 활성 샘플/가중치를 라이브로 보여줘
+	// Build 3 런타임 블렌드 결과와 일치함을 저작 중에 눈으로 확인하게 한다.
+	// 반환값 true = 샘플 좌표가 바뀜(caller 가 BumpVersion). 프리뷰/선택은 에디터-only 상태라 미변경.
+	bool RenderBlendSpaceCanvas(FAnimGraphNode& Node)
+	{
+		bool bChanged = false;
+
+		FBSCanvasState& UI = GetBSCanvasState(Node.NodeId);
+
+		const int32 SampleCount = static_cast<int32>(Node.BlendSamples.size());
+		if (UI.Selected >= SampleCount) UI.Selected = -1;
+		if (UI.Dragging >= SampleCount) UI.Dragging = -1;
+
+		// 축 범위 — degenerate(min==max, 예: 한 축만 쓰는 1D) 는 0-width 매핑을 피하려 패딩.
+		float MinX = Node.AxisMinX, MaxX = Node.AxisMaxX;
+		float MinY = Node.AxisMinY, MaxY = Node.AxisMaxY;
+		if (MaxX - MinX < 1e-3f) { MinX -= 0.5f; MaxX += 0.5f; }
+		if (MaxY - MinY < 1e-3f) { MinY -= 0.5f; MaxY += 0.5f; }
+		const float SpanX = MaxX - MinX;
+		const float SpanY = MaxY - MinY;
+
+		const float CanvasW = ImGui::GetContentRegionAvail().x;
+		const float CanvasH = std::min(std::max(CanvasW, 180.0f), 280.0f);
+		const ImVec2 P0 = ImGui::GetCursorScreenPos();
+		const ImVec2 Size(CanvasW, CanvasH);
+
+		// 축 범위 경계의 샘플이 테두리에 붙어 잘리지 않도록 world 좌표를 캔버스 안쪽(패딩된
+		// 사각형)에만 매핑한다. 배경/클립 영역은 전체 캔버스 그대로.
+		const float Pad = 16.0f;
+		const float InnerW = std::max(CanvasW - 2.0f * Pad, 1.0f);
+		const float InnerH = std::max(CanvasH - 2.0f * Pad, 1.0f);
+
+		// world(축값) ↔ screen(px) 매핑. Y 는 화면좌표가 아래로 증가하므로 뒤집는다.
+		auto WorldToScreen = [&](float wx, float wy) -> ImVec2
+		{
+			const float u = (wx - MinX) / SpanX;
+			const float v = (wy - MinY) / SpanY;
+			return ImVec2(P0.x + Pad + u * InnerW, P0.y + Pad + (1.0f - v) * InnerH);
+		};
+		auto ScreenToWorld = [&](const ImVec2& s) -> FVector2
+		{
+			const float u = (s.x - P0.x - Pad) / InnerW;
+			const float v = 1.0f - (s.y - P0.y - Pad) / InnerH;
+			return FVector2(MinX + u * SpanX, MinY + v * SpanY);
+		};
+
+		ImGui::InvisibleButton("##BSCanvas", Size);
+		const bool bActive = ImGui::IsItemActive();
+		const ImVec2 Mouse = ImGui::GetIO().MousePos;
+
+		ImDrawList* DL = ImGui::GetWindowDrawList();
+		DL->AddRectFilled(P0, ImVec2(P0.x + CanvasW, P0.y + CanvasH), IM_COL32(28, 30, 36, 255), 4.0f);
+		DL->AddRect     (P0, ImVec2(P0.x + CanvasW, P0.y + CanvasH), IM_COL32(90, 94, 104, 255), 4.0f);
+		DL->PushClipRect(P0, ImVec2(P0.x + CanvasW, P0.y + CanvasH), true);
+
+		// world 0 축선(범위 안일 때만).
+		if (MinX <= 0.0f && MaxX >= 0.0f)
+		{
+			const ImVec2 a = WorldToScreen(0.0f, MinY), b = WorldToScreen(0.0f, MaxY);
+			DL->AddLine(a, b, IM_COL32(70, 74, 84, 255));
+		}
+		if (MinY <= 0.0f && MaxY >= 0.0f)
+		{
+			const ImVec2 a = WorldToScreen(MinX, 0.0f), b = WorldToScreen(MaxX, 0.0f);
+			DL->AddLine(a, b, IM_COL32(70, 74, 84, 255));
+		}
+
+		// 런타임과 동일한 삼각망 build → edge draw. 질의 가중치도 여기서 뽑는다.
+		TArray<FVector2> Pts;
+		Pts.reserve(SampleCount);
+		for (const FBlendSample& S : Node.BlendSamples) Pts.push_back(FVector2(S.PosX, S.PosY));
+		FBlendSpaceTriangulation Tri;
+		const bool bHasSamples = Tri.Build(Pts);
+
+		for (const FBlendTriangle& T : Tri.GetTriangles())
+		{
+			const ImVec2 v0 = WorldToScreen(Pts[T.V0].X, Pts[T.V0].Y);
+			const ImVec2 v1 = WorldToScreen(Pts[T.V1].X, Pts[T.V1].Y);
+			const ImVec2 v2 = WorldToScreen(Pts[T.V2].X, Pts[T.V2].Y);
+			const ImU32 EdgeCol = IM_COL32(120, 150, 190, 160);
+			DL->AddLine(v0, v1, EdgeCol);
+			DL->AddLine(v1, v2, EdgeCol);
+			DL->AddLine(v2, v0, EdgeCol);
+		}
+
+		// 프리뷰 질의점의 활성 샘플/가중치(런타임 CalculateWeights 와 동일 경로).
+		TArray<FBlendTriangulationWeight> Weights;
+		if (bHasSamples) Tri.CalculateWeights(UI.Preview, Weights);
+
+		// 커서 아래의 샘플(선택/드래그 대상) — screen 거리 최근접.
+		const float PickRadius = 10.0f;
+		int32 HoverIdx = -1;
+		float BestD2 = PickRadius * PickRadius;
+		for (int32 i = 0; i < SampleCount; ++i)
+		{
+			const ImVec2 sp = WorldToScreen(Node.BlendSamples[i].PosX, Node.BlendSamples[i].PosY);
+			const float dx = sp.x - Mouse.x, dy = sp.y - Mouse.y;
+			const float d2 = dx * dx + dy * dy;
+			if (d2 < BestD2) { BestD2 = d2; HoverIdx = i; }
+		}
+
+		// 상호작용: 샘플 위 클릭 = 선택+드래그 시작 · 빈 곳 클릭/드래그 = 프리뷰 이동.
+		if (ImGui::IsItemActivated())
+		{
+			if (HoverIdx >= 0)
+			{
+				if (UI.Selected != HoverIdx) UI.bScrollToSel = true; // 리스트를 이 샘플로 스크롤.
+				UI.Selected = HoverIdx; UI.Dragging = HoverIdx;
+			}
+			else               { UI.Dragging = -1; UI.Preview = ScreenToWorld(Mouse); }
+		}
+		if (bActive)
+		{
+			const FVector2 W = ScreenToWorld(Mouse);
+			if (UI.Dragging >= 0 && UI.Dragging < SampleCount)
+			{
+				const float NewX = std::min(std::max(W.X, MinX), MaxX);
+				const float NewY = std::min(std::max(W.Y, MinY), MaxY);
+				FBlendSample& S = Node.BlendSamples[UI.Dragging];
+				if (S.PosX != NewX || S.PosY != NewY) { S.PosX = NewX; S.PosY = NewY; bChanged = true; }
+			}
+			else
+			{
+				UI.Preview = FVector2(std::min(std::max(W.X, MinX), MaxX),
+				                      std::min(std::max(W.Y, MinY), MaxY));
+			}
+		}
+		else
+		{
+			UI.Dragging = -1;
+		}
+
+		// 프리뷰 십자선 + 활성 샘플로 향하는 가중 선.
+		const ImVec2 pv = WorldToScreen(UI.Preview.X, UI.Preview.Y);
+		for (const FBlendTriangulationWeight& Wt : Weights)
+		{
+			if (Wt.SampleIndex < 0 || Wt.SampleIndex >= SampleCount) continue;
+			const ImVec2 sp = WorldToScreen(Node.BlendSamples[Wt.SampleIndex].PosX,
+			                                Node.BlendSamples[Wt.SampleIndex].PosY);
+			const int32 A = static_cast<int32>(40.0f + 180.0f * Wt.Weight);
+			DL->AddLine(pv, sp, IM_COL32(250, 210, 120, A), 1.0f + 2.0f * Wt.Weight);
+		}
+
+		// 샘플 점 + 라벨. 활성 가중치는 외곽 링 크기로 표현.
+		for (int32 i = 0; i < SampleCount; ++i)
+		{
+			const FBlendSample& S = Node.BlendSamples[i];
+			const ImVec2 sp = WorldToScreen(S.PosX, S.PosY);
+
+			float w = 0.0f;
+			for (const FBlendTriangulationWeight& Wt : Weights)
+				if (Wt.SampleIndex == i) { w = Wt.Weight; break; }
+
+			if (w > 0.0f)
+				DL->AddCircle(sp, 6.0f + 8.0f * w, IM_COL32(250, 210, 120, 200), 0, 2.0f);
+
+			const bool bSel = (i == UI.Selected);
+			const ImU32 Fill = bSel ? IM_COL32(255, 220, 90, 255) : IM_COL32(120, 170, 230, 255);
+			DL->AddCircleFilled(sp, 5.0f, Fill);
+			DL->AddCircle(sp, 5.0f, IM_COL32(20, 22, 26, 255), 0, 1.5f);
+
+			const FString Stem = S.SequencePath.empty() ? FString("None") : GetStemFromPath(S.SequencePath);
+			DL->AddText(ImVec2(sp.x + 8.0f, sp.y - 6.0f), IM_COL32(210, 214, 224, 255), Stem.c_str());
+		}
+
+		// 프리뷰 십자선(맨 위).
+		DL->AddLine(ImVec2(pv.x - 7, pv.y), ImVec2(pv.x + 7, pv.y), IM_COL32(255, 235, 150, 255), 1.5f);
+		DL->AddLine(ImVec2(pv.x, pv.y - 7), ImVec2(pv.x, pv.y + 7), IM_COL32(255, 235, 150, 255), 1.5f);
+
+		DL->PopClipRect();
+
+		// 캔버스 하단: 좌표/가중치 리드아웃 + 안내.
+		ImGui::Spacing();
+		if (!bHasSamples)
+		{
+			ImGui::TextDisabled("샘플이 없습니다. 아래 'Add Sample' 또는 캔버스 편집 후 배치.");
+		}
+		else
+		{
+			ImGui::Text("Preview (%.2f, %.2f)", UI.Preview.X, UI.Preview.Y);
+			ImGui::SameLine();
+			ImGui::TextDisabled("| 빈 곳 드래그=프리뷰, 점 드래그=샘플 이동");
+			for (const FBlendTriangulationWeight& Wt : Weights)
+			{
+				if (Wt.SampleIndex < 0 || Wt.SampleIndex >= SampleCount) continue;
+				const FString Stem = Node.BlendSamples[Wt.SampleIndex].SequencePath.empty()
+					? FString("None") : GetStemFromPath(Node.BlendSamples[Wt.SampleIndex].SequencePath);
+				ImGui::BulletText("%s  %.0f%%", Stem.c_str(), Wt.Weight * 100.0f);
+			}
+		}
+
+		return bChanged;
+	}
+
 	// 노드 타입별 properties. 변경 시 Asset.BumpVersion() — UAnimGraphInstance 가 다음 frame 에
 	// 재컴파일하여 in-editor live preview 가 즉시 반영되도록.
 	bool RenderNodeInspector(UAnimGraphAsset& Asset, FAnimGraphNode& Node)
@@ -1674,23 +1887,34 @@ namespace
 
 			case EAnimGraphNodeType::BlendSpace:
 			{
+				// ── 2D 캔버스 인스펙터 (Build 4.1). 아래 숫자 인스펙터와 병행. ──
+				if (ImGui::CollapsingHeader("2D Canvas", ImGuiTreeNodeFlags_DefaultOpen))
+				{
+					if (RenderBlendSpaceCanvas(Node)) bChanged = true;
+				}
+
+				ImGui::Spacing();
+
 				// ── 임시 숫자입력 인스펙터 (Build 3.5). Build 4 에서 2D 캔버스와 병행 유지. ──
-				ImGui::TextDisabled("AxisX/AxisY 핀에 Variable Get(Float)을 연결해 축값 공급.");
-				ImGui::TextDisabled("한 축만 연결 시 자동 1D 퇴화. 미연결 축=0.");
+				ImGui::TextDisabled("AxisX/AxisY 핀에 Variable Get(Float)을 연결. (미연결 축 = 0)");
 				ImGui::Spacing();
 
 				// 축 범위(에디터/정규화 참고). 삼각분할은 실제 좌표를 그대로 사용.
 				if (ImGui::CollapsingHeader("Axis Range", ImGuiTreeNodeFlags_DefaultOpen))
 				{
+					ImGui::TextUnformatted("X");
+					ImGui::SameLine();
 					float RangeX[2] = { Node.AxisMinX, Node.AxisMaxX };
 					ImGui::SetNextItemWidth(-1.0f);
-					if (ImGui::DragFloat2("##AxisRangeX", RangeX, 0.05f, -100.0f, 100.0f, "X [%.2f"))
+					if (ImGui::DragFloat2("##AxisRangeX", RangeX, 0.05f, -100.0f, 100.0f, "%.2f"))
 					{
 						Node.AxisMinX = RangeX[0]; Node.AxisMaxX = RangeX[1]; bChanged = true;
 					}
+					ImGui::TextUnformatted("Y");
+					ImGui::SameLine();
 					float RangeY[2] = { Node.AxisMinY, Node.AxisMaxY };
 					ImGui::SetNextItemWidth(-1.0f);
-					if (ImGui::DragFloat2("##AxisRangeY", RangeY, 0.05f, -100.0f, 100.0f, "Y [%.2f"))
+					if (ImGui::DragFloat2("##AxisRangeY", RangeY, 0.05f, -100.0f, 100.0f, "%.2f"))
 					{
 						Node.AxisMinY = RangeY[0]; Node.AxisMaxY = RangeY[1]; bChanged = true;
 					}
@@ -1699,6 +1923,8 @@ namespace
 				ImGui::Spacing();
 
 				// ── Samples ──
+				// 캔버스와 공유하는 선택 상태 — 리스트에서 고르면 캔버스가, 캔버스에서 고르면 리스트가 하이라이트.
+				FBSCanvasState& UI = GetBSCanvasState(Node.NodeId);
 				char BSHeader[64];
 				std::snprintf(BSHeader, sizeof(BSHeader), "Samples (%zu)###BSSamples", Node.BlendSamples.size());
 				if (ImGui::CollapsingHeader(BSHeader, ImGuiTreeNodeFlags_DefaultOpen))
@@ -1706,69 +1932,92 @@ namespace
 					if (ImGui::Button("Add Sample"))
 					{
 						Node.BlendSamples.push_back(FBlendSample{});
+						UI.Selected = static_cast<int32>(Node.BlendSamples.size()) - 1;
+						UI.bScrollToSel = true;
 						bChanged = true;
 					}
 
+					const int32 NumSamples = static_cast<int32>(Node.BlendSamples.size());
 					int32 PendingDeleteIdx = -1;
-					for (int32 i = 0; i < static_cast<int32>(Node.BlendSamples.size()); ++i)
+
+					// 캔버스를 밀어내지 않도록 리스트를 높이 제한 child(스크롤)로 감싼다.
+					// 샘플이 적으면 내용 높이에 맞춰 줄고, 많으면 상한에서 스크롤바가 생긴다.
+					if (NumSamples > 0)
 					{
-						FBlendSample& Sample = Node.BlendSamples[i];
-						ImGui::PushID(i);
-						ImGui::Separator();
-
-						// 클립 피커 (SequencePlayer 노드와 동일 패턴).
-						const FString PreviewStem = Sample.SequencePath.empty() ? FString("None") : GetStemFromPath(Sample.SequencePath);
-						ImGui::TextUnformatted("Clip");
-						ImGui::SameLine();
-						ImGui::SetNextItemWidth(-1.0f);
-						if (ImGui::BeginCombo("##BSClip", PreviewStem.c_str()))
+						const float ListH = std::min(NumSamples * 132.0f + 8.0f, 400.0f);
+						ImGui::BeginChild("##BSSampleList", ImVec2(0.0f, ListH), true);
+						for (int32 i = 0; i < NumSamples; ++i)
 						{
-							const bool bSelNone = Sample.SequencePath.empty();
-							if (ImGui::Selectable("None", bSelNone))
+							FBlendSample& Sample = Node.BlendSamples[i];
+							ImGui::PushID(i);
+
+							// 선택 헤더 행 — 클릭 시 선택(캔버스와 공유). 선택 시 지속 하이라이트.
+							const FString Stem = Sample.SequencePath.empty() ? FString("None") : GetStemFromPath(Sample.SequencePath);
+							char RowLabel[96];
+							std::snprintf(RowLabel, sizeof(RowLabel), "#%d  %s", i, Stem.c_str());
+							const bool bRowSel = (UI.Selected == i);
+							if (ImGui::Selectable(RowLabel, bRowSel)) UI.Selected = i;
+							// 캔버스에서 선택이 바뀌었으면 그 행으로 스크롤.
+							if (bRowSel && UI.bScrollToSel) { ImGui::SetScrollHereY(0.5f); UI.bScrollToSel = false; }
+
+							// 클립 피커 (SequencePlayer 노드와 동일 패턴).
+							ImGui::TextUnformatted("Clip");
+							ImGui::SameLine();
+							ImGui::SetNextItemWidth(-1.0f);
+							if (ImGui::BeginCombo("##BSClip", Stem.c_str()))
 							{
-								if (!Sample.SequencePath.empty()) bChanged = true;
-								Sample.SequencePath.clear();
-							}
-							const TArray<FAssetListItem>& AnimFiles = FAssetRegistry::ListByTypeName("UAnimSequence");
-							for (const FAssetListItem& Item : AnimFiles)
-							{
-								const bool bSel = (Sample.SequencePath == Item.FullPath);
-								if (ImGui::Selectable(Item.DisplayName.c_str(), bSel))
+								const bool bSelNone = Sample.SequencePath.empty();
+								if (ImGui::Selectable("None", bSelNone))
 								{
-									if (Sample.SequencePath != Item.FullPath) bChanged = true;
-									Sample.SequencePath = Item.FullPath;
+									if (!Sample.SequencePath.empty()) bChanged = true;
+									Sample.SequencePath.clear();
 								}
-								if (bSel) ImGui::SetItemDefaultFocus();
+								const TArray<FAssetListItem>& AnimFiles = FAssetRegistry::ListByTypeName("UAnimSequence");
+								for (const FAssetListItem& Item : AnimFiles)
+								{
+									const bool bSel = (Sample.SequencePath == Item.FullPath);
+									if (ImGui::Selectable(Item.DisplayName.c_str(), bSel))
+									{
+										if (Sample.SequencePath != Item.FullPath) bChanged = true;
+										Sample.SequencePath = Item.FullPath;
+									}
+									if (bSel) ImGui::SetItemDefaultFocus();
+								}
+								ImGui::EndCombo();
 							}
-							ImGui::EndCombo();
-						}
 
-						// PosX/PosY — DragFloatN 은 포맷을 컴포넌트마다 따로 적용(컴포넌트당 %f 1개)하므로
-						// X/Y 를 별도 DragFloat 2개로 분리(포맷에 %f 2개 넣으면 두 번째가 스택 쓰레기값 읽음).
-						ImGui::SetNextItemWidth(-1.0f);
-						if (ImGui::DragFloat("##BSPosX", &Sample.PosX, 0.02f, -100.0f, 100.0f, "PosX %.2f"))
-						{
-							bChanged = true;
-						}
-						ImGui::SetNextItemWidth(-1.0f);
-						if (ImGui::DragFloat("##BSPosY", &Sample.PosY, 0.02f, -100.0f, 100.0f, "PosY %.2f"))
-						{
-							bChanged = true;
-						}
+							// PosX/PosY — DragFloatN 은 포맷을 컴포넌트마다 따로 적용(컴포넌트당 %f 1개)하므로
+							// X/Y 를 별도 DragFloat 2개로 분리(포맷에 %f 2개 넣으면 두 번째가 스택 쓰레기값 읽음).
+							ImGui::SetNextItemWidth(-1.0f);
+							if (ImGui::DragFloat("##BSPosX", &Sample.PosX, 0.02f, -100.0f, 100.0f, "PosX %.2f"))
+							{
+								bChanged = true;
+							}
+							ImGui::SetNextItemWidth(-1.0f);
+							if (ImGui::DragFloat("##BSPosY", &Sample.PosY, 0.02f, -100.0f, 100.0f, "PosY %.2f"))
+							{
+								bChanged = true;
+							}
 
-						// PlayRate.
-						ImGui::SetNextItemWidth(-1.0f);
-						if (ImGui::DragFloat("##BSPlayRate", &Sample.PlayRate, 0.02f, 0.0f, 4.0f, "PlayRate %.2f"))
-						{
-							bChanged = true;
-						}
+							// PlayRate.
+							ImGui::SetNextItemWidth(-1.0f);
+							if (ImGui::DragFloat("##BSPlayRate", &Sample.PlayRate, 0.02f, 0.0f, 4.0f, "PlayRate %.2f"))
+							{
+								bChanged = true;
+							}
 
-						if (ImGui::Button("Delete##BSSample")) PendingDeleteIdx = i;
-						ImGui::PopID();
+							if (ImGui::Button("Delete##BSSample")) PendingDeleteIdx = i;
+							ImGui::Separator();
+							ImGui::PopID();
+						}
+						ImGui::EndChild();
 					}
+
 					if (PendingDeleteIdx >= 0)
 					{
 						Node.BlendSamples.erase(Node.BlendSamples.begin() + PendingDeleteIdx);
+						if (UI.Selected == PendingDeleteIdx) UI.Selected = -1;
+						else if (UI.Selected > PendingDeleteIdx) --UI.Selected; // 인덱스 시프트 보정.
 						bChanged = true;
 					}
 				}

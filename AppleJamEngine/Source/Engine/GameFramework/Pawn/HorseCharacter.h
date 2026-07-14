@@ -27,6 +27,9 @@ public:
 	void Tick(float DeltaTime) override;
 	void PostDuplicate() override;
 
+	UFUNCTION(Pure, Catergory="Character|Components")
+	UHorseMovementComponent* GetHorseMovement() const { return MovementComponent; }
+
 protected:
 	void OnPostLoad(FArchive& Ar) override; // Re-Initialize after save & load
 

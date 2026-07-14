@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "GameFramework/Pawn/Pawn.h"
 #include "Core/Types/CollisionTypes.h"
