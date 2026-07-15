@@ -20,18 +20,6 @@
 #include <algorithm>
 #include <cmath>
 
-namespace
-{
-	// [-180, 180] 로 각도 정규화
-	float NormalizeDegrees(float Angle)
-	{
-		Angle = std::fmod(Angle, 360.0f);
-		if (Angle > 180.0f)        Angle -= 360.0f;
-		else if (Angle <= -180.0f) Angle += 360.0f;
-		return Angle;
-	}
-}
-
 UHorseMovementComponent::UHorseMovementComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
@@ -99,12 +87,12 @@ void UHorseMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType
 	NormalizedSpeed = TargetSpeed;
 
 	// ── 2) root motion 소비(yaw 즉시 적용) + 모드별 위치 처리 ──
-	FVector WorldDeltaXY(0.0f, 0.0f, 0.0f);
-	ConsumeRootMotion(WorldDeltaXY);
+	FVector WorldDelta(0.0f, 0.0f, 0.0f);
+	ConsumeRootMotion(WorldDelta);
 
 	if (MoveMode == EHorseMoveMode::Grounded)
 	{
-		TickGrounded(DeltaTime, WorldDeltaXY);
+		TickGrounded(DeltaTime, WorldDelta);
 	}
 	else if (MoveMode == EHorseMoveMode::Sliding)
 	{
@@ -120,9 +108,9 @@ void UHorseMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType
 	bBrakeRequested = false;   // frame 소비 후 클리어(다음 frame Locomotion 이 재요청).
 }
 
-void UHorseMovementComponent::ConsumeRootMotion(FVector& OutWorldDeltaXY)
+void UHorseMovementComponent::ConsumeRootMotion(FVector& OutWorldDelta)
 {
-	OutWorldDeltaXY = FVector(0.0f, 0.0f, 0.0f);
+	OutWorldDelta = FVector(0.0f, 0.0f, 0.0f);
 
 	USkeletalMeshComponent* MeshComp = Mesh.Get();
 	USceneComponent*        Updated  = GetUpdatedComponent();
@@ -136,33 +124,41 @@ void UHorseMovementComponent::ConsumeRootMotion(FVector& OutWorldDeltaXY)
 		return;
 	}
 
+	// Root motion 성분 분해는 클립 속성 (UAnimSequence: RootRotationLock=YawOnly 면 delta 에
+	// yaw 만, bExtractRootMotionZ=false 면 delta Z=0 — 나머지는 pose 가 애니메이션 절대값으로 표현).
+	// 말 보행류 클립은 YawOnly + Z 미추출로 세팅되어 있다.
 	const FTransform Delta = AI->ConsumeRootMotion();
 
-	// 병진 — root local delta 를 현재 world yaw 로 회전(연속 선회가 실제로 곡선을 그리도록 매 frame 현재 basis).
+	// Translate — world frame 전체(XYZ). Z 처리는 모드별 tick 이 결정 (Grounded 는 지면 스냅이
+	// step 범위 내에서 최종 Z 를 소유).
 	const FQuat   Basis = Updated->GetWorldRotation().ToQuaternion().GetNormalized();
-	const FVector World = Basis.RotateVector(Delta.Location);
-	OutWorldDeltaXY = FVector(World.X, World.Y, 0.0f);
+	OutWorldDelta = Basis.RotateVector(Delta.Location);
 
-	// 회전 — root motion 의 yaw 성분만 적용(box 를 세운 채 방향만). pitch/roll 은 지면 정렬 후속 작업.
-	const FRotator DeltaRot = Delta.Rotation.ToRotator();
-	if (std::fabs(DeltaRot.Yaw) > 1.e-4f)
+	// Rotation — 방어적으로 up(+Z)축 yaw(twist)만 적분해 몸통 box 를 항상 세워 둔다
+	// (YawOnly 클립이면 delta 가 이미 순수 yaw 라 no-op, Full 클립이 섞여도 box 는 안 기움).
+	// actor 가 yaw-only 로 유지되므로 Z-twist 합성은 world/local 곱 순서와 무관(가환).
+	// NOTE: Raycast를 사용한 지면과의 정렬 (Suspension) 추가 시에 animation에 의한 rotation과 처리 순서 연구 필요
+	FQuat Swing, YawTwist;
+	Delta.Rotation.GetNormalized().ToSwingTwist(FVector(0.0f, 0.0f, 1.0f), Swing, YawTwist);
+	if (std::fabs(YawTwist.Z) > 1.e-7f)
 	{
-		FRotator Rot = Updated->GetWorldRotation();
-		Rot.Yaw = NormalizeDegrees(Rot.Yaw + DeltaRot.Yaw);
-		Updated->SetWorldRotation(Rot);
+		Updated->SetWorldRotation((Basis * YawTwist).GetNormalized());
 	}
 }
 
-void UHorseMovementComponent::TickGrounded(float DeltaTime, const FVector& WorldDeltaXY)
+void UHorseMovementComponent::TickGrounded(float DeltaTime, const FVector& WorldDelta)
 {
 	USceneComponent* Updated = GetUpdatedComponent();
 	Velocity.Z = 0.0f;
 
 	FVector Loc = Updated->GetWorldLocation();
 	// 몸통 box sweep 으로 벽/급경사면 관통·비비기 차단(램프는 통과).
-	const FVector DeltaXY = ResolveTorsoCollision(Loc, FVector(WorldDeltaXY.X, WorldDeltaXY.Y, 0.0f));
+	const FVector DeltaXY = ResolveTorsoCollision(Loc, FVector(WorldDelta.X, WorldDelta.Y, 0.0f));
 	Loc.X += DeltaXY.X;
 	Loc.Y += DeltaXY.Y;
+	// Root motion Z 소비 — 지면 스냅이 step 범위 내 최종 Z 를 소유하므로 보행 bob 은 스냅에
+	// 흡수되고, 점프 클립처럼 스냅 범위를 벗어나는 상승만 모드 전환(낙하 판정)으로 이어진다.
+	Loc.Z += WorldDelta.Z;
 
 	// 수평 속도 리포팅/관성 — root motion 이 만든 실제 이동에서 역산(이륙 시 momentum 으로 넘어감).
 	Velocity.X = DeltaXY.X / DeltaTime;

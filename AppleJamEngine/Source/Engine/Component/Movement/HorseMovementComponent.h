@@ -103,12 +103,14 @@ protected:
 	// 지면 노멀(면 노멀 우선, 없으면 shape 노멀, 그래도 없으면 +Z). 항상 정규화.
 	FVector GroundNormal(const FHitResult& Hit) const;
 
-	// mesh AnimInstance 가 이번 frame 누적한 root motion 을 소비해 world XY 이동 + yaw 회전으로 분해.
-	// 이동은 OutWorldDeltaXY 로 반환(모드별 처리는 호출자), yaw 는 여기서 곧바로 root 에 적용한다.
-	// yaw only — 몸통 box 를 세운 채 방향만 돌린다(지면 pitch/roll 정렬은 후속 suspension 작업).
-	void ConsumeRootMotion(FVector& OutWorldDeltaXY);
+	// mesh AnimInstance 가 이번 frame 누적한 root motion 을 소비해 world 이동(XYZ) + yaw 회전으로
+	// 분해. 이동은 OutWorldDelta 로 반환(모드별 처리는 호출자), yaw 는 여기서 곧바로 root 에 적용.
+	// 회전은 yaw only — 몸통 box 를 세운 채 방향만 돌린다(지면 pitch/roll 정렬은 후속 suspension).
+	// 클립의 pitch/roll(swing)·Z bob 은 per-asset 옵션(UAnimSequence 의 RootRotationLock=YawOnly,
+	// bExtractRootMotionZ=false)으로 pose 쪽에 남는다 — actor 는 기울지 않고 mesh 만 움직인다.
+	void ConsumeRootMotion(FVector& OutWorldDelta);
 
-	void TickGrounded(float DeltaTime, const FVector& WorldDeltaXY);
+	void TickGrounded(float DeltaTime, const FVector& WorldDelta);
 	void TickSliding(float DeltaTime);
 	void TickFalling(float DeltaTime);
 

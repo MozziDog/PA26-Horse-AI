@@ -128,6 +128,8 @@ public:
 	ERootMotionMode GetRootMotionMode() const { return RootMotionMode; }
 	UFUNCTION(Callable, Exec, Category="Animation|RootMotion")
 	void            SetRootMotionMode(ERootMotionMode InMode) { RootMotionMode = InMode; }
+	// NOTE: root motion 의 성분 분해(어떤 회전/이동을 추출하고 pose 에 남길지)는 캐릭터가 아니라
+	// 클립 속성 — UAnimSequence 의 RootRotationLock / bExtractRootMotionZ (per-asset) 참고.
 
 	// ── Montage (Phase 2.1+: slot 별 보유) ──
 	// SlotName 은 마지막 default 인자 — 미지정 (FName::None) 시 내부에서 DefaultMontageSlot

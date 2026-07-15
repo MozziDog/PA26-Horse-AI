@@ -93,6 +93,34 @@ struct FQuat
 	FVector GetRightVector()   const { return RotateVector(FVector(0.0f, 1.0f, 0.0f)); }
 	FVector GetUpVector()      const { return RotateVector(FVector(0.0f, 0.0f, 1.0f)); }
 
+	// Swing-Twist 분해: *this == OutTwist * OutSwing (곱은 오른쪽부터 적용 — swing 먼저, twist 나중).
+	// OutTwist 는 TwistAxis(단위 벡터) 축 회전 성분, OutSwing 은 그 축과 수직인 나머지 성분.
+	// *this 는 정규화되어 있어야 한다. 회전각이 TwistAxis 와 수직인 축의 ~180°에 가까우면
+	// twist 가 수치적으로 정의되지 않으므로 (Identity, *this) 로 fallback.
+	void ToSwingTwist(const FVector& TwistAxis, FQuat& OutSwing, FQuat& OutTwist) const
+	{
+		const float Dot = X * TwistAxis.X + Y * TwistAxis.Y + Z * TwistAxis.Z;
+		const FQuat Projected(TwistAxis.X * Dot, TwistAxis.Y * Dot, TwistAxis.Z * Dot, W);
+		const float LenSq = Projected.SizeSquared();
+		if (LenSq < 1.e-8f)
+		{
+			OutTwist = Identity;
+			OutSwing = *this;
+			return;
+		}
+		const float InvLen = 1.0f / sqrtf(LenSq);
+		OutTwist = FQuat(Projected.X * InvLen, Projected.Y * InvLen, Projected.Z * InvLen, Projected.W * InvLen);
+		OutSwing = OutTwist.Inverse() * (*this);
+	}
+
+	// TwistAxis 축 회전 성분만 반환하는 편의 함수.
+	FQuat GetTwist(const FVector& TwistAxis) const
+	{
+		FQuat Swing, Twist;
+		ToSwingTwist(TwistAxis, Swing, Twist);
+		return Twist;
+	}
+
 	// Spherical Linear Interpolation
 	static FQuat Slerp(const FQuat& A, const FQuat& B, float Alpha)
 	{

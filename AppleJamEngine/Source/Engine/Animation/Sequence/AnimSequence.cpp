@@ -494,6 +494,17 @@ void UAnimSequence::Serialize(FArchive& Ar)
         DataModel->Serialize(Ar);
     }
 
+    // ── 하위호환 append 필드 — 반드시 파일 끝에 유지. 구버전 uasset 로드는 여기서 EOF 라
+    // skip 되어 default 를 쓴다 (Ar.AtEnd() 가드). 새 필드는 이 아래에 같은 패턴으로 추가.
+    if (!Ar.IsLoading() || !Ar.AtEnd())
+    {
+        Ar << bExtractRootMotionZ;
+    }
+    if (!Ar.IsLoading() || !Ar.AtEnd())
+    {
+        Ar << RootRotationLock;
+    }
+
     if (IsValid(DataModel))
     {
         PlayLength = DataModel->PlayLength;
@@ -828,12 +839,46 @@ void UAnimSequence::GetBonePose(FPoseContext& Output, const FAnimExtractContext&
 
         if (!RootMotionLockTrack->PosKeys.empty())
         {
-            LockedRoot.Location = RootMotionLockTrack->PosKeys[0];
+            // Translation lock — X/Y 는 항상 첫 키로 고정 (이동은 movement 가 delta 로 소비).
+            // Z 는 클립 선언(bExtractRootMotionZ)에 따라: 이동(점프 상승)이면 잠그고 delta 로
+            // 추출, 제자리 bob 이면 pose 에 남긴다 (ExtractRootMotion 이 delta Z 를 0 으로 추출).
+            const FVector& FirstPos = RootMotionLockTrack->PosKeys[0];
+            LockedRoot.Location.X = FirstPos.X;
+            LockedRoot.Location.Y = FirstPos.Y;
+            if (bExtractRootMotionZ)
+            {
+                LockedRoot.Location.Z = FirstPos.Z;
+            }
         }
 
+        // Rotation 잠금은 클립이 선언한 만큼만 (RootRotationLock, per-asset) — 잠근 성분만
+        // ExtractRootMotion 이 delta 로 추출하므로 이중 적용/유실이 없다 (ERootMotionRotationLock 주석).
+        // NOTE: root motion 본이 스켈레톤 root 라는 전제에서 local == component space 로 계산.
+        //       부모가 있는 본이 검출되면 up 축을 부모 space 로 옮기는 처리가 필요해진다.
         if (!RootMotionLockTrack->RotKeys.empty())
         {
-            LockedRoot.Rotation = RootMotionLockTrack->RotKeys[0].GetNormalized();
+            const FQuat FirstKey = RootMotionLockTrack->RotKeys[0].GetNormalized();
+            switch (RootRotationLock)
+            {
+            case ERootMotionRotationLock::Full:
+                LockedRoot.Rotation = FirstKey;
+                break;
+            case ERootMotionRotationLock::YawOnly:
+            {
+                // 첫 키 기준 component-space delta (D = R(t) * R0⁻¹ — ExtractRootMotion 과 동일한
+                // pre-multiply delta) 에서 up(+Z)축 twist(yaw)만 걷어낸다: R_locked = TwistZ(D)⁻¹ * R(t).
+                // raw quat R(t) 에 직접 twist 분해를 하면 본의 rest 방향(축 보정 pre-rotation)이 섞여
+                // pitch 가 quat z 성분으로 새어 들어가 가짜 yaw 흔들림이 생긴다 — 반드시 delta 기준.
+                static const FVector UpAxis(0.0f, 0.0f, 1.0f);
+                const FQuat Animated       = LockedRoot.Rotation.GetNormalized();
+                const FQuat DeltaFromFirst = (Animated * FirstKey.Inverse()).GetNormalized();
+                const FQuat YawTwist       = DeltaFromFirst.GetTwist(UpAxis);
+                LockedRoot.Rotation        = (YawTwist.Inverse() * Animated).GetNormalized();
+                break;
+            }
+            case ERootMotionRotationLock::None:
+                break;
+            }
         }
 
         Output.Pose[RootMotionLockBoneIndex] = LockedRoot;
@@ -1025,13 +1070,34 @@ FTransform UAnimSequence::ExtractRootMotion(float PrevTime, float CurTime, bool 
         const FTransform D2 = ComputeDelta(PA, RA, PB, RB);
         Delta.Location = D1.Location + D2.Location;
         Delta.Rotation = (D1.Rotation * D2.Rotation).GetNormalized();
-        return Delta;
+    }
+    else
+    {
+        FVector P0, P1; FQuat R0, R1;
+        SampleAt(PrevTime, P0, R0);
+        SampleAt(CurTime,  P1, R1);
+        Delta = ComputeDelta(P0, R0, P1, R1);
     }
 
-    FVector P0, P1; FQuat R0, R1;
-    SampleAt(PrevTime, P0, R0);
-    SampleAt(CurTime,  P1, R1);
-    return ComputeDelta(P0, R0, P1, R1);
+    if (!bExtractRootMotionZ)
+    {
+        Delta.Location.Z = 0.0f;   // Z 는 제자리 bob — pose 가 보유 (lock 도 Z 를 안 잠금)
+    }
+
+    // Rotation 도 잠근 성분만 추출 (pose 잠금과 대칭 — GetBonePose 의 lock 블록 참고).
+    // delta 는 component-space 라 본 rest 방향이 상쇄되어 +Z twist 가 순수 yaw.
+    switch (RootRotationLock)
+    {
+    case ERootMotionRotationLock::YawOnly:
+        Delta.Rotation = Delta.Rotation.GetTwist(FVector(0.0f, 0.0f, 1.0f));
+        break;
+    case ERootMotionRotationLock::None:
+        Delta.Rotation = FQuat::Identity;
+        break;
+    case ERootMotionRotationLock::Full:
+        break;
+    }
+    return Delta;
 }
 
 // ──────────────────────────────────────────────

@@ -157,6 +157,21 @@ public:
 
 	bool IsValid() const { return FileStream.is_open() && FileStream.good(); }
 
+	bool AtEnd() override
+	{
+		if (!FileStream.is_open())
+		{
+			return true;
+		}
+		if (FileStream.peek() == std::ifstream::traits_type::eof())
+		{
+			// peek 이 eofbit 을 세우므로 복구 — 이후 IsValid()(good() 검사)가 깨지지 않게.
+			FileStream.clear();
+			return true;
+		}
+		return false;
+	}
+
 	void BeginObject() override
 	{
 		if (!bUseTaggedPropertySerialization)

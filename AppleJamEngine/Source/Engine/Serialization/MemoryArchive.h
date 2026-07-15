@@ -28,6 +28,8 @@ public:
 
 	const TArray<uint8>& GetBuffer() const { return Buffer; }
 
+	bool AtEnd() override { return bIsLoading && Offset >= Buffer.size(); }
+
 	void Serialize(void* Data, size_t Num) override
 	{
 		if (Num == 0) return;

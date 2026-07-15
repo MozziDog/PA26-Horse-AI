@@ -25,6 +25,9 @@ public:
 	inline bool IsLoading() const { return bIsLoading; }
 	inline bool IsSaving() const { return bIsSaving; }
 	virtual bool IsValid() const { return true; }
+	// 로드 스트림이 끝에 도달했는지 — 포맷 뒤에 append 된 하위호환 필드의 로드 가드용.
+	// (구버전 파일은 EOF → 필드 skip 후 default 유지) 저장 모드/미구현 백엔드는 false.
+	virtual bool AtEnd() { return false; }
 	inline bool UsesTaggedPropertySerialization() const { return bUseTaggedPropertySerialization; }
 	inline bool IsVersionedTaggedLoad() const { return bIsLoading && bUseTaggedPropertySerialization; }
 	virtual void SetTaggedPropertySerializationEnabled(bool bEnabled) { bUseTaggedPropertySerialization = bEnabled; }
