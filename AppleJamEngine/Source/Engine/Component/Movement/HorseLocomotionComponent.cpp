@@ -7,6 +7,7 @@
 #include "Debug/DrawDebugHelpers.h"
 #include "GameFramework/AActor.h"
 #include "Serialization/Archive.h"
+#include "Math/MathUtils.h"
 
 #include <algorithm>
 #include <cfloat>
@@ -22,7 +23,7 @@ namespace
 	// V 를 world +Z 축 기준 Deg(도) 만큼 회전(수평 부채꼴 slot 생성용). Z 성분 보존.
 	FVector RotateAroundZ(const FVector& V, float Deg)
 	{
-		const float R = Deg * (3.14159265358979f / 180.0f);
+		const float R = Deg * FMath::DegToRad;
 		const float C = std::cos(R);
 		const float S = std::sin(R);
 		return FVector(V.X * C - V.Y * S, V.X * S + V.Y * C, V.Z);

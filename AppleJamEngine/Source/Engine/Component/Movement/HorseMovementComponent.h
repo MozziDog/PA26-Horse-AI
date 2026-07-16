@@ -7,21 +7,21 @@ struct FHitResult;
 class USkeletalMeshComponent;
 class UAnimGraphInstance;
 
-// 말 전용 이동 — root motion 구동. 수평 전진/선회는 애니메이션 root motion 이 만든다(발 미끄러짐 0).
+// 말 전용 이동 — root motion 구동. 수평 전진/선회는 애니메이션 root motion 이 만든다(발 미끄러짐 방지)
 // Movement 는 (1) 입력을 AnimGraph 변수로 번역하고, (2) mesh AnimInstance 가 누적한 root motion 을
 // 소비해 root(box) transform 에 적용하며, (3) 지면 스냅·몸통 충돌·낙하·점프 같은 physical 처리를 맡는다.
 //
-// AnimGraph 변수 계약(HorseAnimGraph):
-//   float NormalizedSpeed  0=정지, 1=최고속. 입력 세기를 accel/decel 로 이징한 값.
-//   float SteeringAngle    현재 forward 기준 목표 heading 까지의 부호 각(deg, [-180,180]).
-//                          turn 클립이 이 값을 보고 blend → 클립의 yaw root motion 이 실제로 말을 돌린다.
-//   float InclineAngle     -1=최대 내리막, +1=최대 오르막(walkable 한계 기준 정규화). 잠정 구현.
-//   bool  bBrake           Canter 이상에서 급정지 요청(Locomotion 이 Brake() 호출한 frame).
-//   bool  bJump            의도적 점프로 공중에 있는 동안 true(walk-off 낙하와 구분).
-//   float AirTime          공중에 머문 시간(초). JumpUp→Falling 이행 판단용.
+// AnimGraph 변수 (HorseAnimGraph):
+//   float NormalizedSpeed  [0, 1] 최대 속도 대비 현재 속력
+//   float SteeringAngle    초당 회전각 (deg/s, ±MaxTurnRate). 
+//							Forward와 Desired 간의 오차를 YawAlignTime으로 나눠서 계산,
+//							YawAlignTime에 걸쳐서 AI가 계산한 '가고 싶은 방향'에 도달할 수 있도록 함
+//   float InclineAngle     [-1, +1] 내리막길/오르막길 각도 ( 현재 placeholder )
+//   bool  bBrake           급정지는 Canter 이상에서만 사용
+//   bool  bJump            
+//   float AirTime          second 단위 공중에 머문 시간 (JumpUp→Falling 이행 판단용)
 //
-// yaw 는 순수 root motion 이 담당(절차적 선회 없음): SteeringAngle 이 turn 애니를 고르고, 그 클립의
-// root motion yaw 가 말을 돌려 SteeringAngle 을 0 으로 되돌리는 닫힌 루프.
+// yaw 회전은 root motion으로 처리: 애니메이션이 없는 각도의 회전은 자연스레 차단됨
 
 #include "Source/Engine/Component/Movement/HorseMovementComponent.generated.h"
 
@@ -95,6 +95,12 @@ public:
 	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Jump Speed", Min=0.0f, Max=30.0f, Speed=0.1f)
 	float JumpSpeed = 5.8f;            // m/s — 점프 시 초기 상향 속도. h≈v²/2g (5.8m/s → 약 1.7m)
 
+
+	UPROPERTY(Edit, Save, Category="HorseMovement|Steering", DisplayName="Yaw Align Time", Min=0.05f, Max=5.0f, Speed=0.01f)
+	float YawAlignTime = 0.4f;         // 초 — 진행 방향을 heading으로 수렴시키는 시간, 작을수록 민첩
+	UPROPERTY(Edit, Save, Category="HorseMovement|Steering", DisplayName="Max Turn Rate", Min=0.0f, Max=720.0f, Speed=1.0f)
+	float MaxTurnRate = 205.0f;        // deg/s — 선회율 상한 ( NOTE: Turn 계통의 애니메이션과 맞춰야 함 )
+
 protected:
 	FVector GetGravity() const;
 
@@ -130,7 +136,7 @@ protected:
 
 	// ── AnimGraph 로 내보낼 상태 ──
 	float NormalizedSpeed = 0.0f;   // 이징된 현재 속도 스칼라([0,1])
-	float SteeringAngle   = 0.0f;   // 이번 frame 목표 heading 까지 부호 각(deg)
+	float TurnRate        = 0.0f;   // 이번 프레임에서의 초당 선회각
 	float InclineAngle    = 0.0f;   // 이징된 경사([-1,1])
 	float AirTime         = 0.0f;   // 공중 체류 시간(초)
 	bool  bJumpActive     = false;  // 의도적 점프로 공중에 있는 동안 true

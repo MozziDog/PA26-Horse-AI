@@ -64,7 +64,8 @@ void UHorseMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType
 		TargetSpeed = 0.0f;   // 급정지·미끄러짐 중엔 전진 의사 0.
 	}
 
-	// 조향각 — 현재 forward 기준 목표 heading 까지 부호 각. 입력이 거의 없으면 직진(0) 유지.
+	// 조향
+	// 목표 진행방향을 yaw rate(deg/s)으로 변환 (anim blend space에 맞추기)
 	if (TargetSpeed > 1.e-3f && !Desired.IsNearlyZero())
 	{
 		FVector Forward = Updated->GetForwardVector();
@@ -76,13 +77,16 @@ void UHorseMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType
 			Forward = Forward.Normalized();
 			Heading = Heading.Normalized();
 			const float Dot   = std::clamp(Forward.X * Heading.X + Forward.Y * Heading.Y, -1.0f, 1.0f);
-			const float Cross = Forward.X * Heading.Y - Forward.Y * Heading.X;   // +Z 성분
-			SteeringAngle = std::atan2(Cross, Dot) * RAD_TO_DEG;
+			// 한 변(Forwad)의 길이가 1인 마름모의 넓이 == sin(theta) == Heading의, Forward와 수직인 성분
+			const float Cross = Forward.X * Heading.Y - Forward.Y * Heading.X;
+			const float HeadingError = std::atan2(Cross, Dot) * RAD_TO_DEG;
+			const float AlignTime    = std::max(YawAlignTime, 1.e-3f);
+			TurnRate = std::clamp(HeadingError / AlignTime, -MaxTurnRate, MaxTurnRate);
 		}
 	}
 	else
 	{
-		SteeringAngle = 0.0f;
+		TurnRate = 0.0f;
 	}
 	NormalizedSpeed = TargetSpeed;
 
@@ -350,7 +354,7 @@ void UHorseMovementComponent::PushAnimGraphVariables()
 	}
 	const bool bGrounded = (MoveMode != EHorseMoveMode::Falling);
 	Graph->SetGraphVariableFloat(FName("NormalizedSpeed"), NormalizedSpeed);
-	Graph->SetGraphVariableFloat(FName("SteeringAngle"),   SteeringAngle);
+	Graph->SetGraphVariableFloat(FName("TurnRate"),   TurnRate);
 	Graph->SetGraphVariableFloat(FName("InclineAngle"),    bGrounded ? InclineAngle : 0.0f);
 	Graph->SetGraphVariableFloat(FName("AirTime"),         AirTime);
 	Graph->SetGraphVariableBool(FName("bBrake"),           bBrakeRequested);
@@ -478,4 +482,6 @@ void UHorseMovementComponent::Serialize(FArchive& Ar)
 	Ar << bTorsoCollision;
 	Ar << TorsoSkin;
 	Ar << JumpSpeed;
+	Ar << YawAlignTime;
+	Ar << MaxTurnRate;
 }
