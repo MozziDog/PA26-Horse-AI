@@ -1,4 +1,4 @@
-#include "AnimSequencePropertyPanel.h"
+﻿#include "AnimSequencePropertyPanel.h"
 
 #include "Animation/Sequence/AnimSequence.h"
 #include "Animation/Sequence/BoneAnimationTrack.h"
@@ -100,6 +100,22 @@ namespace
 				}
 				ImGui::EndCombo();
 			}
+		}
+
+		// Root Yaw Offset (Unity에서 따온 기능)
+		// Animation sequence의 몸통 기준 방향 재정의
+		ImGui::Dummy(ImVec2(0.0f, 4.0f));
+		ImGui::TextUnformatted("Root Yaw Offset (deg)");
+		ImGui::SetNextItemWidth(-1.0f);
+		float YawOffsetDeg = Seq->GetRootYawOffsetDegrees();
+		if (ImGui::DragFloat("##rootYawOffset", &YawOffsetDeg, 0.5f, -180.0f, 180.0f, "%.1f"))
+		{
+			Seq->SetRootYawOffsetDegrees(YawOffsetDeg);
+			bChanged = true;
+		}
+		if (ImGui::IsItemHovered())
+		{
+			ImGui::SetTooltip("Re-align animation sequence's 'direction'.\nApply to both character pose & root motion move direction.");
 		}
 
 		return bChanged;

@@ -504,6 +504,10 @@ void UAnimSequence::Serialize(FArchive& Ar)
     {
         Ar << RootRotationLock;
     }
+    if (!Ar.IsLoading() || !Ar.AtEnd())
+    {
+        Ar << RootYawOffsetDegrees;
+    }
 
     if (IsValid(DataModel))
     {
@@ -883,6 +887,22 @@ void UAnimSequence::GetBonePose(FPoseContext& Output, const FAnimExtractContext&
 
         Output.Pose[RootMotionLockBoneIndex] = LockedRoot;
     }
+
+    // ── Root Yaw Offset (per-asset) ──
+    // 클립의 기준 방향을 yaw offset을 적용하여 보정: root bone rotation에 QOffset을 pre-multiply
+    // 여기서는 회전만 보정 적용, 이동은 ExtractRootMotion에서 보정 적용.
+    // NOTE: root lock bone space 와 component space 가 같다는 가정 (root lock bone = 스켈레톤 root 또는 root lock bone의 부모의 회전 일절 없음)
+    if (std::fabs(RootYawOffsetDegrees) > 1.0e-4f &&
+        RootMotionLockBoneIndex >= 0 &&
+        RootMotionLockBoneIndex < static_cast<int32>(Output.Pose.size()))
+    {
+        const FQuat QOffset = FQuat::FromAxisAngle(
+            FVector::UpVector,
+            RootYawOffsetDegrees * FMath::DegToRad);
+
+        FTransform& Root = Output.Pose[RootMotionLockBoneIndex];
+        Root.Rotation = (QOffset * Root.Rotation.GetNormalized()).GetNormalized();
+    }
 }
 
 bool UAnimSequence::GetAnimationPose(float TimeSeconds, USkeletalMesh* InSkeletalMesh, TArray<FTransform>& OutLocalPose, bool bLooping) const
@@ -1096,6 +1116,18 @@ FTransform UAnimSequence::ExtractRootMotion(float PrevTime, float CurTime, bool 
         break;
     case ERootMotionRotationLock::Full:
         break;
+    }
+
+    // Root Yaw Offset — pose 회전과 대칭으로 delta 도 offset frame 으로 (GetBonePose 참고).
+    // rotation 은 켤레 변환 — 순수 yaw delta 면 no-op (+Z twist 는 QOffset 과 가환).
+    if (std::fabs(RootYawOffsetDegrees) > 1.0e-4f)
+    {
+        const FQuat QOffset = FQuat::FromAxisAngle(
+            FVector::UpVector,
+            RootYawOffsetDegrees * FMath::DegToRad);
+
+        Delta.Location = QOffset.RotateVector(Delta.Location);
+        Delta.Rotation = (QOffset * Delta.Rotation * QOffset.Inverse()).GetNormalized();
     }
     return Delta;
 }

@@ -131,6 +131,11 @@ public:
     // rotation — Full(전체 추출+잠금, default) / YawOnly(yaw 만 추출, swing 은 pose 유지) / None.
     ERootMotionRotationLock GetRootRotationLock() const { return RootRotationLock; }
     void SetRootRotationLock(ERootMotionRotationLock InLock) { RootRotationLock = InLock; }
+    // RootYawOffsetDegrees: 클립의 기준 방향(root frame yaw)을 보정
+    // 첫 키부터 몸통 방향이 reference pose와 어긋난 클립 보정용
+	// GetBonePose(pose 움직임)와 ExtractRootMotion(Transform 움직임)에 동일한 FQuat로 동시에 적용됨
+    float GetRootYawOffsetDegrees() const { return RootYawOffsetDegrees; }
+    void  SetRootYawOffsetDegrees(float InDegrees) { RootYawOffsetDegrees = InDegrees; }
 
     // [PrevTime, CurTime) 구간에서 root motion 본의 local translation/rotation delta 를 추출.
     //   bLoop 면 시간이 끝에서 0 으로 wrap 되는 경계도 정확하게 누적 (두 구간 합산).
@@ -171,4 +176,5 @@ private:
     // Root motion 성분 분해 — Serialize 에서 파일 끝에 append (하위호환, AtEnd 가드).
     bool                    bExtractRootMotionZ = true;
     ERootMotionRotationLock RootRotationLock    = ERootMotionRotationLock::Full;
+    float                   RootYawOffsetDegrees = 0.0f;
 };
