@@ -124,6 +124,11 @@ void UHorseLocomotionComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 	{
 		bool  bJumpable = false;
 		float FwdDist   = 0.0f;
+		const float JumpTriggerDist =
+			GetGait() == EHorseGait::Gallop ? GallopJumpTriggerDist :
+			GetGait() == EHorseGait::Canter ? CanterJumpTriggerDist :
+			GetGait() == EHorseGait::Trot ? TrotJumpTriggerDist : -1.0f;
+			
 		const bool bGateActive =
 			BB->TryGetBool(HorseBBKeys::ObsJumpable, bJumpable) && bJumpable
 			&& BB->TryGetFloat(HorseBBKeys::ObsFwdDist, FwdDist) && FwdDist < JumpTriggerDist;
@@ -394,7 +399,9 @@ void UHorseLocomotionComponent::Serialize(FArchive& Ar)
 	Ar << UserWeight;
 	Ar << RoadWeight;
 	Ar << InertiaWeight;
-	Ar << JumpTriggerDist;
+	Ar << TrotJumpTriggerDist;
+	Ar << CanterJumpTriggerDist;
+	Ar << GallopJumpTriggerDist;
 	Ar << bDrawSteeringDebug;
 	Ar << HardBlockDistance;
 	Ar << DangerWeight;
