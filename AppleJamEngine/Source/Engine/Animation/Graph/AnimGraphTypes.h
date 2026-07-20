@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "Core/Types/CoreTypes.h"
 #include "Object/FName.h"
@@ -135,15 +135,30 @@ struct FAnimGraphState
 	friend FArchive& operator<<(FArchive& Ar, FAnimGraphState& State);
 };
 
+// 단일 leaf node 전환 규칙. 
+// RuleKind가 property 기반이 아닐 경우 변수/비교연산/임계값 등은 무시함.
+// FAnimGraphTransition::Rules 에 여러 개가 담겨 AND 조건으로 결합
+// 필드 순서/타입은 구버전(단일 규칙) FAnimGraphTransition 과 동일하게 유지
+struct FAnimGraphTransitionRule
+{
+	ETransitionRuleKind   RuleKind      = ETransitionRuleKind::FloatCompare;
+	FName                 VariableName;  // FloatCompare/BoolProperty 만 사용 (OwnerClass UPROPERTY 또는 AnimGraph 변수)
+	ETransitionOp         Op            = ETransitionOp::Greater; // FloatCompare 만 사용
+	float                 Threshold     = 0.0f;                   // Bool 은 >=0.5 == true
+
+	friend FArchive& operator<<(FArchive& Ar, FAnimGraphTransitionRule& R);
+};
+
 struct FAnimGraphTransition
 {
 	FName                 FromStateName; // FName::None == AnyState
 	FName                 ToStateName;
-	FName                 VariableName;  // OwnerClass 의 UPROPERTY 이름 (Float/Int/Bool 등)
-	ETransitionOp         Op            = ETransitionOp::Greater;
-	float                 Threshold     = 0.0f;
 	float                 BlendTime     = 0.2f;
-	ETransitionRuleKind   RuleKind      = ETransitionRuleKind::FloatCompare;
+
+	// AND 로 결합되는 규칙들. 모두 true 여야 전환한다. 비어 있으면 전환하지 않음(AlwaysFalse 동등).
+	// float param 범위 이내(예: Speed>a AND Speed<b)를 여기서 표현한다. 범위 바깥(OR)은 후속
+	// Unity 식 중복 transition / condition graph 로 처리하며, 그때 각 rule 이 AND 항으로 재사용된다.
+	TArray<FAnimGraphTransitionRule> Rules;
 
 	friend FArchive& operator<<(FArchive& Ar, FAnimGraphTransition& T);
 };

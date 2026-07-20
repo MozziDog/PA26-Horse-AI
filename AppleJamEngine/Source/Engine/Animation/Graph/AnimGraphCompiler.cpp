@@ -25,6 +25,7 @@
 #include "Object/Object.h"
 
 #include <cmath>
+#include <utility>
 
 namespace
 {
@@ -154,55 +155,84 @@ namespace
 		return std::max(0.0f, Length - GetCurrentStateElapsedSeconds(SM));
 	}
 
+	// 단일 leaf 규칙 하나를 평가. Reader 는 rule.VariableName 에 대한 MakeFloatReader 결과(property
+	// 기반 rule 만 사용). SM 은 시간 기반 rule 이 현재 state 를 조회하는 데 사용.
+	bool EvaluateTransitionRule(const FAnimGraphTransitionRule& Rule,
+	                            const TFunction<float(UAnimInstance*)>& Reader,
+	                            UAnimInstance* AI,
+	                            const FAnimNode_StateMachine* SM)
+	{
+		switch (Rule.RuleKind)
+		{
+			case ETransitionRuleKind::FloatCompare:
+				return Rule.VariableName != FName::None && CompareTransitionFloat(Reader(AI), Rule.Op, Rule.Threshold);
+
+			case ETransitionRuleKind::BoolProperty:
+			{
+				if (Rule.VariableName == FName::None) return false;
+				const bool bValue = Reader(AI) >= 0.5f;
+				const bool bExpected = Rule.Threshold >= 0.5f;
+				return bValue == bExpected;
+			}
+
+			case ETransitionRuleKind::TimeRemaining:
+				return GetCurrentStateLengthSeconds(SM) > 0.0f && GetCurrentStateRemainingSeconds(SM) <= std::max(0.0f, Rule.Threshold);
+
+			case ETransitionRuleKind::TimeRemainingRatio:
+			{
+				const float Length = GetCurrentStateLengthSeconds(SM);
+				if (Length <= 0.0f) return false;
+				const float Ratio = GetCurrentStateRemainingSeconds(SM) / Length;
+				return Ratio <= std::max(0.0f, Rule.Threshold);
+			}
+
+			case ETransitionRuleKind::TimeElapsed:
+				return GetCurrentStateElapsedSeconds(SM) >= std::max(0.0f, Rule.Threshold);
+
+			case ETransitionRuleKind::AutomaticSequenceEnd:
+			{
+				const UAnimState* State = SM ? SM->GetCurrentState() : nullptr;
+				if (!IsValid(State) || !IsValid(State->Sequence) || State->bLooping) return false;
+				const float Length = State->Sequence->GetPlayLength();
+				return Length > 0.0f && State->GetLocalTime() >= Length - 1e-4f;
+			}
+
+			case ETransitionRuleKind::AlwaysTrue:
+				return true;
+
+			case ETransitionRuleKind::AlwaysFalse:
+				return false;
+		}
+		return false;
+	}
+
 	// Transition rule — UE 의 Transition Rule Graph 에서 가장 많이 쓰는 노드들을 데이터 기반으로 평가.
 	// 전체 Blueprint VM 은 아니지만, bool/float property access 와 current state time 함수류는 런타임 반영된다.
+	// T.Rules 의 모든 규칙을 AND 로 결합한다(예: Speed>a AND Speed<b → 범위 이내). 규칙이 하나도
+	// 없으면 전환하지 않음(false) — AlwaysFalse placeholder 와 동일 취급.
 	TFunction<bool(UAnimInstance*)> MakeTransitionCondition(const FAnimGraphTransition& T, const FAnimNode_StateMachine* SM)
 	{
-		auto Reader = MakeFloatReader(T.VariableName);
-		return [Reader, T, SM](UAnimInstance* AI) -> bool
+		struct FCompiledRule
 		{
-			switch (T.RuleKind)
+			FAnimGraphTransitionRule         Rule;
+			TFunction<float(UAnimInstance*)> Reader;
+		};
+
+		TArray<FCompiledRule> CompiledRules;
+		CompiledRules.reserve(T.Rules.size());
+		for (const FAnimGraphTransitionRule& Rule : T.Rules)
+		{
+			CompiledRules.push_back({ Rule, MakeFloatReader(Rule.VariableName) });
+		}
+
+		return [Rules = std::move(CompiledRules), SM](UAnimInstance* AI) -> bool
+		{
+			if (Rules.empty()) return false;
+			for (const FCompiledRule& CR : Rules)
 			{
-				case ETransitionRuleKind::FloatCompare:
-					return T.VariableName != FName::None && CompareTransitionFloat(Reader(AI), T.Op, T.Threshold);
-
-				case ETransitionRuleKind::BoolProperty:
-				{
-					if (T.VariableName == FName::None) return false;
-					const bool bValue = Reader(AI) >= 0.5f;
-					const bool bExpected = T.Threshold >= 0.5f;
-					return bValue == bExpected;
-				}
-
-				case ETransitionRuleKind::TimeRemaining:
-					return GetCurrentStateLengthSeconds(SM) > 0.0f && GetCurrentStateRemainingSeconds(SM) <= std::max(0.0f, T.Threshold);
-
-				case ETransitionRuleKind::TimeRemainingRatio:
-				{
-					const float Length = GetCurrentStateLengthSeconds(SM);
-					if (Length <= 0.0f) return false;
-					const float Ratio = GetCurrentStateRemainingSeconds(SM) / Length;
-					return Ratio <= std::max(0.0f, T.Threshold);
-				}
-
-				case ETransitionRuleKind::TimeElapsed:
-					return GetCurrentStateElapsedSeconds(SM) >= std::max(0.0f, T.Threshold);
-
-				case ETransitionRuleKind::AutomaticSequenceEnd:
-				{
-					const UAnimState* State = SM ? SM->GetCurrentState() : nullptr;
-					if (!IsValid(State) || !IsValid(State->Sequence) || State->bLooping) return false;
-					const float Length = State->Sequence->GetPlayLength();
-					return Length > 0.0f && State->GetLocalTime() >= Length - 1e-4f;
-				}
-
-				case ETransitionRuleKind::AlwaysTrue:
-					return true;
-
-				case ETransitionRuleKind::AlwaysFalse:
-					return false;
+				if (!EvaluateTransitionRule(CR.Rule, CR.Reader, AI, SM)) return false;
 			}
-			return false;
+			return true;
 		};
 	}
 

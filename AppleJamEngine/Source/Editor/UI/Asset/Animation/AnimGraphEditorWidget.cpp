@@ -132,6 +132,9 @@ namespace
 
 	FString FormatTransitionSummary(const FAnimGraphTransition& T);
 	FString FormatTransitionRuleNodeTitle(const FAnimGraphTransition& T);
+	FString FormatSingleRuleSummary(const FAnimGraphTransitionRule& R);
+	const char* RuleKindNodeTitle(ETransitionRuleKind Kind);
+	bool RenderTransitionRuleCompactEditor(FAnimGraphTransition& T, UAnimGraphAsset* Asset, UClass* OwnerCls);
 	bool StringContainsInsensitive(const FString& Haystack, const char* Needle);
 
 	ImVec4 PinTypeColor(EAnimGraphPinType Type)
@@ -1103,6 +1106,8 @@ namespace
 		ImGui::Dummy(ImVec2(Width, Height));
 	}
 
+	// 규칙 그래프 스타일 뷰. 각 leaf 규칙을 작은 노드로 그려 AND 결합을 보여주고, "Add Rule Node"
+	// 팔레트로 규칙을 추가한 뒤 아래 목록 편집기(RenderTransitionRuleCompactEditor)로 상세 편집한다.
 	bool RenderTransitionRuleGraph(FAnimGraphTransition& T, UAnimGraphAsset* Asset, UClass* OwnerCls, int32 Index)
 	{
 		ImGui::PushID(Index + 100000);
@@ -1114,7 +1119,7 @@ namespace
 		{
 			ImGui::OpenPopup("TransitionRuleActionPalette");
 		}
-		ImGui::TextDisabled("The rule must output a boolean for Can Enter Transition.");
+		ImGui::TextDisabled("All rule nodes are AND-combined into Can Enter Transition.");
 
 		if (ImGui::BeginPopup("TransitionRuleActionPalette"))
 		{
@@ -1128,15 +1133,13 @@ namespace
 			{
 				const FString Search = FString(TransitionRuleKindLabel(Kind)) + FString(" ") + TransitionRuleKindSearchText(Kind);
 				if (!StringContainsInsensitive(Search, RuleSearchBuf)) return;
-				const bool bSelected = T.RuleKind == Kind;
-				if (ImGui::Selectable(TransitionRuleKindLabel(Kind), bSelected))
+				if (ImGui::Selectable(TransitionRuleKindLabel(Kind), false))
 				{
-					if (T.RuleKind != Kind) bChanged = true;
-					T.RuleKind = Kind;
-					if (Kind == ETransitionRuleKind::BoolProperty && T.Threshold < 0.5f)
-					{
-						T.Threshold = 1.0f;
-					}
+					FAnimGraphTransitionRule R;
+					R.RuleKind = Kind;
+					if (Kind == ETransitionRuleKind::BoolProperty) R.Threshold = 1.0f;
+					T.Rules.push_back(R);
+					bChanged = true;
 					ImGui::CloseCurrentPopup();
 				}
 			};
@@ -1162,179 +1165,73 @@ namespace
 		}
 
 		const float NodeWidth = std::max(150.0f, (ImGui::GetContentRegionAvail().x - 26.0f) * 0.50f);
-		const FString RuleTitle = FormatTransitionRuleNodeTitle(T);
-		const FString RuleSummary = FormatTransitionSummary(T);
-		DrawSmallRuleNode(RuleTitle.c_str(), RuleSummary.c_str(), ImVec4(0.30f, 0.85f, 0.30f, 1.0f), NodeWidth);
+		if (T.Rules.empty())
+		{
+			DrawSmallRuleNode("No Rules", "Never (add a rule)", ImVec4(0.55f, 0.55f, 0.55f, 1.0f), NodeWidth);
+		}
+		else
+		{
+			for (int32 i = 0; i < static_cast<int32>(T.Rules.size()); ++i)
+			{
+				if (i > 0) ImGui::TextColored(ImVec4(0.70f, 0.85f, 0.55f, 1.0f), "AND");
+				DrawSmallRuleNode(RuleKindNodeTitle(T.Rules[i].RuleKind), FormatSingleRuleSummary(T.Rules[i]).c_str(),
+					ImVec4(0.30f, 0.85f, 0.30f, 1.0f), NodeWidth);
+			}
+		}
 		ImGui::SameLine();
 		ImGui::TextColored(ImVec4(0.86f, 0.86f, 0.82f, 1.0f), "=>");
 		ImGui::SameLine();
 		DrawSmallRuleNode("Can Enter Transition", "Return Value", ImVec4(0.86f, 0.20f, 0.16f, 1.0f), NodeWidth);
 
 		ImGui::Spacing();
-		ImGui::TextUnformatted("Rule Type");
-		bChanged |= TransitionRuleKindCombo("##TransitionRuleKind", T.RuleKind);
-
-		if (ImGui::CollapsingHeader("Common UE-style Presets"))
-		{
-			ImGui::TextWrapped("Pick a preset, then adjust the variable and threshold. For an Idle <-> Run pair, use GroundSpeed > threshold on the forward transition and GroundSpeed <= threshold on the reverse transition.");
-			if (ImGui::Button("Locomotion Enter: GroundSpeed > 10"))
-			{
-				EnsureGraphVariable(Asset, FName("GroundSpeed"), EAnimGraphPinType::Float);
-				T.RuleKind = ETransitionRuleKind::FloatCompare;
-				T.VariableName = FName("GroundSpeed");
-				T.Op = ETransitionOp::Greater;
-				T.Threshold = 10.0f;
-				bChanged = true;
-			}
-			ImGui::SameLine();
-			if (ImGui::Button("Locomotion Exit: GroundSpeed <= 10"))
-			{
-				EnsureGraphVariable(Asset, FName("GroundSpeed"), EAnimGraphPinType::Float);
-				T.RuleKind = ETransitionRuleKind::FloatCompare;
-				T.VariableName = FName("GroundSpeed");
-				T.Op = ETransitionOp::LessEqual;
-				T.Threshold = 10.0f;
-				bChanged = true;
-			}
-			if (ImGui::Button("Jump/Fall: IsFalling == true"))
-			{
-				EnsureGraphVariable(Asset, FName("IsFalling"), EAnimGraphPinType::Bool);
-				T.RuleKind = ETransitionRuleKind::BoolProperty;
-				T.VariableName = FName("IsFalling");
-				T.Threshold = 1.0f;
-				bChanged = true;
-			}
-			ImGui::SameLine();
-			if (ImGui::Button("Land: IsFalling == false"))
-			{
-				EnsureGraphVariable(Asset, FName("IsFalling"), EAnimGraphPinType::Bool);
-				T.RuleKind = ETransitionRuleKind::BoolProperty;
-				T.VariableName = FName("IsFalling");
-				T.Threshold = 0.0f;
-				bChanged = true;
-			}
-			if (ImGui::Button("One-shot: Current Animation Reached End"))
-			{
-				T.RuleKind = ETransitionRuleKind::AutomaticSequenceEnd;
-				T.VariableName = FName::None;
-				T.Threshold = 0.0f;
-				bChanged = true;
-			}
-		}
-
-		switch (T.RuleKind)
-		{
-			case ETransitionRuleKind::FloatCompare:
-			{
-				ImGui::TextUnformatted("Property");
-				bChanged |= VariableNameCombo("##RuleFloatProperty", Asset, OwnerCls, T.VariableName);
-				ImGui::TextUnformatted("Compare");
-				ImGui::SetNextItemWidth(72.0f);
-				if (ImGui::BeginCombo("##RuleOp", TransitionOpLabel(T.Op)))
-				{
-					for (int i = 0; i <= static_cast<int>(ETransitionOp::NotEqual); ++i)
-					{
-						const ETransitionOp O = static_cast<ETransitionOp>(i);
-						const bool bSel = (T.Op == O);
-						if (ImGui::Selectable(TransitionOpLabel(O), bSel))
-						{
-							if (T.Op != O) bChanged = true;
-							T.Op = O;
-						}
-					}
-					ImGui::EndCombo();
-				}
-				ImGui::SameLine();
-				ImGui::SetNextItemWidth(-1.0f);
-				if (ImGui::DragFloat("##RuleThreshold", &T.Threshold, 0.1f, -1000.0f, 1000.0f, "%.2f")) bChanged = true;
-				break;
-			}
-			case ETransitionRuleKind::BoolProperty:
-			{
-				ImGui::TextUnformatted("Property");
-				bChanged |= VariableNameCombo("##RuleBoolProperty", Asset, OwnerCls, T.VariableName);
-				bool bExpected = T.Threshold >= 0.5f;
-				if (ImGui::Checkbox("Expected True", &bExpected))
-				{
-					T.Threshold = bExpected ? 1.0f : 0.0f;
-					bChanged = true;
-				}
-				break;
-			}
-			case ETransitionRuleKind::TimeRemaining:
-				ImGui::TextUnformatted("Remaining Seconds <=");
-				ImGui::SetNextItemWidth(-1.0f);
-				if (ImGui::DragFloat("##RuleTimeRemaining", &T.Threshold, 0.01f, 0.0f, 60.0f, "%.2fs")) bChanged = true;
-				break;
-			case ETransitionRuleKind::TimeRemainingRatio:
-				ImGui::TextUnformatted("Remaining Ratio <=");
-				ImGui::SetNextItemWidth(-1.0f);
-				if (ImGui::DragFloat("##RuleTimeRemainingRatio", &T.Threshold, 0.01f, 0.0f, 1.0f, "%.2f")) bChanged = true;
-				break;
-			case ETransitionRuleKind::TimeElapsed:
-				ImGui::TextUnformatted("Current State Time >=");
-				ImGui::SetNextItemWidth(-1.0f);
-				if (ImGui::DragFloat("##RuleTimeElapsed", &T.Threshold, 0.01f, 0.0f, 60.0f, "%.2fs")) bChanged = true;
-				break;
-			case ETransitionRuleKind::AutomaticSequenceEnd:
-				ImGui::TextWrapped("Uses the current non-looping state's sequence end. Looping states will not auto-transition.");
-				break;
-			case ETransitionRuleKind::AlwaysTrue:
-				ImGui::TextWrapped("This transition is unconditional. Use it only for intentional forced flow.");
-				break;
-			case ETransitionRuleKind::AlwaysFalse:
-				ImGui::TextWrapped("This transition is disabled until a real rule node is selected.");
-				break;
-		}
-
-		ImGui::TextUnformatted("Blend Duration");
-		ImGui::SetNextItemWidth(-1.0f);
-		if (ImGui::DragFloat("##RuleBlendTime", &T.BlendTime, 0.01f, 0.0f, 5.0f, "%.2fs")) bChanged = true;
+		bChanged |= RenderTransitionRuleCompactEditor(T, Asset, OwnerCls);
 
 		ImGui::PopID();
 		return bChanged;
 	}
 
-	bool RenderTransitionRuleCompactEditor(FAnimGraphTransition& T, UAnimGraphAsset* Asset, UClass* OwnerCls)
+	// 단일 leaf 규칙 하나의 편집 폼(RuleKind 콤보 + kind 별 필드). Blend 는 transition 레벨이라 여기서 안 다룸.
+	// 호출부가 rule 별로 ImGui::PushID 를 걸어 위젯 id 충돌을 막아야 한다.
+	bool RenderSingleRuleBody(FAnimGraphTransitionRule& R, UAnimGraphAsset* Asset, UClass* OwnerCls)
 	{
 		bool bChanged = false;
 		ImGui::TextUnformatted("Rule");
-		bChanged |= TransitionRuleKindCombo("##TransitionRuleKind", T.RuleKind);
+		bChanged |= TransitionRuleKindCombo("##TransitionRuleKind", R.RuleKind);
 
-		switch (T.RuleKind)
+		switch (R.RuleKind)
 		{
 			case ETransitionRuleKind::FloatCompare:
 			{
 				ImGui::TextUnformatted("Float / Int Variable");
-				bChanged |= VariableNameComboFiltered("##RuleFloatProperty", Asset, OwnerCls, T.VariableName, EAnimGraphPinType::Float, true);
+				bChanged |= VariableNameComboFiltered("##RuleFloatProperty", Asset, OwnerCls, R.VariableName, EAnimGraphPinType::Float, true);
 				ImGui::SetNextItemWidth(72.0f);
-				if (ImGui::BeginCombo("##RuleOp", TransitionOpLabel(T.Op)))
+				if (ImGui::BeginCombo("##RuleOp", TransitionOpLabel(R.Op)))
 				{
 					for (int i = 0; i <= static_cast<int>(ETransitionOp::NotEqual); ++i)
 					{
 						const ETransitionOp O = static_cast<ETransitionOp>(i);
-						const bool bSel = (T.Op == O);
+						const bool bSel = (R.Op == O);
 						if (ImGui::Selectable(TransitionOpLabel(O), bSel))
 						{
-							if (T.Op != O) bChanged = true;
-							T.Op = O;
+							if (R.Op != O) bChanged = true;
+							R.Op = O;
 						}
 					}
 					ImGui::EndCombo();
 				}
 				ImGui::SameLine();
 				ImGui::SetNextItemWidth(-1.0f);
-				if (ImGui::DragFloat("##RuleThreshold", &T.Threshold, 0.1f, -1000.0f, 1000.0f, "%.2f")) bChanged = true;
+				if (ImGui::DragFloat("##RuleThreshold", &R.Threshold, 0.1f, -1000.0f, 1000.0f, "%.2f")) bChanged = true;
 				break;
 			}
 			case ETransitionRuleKind::BoolProperty:
 			{
 				ImGui::TextUnformatted("Bool Variable");
-				bChanged |= VariableNameComboFiltered("##RuleBoolProperty", Asset, OwnerCls, T.VariableName, EAnimGraphPinType::Bool, false);
-				bool bExpected = T.Threshold >= 0.5f;
+				bChanged |= VariableNameComboFiltered("##RuleBoolProperty", Asset, OwnerCls, R.VariableName, EAnimGraphPinType::Bool, false);
+				bool bExpected = R.Threshold >= 0.5f;
 				if (ImGui::Checkbox("Expected True", &bExpected))
 				{
-					T.Threshold = bExpected ? 1.0f : 0.0f;
+					R.Threshold = bExpected ? 1.0f : 0.0f;
 					bChanged = true;
 				}
 				break;
@@ -1342,27 +1239,76 @@ namespace
 			case ETransitionRuleKind::TimeRemaining:
 				ImGui::TextUnformatted("Remaining Seconds <=");
 				ImGui::SetNextItemWidth(-1.0f);
-				if (ImGui::DragFloat("##RuleTimeRemaining", &T.Threshold, 0.01f, 0.0f, 60.0f, "%.2fs")) bChanged = true;
+				if (ImGui::DragFloat("##RuleTimeRemaining", &R.Threshold, 0.01f, 0.0f, 60.0f, "%.2fs")) bChanged = true;
 				break;
 			case ETransitionRuleKind::TimeRemainingRatio:
 				ImGui::TextUnformatted("Remaining Ratio <=");
 				ImGui::SetNextItemWidth(-1.0f);
-				if (ImGui::DragFloat("##RuleTimeRemainingRatio", &T.Threshold, 0.01f, 0.0f, 1.0f, "%.2f")) bChanged = true;
+				if (ImGui::DragFloat("##RuleTimeRemainingRatio", &R.Threshold, 0.01f, 0.0f, 1.0f, "%.2f")) bChanged = true;
 				break;
 			case ETransitionRuleKind::TimeElapsed:
 				ImGui::TextUnformatted("Current State Time >=");
 				ImGui::SetNextItemWidth(-1.0f);
-				if (ImGui::DragFloat("##RuleTimeElapsed", &T.Threshold, 0.01f, 0.0f, 60.0f, "%.2fs")) bChanged = true;
+				if (ImGui::DragFloat("##RuleTimeElapsed", &R.Threshold, 0.01f, 0.0f, 60.0f, "%.2fs")) bChanged = true;
 				break;
 			case ETransitionRuleKind::AutomaticSequenceEnd:
 				ImGui::TextDisabled("현재 State의 non-looping sequence가 끝나면 true입니다.");
 				break;
 			case ETransitionRuleKind::AlwaysTrue:
-				ImGui::TextDisabled("항상 전환됩니다. 의도한 경우에만 사용하세요.");
+				ImGui::TextDisabled("항상 참인 규칙입니다.");
 				break;
 			case ETransitionRuleKind::AlwaysFalse:
-				ImGui::TextDisabled("비활성 전환입니다. Rule을 선택해야 전환됩니다.");
+				ImGui::TextDisabled("항상 거짓인 규칙입니다.");
 				break;
+		}
+		return bChanged;
+	}
+
+	// Transition 의 규칙 목록 편집기. 모든 규칙은 AND 로 결합된다(모두 참이어야 전환). 규칙을
+	// 추가/삭제하고, float param 범위 이내(A<X<B) 같은 복합 조건을 GUI 로 구성할 수 있다.
+	bool RenderTransitionRuleCompactEditor(FAnimGraphTransition& T, UAnimGraphAsset* Asset, UClass* OwnerCls)
+	{
+		bool bChanged = false;
+
+		ImGui::TextColored(ImVec4(0.70f, 0.85f, 0.55f, 1.0f), "Rules (AND)");
+		ImGui::SameLine();
+		ImGui::TextDisabled("모든 규칙이 참일 때 전환");
+
+		if (T.Rules.empty())
+		{
+			ImGui::TextDisabled("규칙 없음 — 전환하지 않습니다. 아래에서 규칙을 추가하세요.");
+		}
+
+		int32 RemoveIndex = -1;
+		for (int32 i = 0; i < static_cast<int32>(T.Rules.size()); ++i)
+		{
+			ImGui::PushID(i);
+			if (i > 0)
+			{
+				ImGui::Spacing();
+				ImGui::TextColored(ImVec4(0.70f, 0.85f, 0.55f, 1.0f), "AND");
+			}
+			ImGui::BeginGroup();
+			bChanged |= RenderSingleRuleBody(T.Rules[i], Asset, OwnerCls);
+			if (ImGui::SmallButton("Remove Rule"))
+			{
+				RemoveIndex = i;
+			}
+			ImGui::EndGroup();
+			ImGui::Separator();
+			ImGui::PopID();
+		}
+
+		if (RemoveIndex >= 0)
+		{
+			T.Rules.erase(T.Rules.begin() + RemoveIndex);
+			bChanged = true;
+		}
+
+		if (ImGui::Button("+ Add Rule (AND)"))
+		{
+			T.Rules.push_back(FAnimGraphTransitionRule{}); // 기본 FloatCompare
+			bChanged = true;
 		}
 
 		ImGui::TextUnformatted("Blend");
@@ -1371,48 +1317,54 @@ namespace
 
 		if (ImGui::CollapsingHeader("Presets", ImGuiTreeNodeFlags_None))
 		{
+			auto SetSingleRule = [&](ETransitionRuleKind Kind, FName Var, ETransitionOp Op, float Threshold)
+			{
+				FAnimGraphTransitionRule R;
+				R.RuleKind = Kind;
+				R.VariableName = Var;
+				R.Op = Op;
+				R.Threshold = Threshold;
+				T.Rules.clear();
+				T.Rules.push_back(R);
+				bChanged = true;
+			};
+
+			// 범위 이내(A < X < B) — 두 FloatCompare 를 AND 로. 이번 작업의 핵심 유스케이스.
+			if (ImGui::Button("Range: 5 < GroundSpeed < 20"))
+			{
+				EnsureGraphVariable(Asset, FName("GroundSpeed"), EAnimGraphPinType::Float);
+				FAnimGraphTransitionRule Lo; Lo.RuleKind = ETransitionRuleKind::FloatCompare; Lo.VariableName = FName("GroundSpeed"); Lo.Op = ETransitionOp::Greater; Lo.Threshold = 5.0f;
+				FAnimGraphTransitionRule Hi; Hi.RuleKind = ETransitionRuleKind::FloatCompare; Hi.VariableName = FName("GroundSpeed"); Hi.Op = ETransitionOp::Less;    Hi.Threshold = 20.0f;
+				T.Rules.clear();
+				T.Rules.push_back(Lo);
+				T.Rules.push_back(Hi);
+				bChanged = true;
+			}
 			if (ImGui::Button("GroundSpeed > 10"))
 			{
 				EnsureGraphVariable(Asset, FName("GroundSpeed"), EAnimGraphPinType::Float);
-				T.RuleKind = ETransitionRuleKind::FloatCompare;
-				T.VariableName = FName("GroundSpeed");
-				T.Op = ETransitionOp::Greater;
-				T.Threshold = 10.0f;
-				bChanged = true;
+				SetSingleRule(ETransitionRuleKind::FloatCompare, FName("GroundSpeed"), ETransitionOp::Greater, 10.0f);
 			}
 			ImGui::SameLine();
 			if (ImGui::Button("GroundSpeed <= 10"))
 			{
 				EnsureGraphVariable(Asset, FName("GroundSpeed"), EAnimGraphPinType::Float);
-				T.RuleKind = ETransitionRuleKind::FloatCompare;
-				T.VariableName = FName("GroundSpeed");
-				T.Op = ETransitionOp::LessEqual;
-				T.Threshold = 10.0f;
-				bChanged = true;
+				SetSingleRule(ETransitionRuleKind::FloatCompare, FName("GroundSpeed"), ETransitionOp::LessEqual, 10.0f);
 			}
 			if (ImGui::Button("IsFalling true"))
 			{
 				EnsureGraphVariable(Asset, FName("IsFalling"), EAnimGraphPinType::Bool);
-				T.RuleKind = ETransitionRuleKind::BoolProperty;
-				T.VariableName = FName("IsFalling");
-				T.Threshold = 1.0f;
-				bChanged = true;
+				SetSingleRule(ETransitionRuleKind::BoolProperty, FName("IsFalling"), ETransitionOp::Greater, 1.0f);
 			}
 			ImGui::SameLine();
 			if (ImGui::Button("IsFalling false"))
 			{
 				EnsureGraphVariable(Asset, FName("IsFalling"), EAnimGraphPinType::Bool);
-				T.RuleKind = ETransitionRuleKind::BoolProperty;
-				T.VariableName = FName("IsFalling");
-				T.Threshold = 0.0f;
-				bChanged = true;
+				SetSingleRule(ETransitionRuleKind::BoolProperty, FName("IsFalling"), ETransitionOp::Greater, 0.0f);
 			}
 			if (ImGui::Button("Animation End"))
 			{
-				T.RuleKind = ETransitionRuleKind::AutomaticSequenceEnd;
-				T.VariableName = FName::None;
-				T.Threshold = 0.0f;
-				bChanged = true;
+				SetSingleRule(ETransitionRuleKind::AutomaticSequenceEnd, FName::None, ETransitionOp::Greater, 0.0f);
 			}
 		}
 		return bChanged;
@@ -2306,69 +2258,85 @@ namespace
 		return Buf;
 	}
 
-	FString FormatTransitionSummary(const FAnimGraphTransition& T)
+	// 단일 leaf 규칙 하나의 요약(Blend 제외). FormatTransitionSummary 가 여러 개를 " AND " 로 잇는다.
+	FString FormatSingleRuleSummary(const FAnimGraphTransitionRule& R)
 	{
-		char Buf[192];
-		switch (T.RuleKind)
+		char Buf[160];
+		switch (R.RuleKind)
 		{
 			case ETransitionRuleKind::FloatCompare:
 			{
-				const FString Var = (T.VariableName == FName::None) ? FString("<select variable>") : T.VariableName.ToString();
-				std::snprintf(Buf, sizeof(Buf), "%s %s %.2f  |  Blend %.2fs",
-					Var.c_str(), TransitionOpLabel(T.Op), T.Threshold, T.BlendTime);
+				const FString Var = (R.VariableName == FName::None) ? FString("<select variable>") : R.VariableName.ToString();
+				std::snprintf(Buf, sizeof(Buf), "%s %s %.2f", Var.c_str(), TransitionOpLabel(R.Op), R.Threshold);
 				return Buf;
 			}
 			case ETransitionRuleKind::BoolProperty:
 			{
-				const FString Var = (T.VariableName == FName::None) ? FString("<select bool>") : T.VariableName.ToString();
-				std::snprintf(Buf, sizeof(Buf), "%s is %s  |  Blend %.2fs",
-					Var.c_str(), T.Threshold >= 0.5f ? "true" : "false", T.BlendTime);
+				const FString Var = (R.VariableName == FName::None) ? FString("<select bool>") : R.VariableName.ToString();
+				std::snprintf(Buf, sizeof(Buf), "%s is %s", Var.c_str(), R.Threshold >= 0.5f ? "true" : "false");
 				return Buf;
 			}
 			case ETransitionRuleKind::TimeRemaining:
-				std::snprintf(Buf, sizeof(Buf), "Current state time remaining <= %.2fs  |  Blend %.2fs", T.Threshold, T.BlendTime);
+				std::snprintf(Buf, sizeof(Buf), "state time remaining <= %.2fs", R.Threshold);
 				return Buf;
 			case ETransitionRuleKind::TimeRemainingRatio:
-				std::snprintf(Buf, sizeof(Buf), "Current state time remaining ratio <= %.2f  |  Blend %.2fs", T.Threshold, T.BlendTime);
+				std::snprintf(Buf, sizeof(Buf), "state time remaining ratio <= %.2f", R.Threshold);
 				return Buf;
 			case ETransitionRuleKind::TimeElapsed:
-				std::snprintf(Buf, sizeof(Buf), "Current state time >= %.2fs  |  Blend %.2fs", T.Threshold, T.BlendTime);
+				std::snprintf(Buf, sizeof(Buf), "state time >= %.2fs", R.Threshold);
 				return Buf;
 			case ETransitionRuleKind::AutomaticSequenceEnd:
-				std::snprintf(Buf, sizeof(Buf), "When non-looping source sequence reaches the end  |  Blend %.2fs", T.BlendTime);
-				return Buf;
+				return "non-looping sequence reached end";
 			case ETransitionRuleKind::AlwaysTrue:
-				std::snprintf(Buf, sizeof(Buf), "Always true  |  Blend %.2fs", T.BlendTime);
-				return Buf;
+				return "always true";
 			case ETransitionRuleKind::AlwaysFalse:
-				std::snprintf(Buf, sizeof(Buf), "Always false  |  Blend %.2fs", T.BlendTime);
-				return Buf;
+				return "always false";
 		}
-		return "Transition Rule";
+		return "rule";
+	}
+
+	FString FormatTransitionSummary(const FAnimGraphTransition& T)
+	{
+		char BlendBuf[48];
+		std::snprintf(BlendBuf, sizeof(BlendBuf), "  |  Blend %.2fs", T.BlendTime);
+
+		if (T.Rules.empty())
+		{
+			return FString("No rules (never)") + BlendBuf;
+		}
+
+		FString Joined;
+		for (int32 i = 0; i < static_cast<int32>(T.Rules.size()); ++i)
+		{
+			if (i > 0) Joined += " AND ";
+			Joined += FormatSingleRuleSummary(T.Rules[i]);
+		}
+		return Joined + BlendBuf;
+	}
+
+	const char* RuleKindNodeTitle(ETransitionRuleKind Kind)
+	{
+		switch (Kind)
+		{
+			case ETransitionRuleKind::FloatCompare:         return "Float Compare";
+			case ETransitionRuleKind::BoolProperty:         return "Bool Property";
+			case ETransitionRuleKind::TimeRemaining:        return "Time Remaining";
+			case ETransitionRuleKind::TimeRemainingRatio:   return "Time Remaining Ratio";
+			case ETransitionRuleKind::TimeElapsed:          return "Current State Time";
+			case ETransitionRuleKind::AutomaticSequenceEnd: return "Automatic Rule";
+			case ETransitionRuleKind::AlwaysTrue:           return "Literal True";
+			case ETransitionRuleKind::AlwaysFalse:          return "Literal False";
+		}
+		return "Rule Node";
 	}
 
 	FString FormatTransitionRuleNodeTitle(const FAnimGraphTransition& T)
 	{
-		switch (T.RuleKind)
-		{
-			case ETransitionRuleKind::FloatCompare:
-				return "Float > Compare";
-			case ETransitionRuleKind::BoolProperty:
-				return "Bool Property";
-			case ETransitionRuleKind::TimeRemaining:
-				return "Time Remaining";
-			case ETransitionRuleKind::TimeRemainingRatio:
-				return "Time Remaining Ratio";
-			case ETransitionRuleKind::TimeElapsed:
-				return "Current State Time";
-			case ETransitionRuleKind::AutomaticSequenceEnd:
-				return "Automatic Rule";
-			case ETransitionRuleKind::AlwaysTrue:
-				return "Literal True";
-			case ETransitionRuleKind::AlwaysFalse:
-				return "Literal False";
-		}
-		return "Rule Node";
+		if (T.Rules.empty()) return "No Rules";
+		if (T.Rules.size() == 1) return RuleKindNodeTitle(T.Rules[0].RuleKind);
+		char Buf[48];
+		std::snprintf(Buf, sizeof(Buf), "%zu Rules (AND)", T.Rules.size());
+		return Buf;
 	}
 
 	FName MakeUniqueStateName(const TArray<FAnimGraphState>& States, const char* Prefix)
@@ -2453,26 +2421,31 @@ namespace
 		Reverse.FromStateName = Source.ToStateName;
 		Reverse.ToStateName   = Source.FromStateName;
 
-		// Safe auto-inversion is only possible for simple scalar/bool property rules.
-		// Time-based rules are bound to the source state and cannot be meaningfully inverted.
-		switch (Source.RuleKind)
+		// 편의용 best-effort 반전 — 규칙별로 뒤집는다. (AND 배열의 엄밀한 논리 부정은 De Morgan 상
+		// OR 가 되어 단일 transition 으로 표현 불가하므로, 각 rule 을 개별 반전하는 기존 방침을 유지.)
+		// FloatCompare 는 Op 반전, Bool 은 기대값 반전, 시간/Always 류는 반전 불가 → 해당 rule 을
+		// AlwaysFalse 로 두어 사용자가 직접 작성하게 한다.
+		for (FAnimGraphTransitionRule& R : Reverse.Rules)
 		{
-			case ETransitionRuleKind::FloatCompare:
-				Reverse.Op = InvertTransitionOp(Source.Op);
-				break;
-			case ETransitionRuleKind::BoolProperty:
-				Reverse.Threshold = Source.Threshold >= 0.5f ? 0.0f : 1.0f;
-				break;
-			case ETransitionRuleKind::AlwaysTrue:
-			case ETransitionRuleKind::AlwaysFalse:
-			case ETransitionRuleKind::TimeRemaining:
-			case ETransitionRuleKind::TimeRemainingRatio:
-			case ETransitionRuleKind::TimeElapsed:
-			case ETransitionRuleKind::AutomaticSequenceEnd:
-				Reverse.RuleKind = ETransitionRuleKind::AlwaysFalse;
-				Reverse.VariableName = FName::None;
-				Reverse.Threshold = 0.0f;
-				break;
+			switch (R.RuleKind)
+			{
+				case ETransitionRuleKind::FloatCompare:
+					R.Op = InvertTransitionOp(R.Op);
+					break;
+				case ETransitionRuleKind::BoolProperty:
+					R.Threshold = R.Threshold >= 0.5f ? 0.0f : 1.0f;
+					break;
+				case ETransitionRuleKind::AlwaysTrue:
+				case ETransitionRuleKind::AlwaysFalse:
+				case ETransitionRuleKind::TimeRemaining:
+				case ETransitionRuleKind::TimeRemainingRatio:
+				case ETransitionRuleKind::TimeElapsed:
+				case ETransitionRuleKind::AutomaticSequenceEnd:
+					R.RuleKind = ETransitionRuleKind::AlwaysFalse;
+					R.VariableName = FName::None;
+					R.Threshold = 0.0f;
+					break;
+			}
 		}
 		return Reverse;
 	}
@@ -3494,30 +3467,38 @@ void FAnimGraphEditorWidget::ValidateGraph(UAnimGraphAsset* Asset)
 						AddValidationMessage(LastValidationMessages, bLastValidationOk,
 							NodeTitleForDisplay(Node) + " has a transition with a missing source state.", true);
 					}
-					if ((T.RuleKind == ETransitionRuleKind::FloatCompare || T.RuleKind == ETransitionRuleKind::BoolProperty) && T.VariableName == FName::None)
+					if (T.Rules.empty())
 					{
 						AddValidationMessage(LastValidationMessages, bLastValidationOk,
-							NodeTitleForDisplay(Node) + " has a property-based transition rule without a selected variable.", true);
+							NodeTitleForDisplay(Node) + " has a transition with no rules (it will never fire).", false);
 					}
-					else if ((T.RuleKind == ETransitionRuleKind::FloatCompare || T.RuleKind == ETransitionRuleKind::BoolProperty)
-						&& !IsVariableResolvable(Asset, OwnerCls, T.VariableName))
+					for (const FAnimGraphTransitionRule& R : T.Rules)
 					{
-						AddValidationMessage(LastValidationMessages, bLastValidationOk,
-							NodeTitleForDisplay(Node) + " has a transition rule referencing an unknown variable: " + T.VariableName.ToString(), true);
-					}
-					else if (T.RuleKind == ETransitionRuleKind::FloatCompare || T.RuleKind == ETransitionRuleKind::BoolProperty)
-					{
-						EAnimGraphPinType VarType = EAnimGraphPinType::Float;
-						if (TryResolveVariableType(Asset, OwnerCls, T.VariableName, VarType) && !VariableTypeMatchesRule(T.RuleKind, VarType))
+						const bool bPropertyRule = (R.RuleKind == ETransitionRuleKind::FloatCompare || R.RuleKind == ETransitionRuleKind::BoolProperty);
+						if (bPropertyRule && R.VariableName == FName::None)
 						{
 							AddValidationMessage(LastValidationMessages, bLastValidationOk,
-								NodeTitleForDisplay(Node) + " has a transition rule with a mismatched variable type: " + T.VariableName.ToString(), true);
+								NodeTitleForDisplay(Node) + " has a property-based transition rule without a selected variable.", true);
 						}
-					}
-					if (T.RuleKind == ETransitionRuleKind::AlwaysTrue)
-					{
-						AddValidationMessage(LastValidationMessages, bLastValidationOk,
-							NodeTitleForDisplay(Node) + " has an explicit Always True transition rule.", false);
+						else if (bPropertyRule && !IsVariableResolvable(Asset, OwnerCls, R.VariableName))
+						{
+							AddValidationMessage(LastValidationMessages, bLastValidationOk,
+								NodeTitleForDisplay(Node) + " has a transition rule referencing an unknown variable: " + R.VariableName.ToString(), true);
+						}
+						else if (bPropertyRule)
+						{
+							EAnimGraphPinType VarType = EAnimGraphPinType::Float;
+							if (TryResolveVariableType(Asset, OwnerCls, R.VariableName, VarType) && !VariableTypeMatchesRule(R.RuleKind, VarType))
+							{
+								AddValidationMessage(LastValidationMessages, bLastValidationOk,
+									NodeTitleForDisplay(Node) + " has a transition rule with a mismatched variable type: " + R.VariableName.ToString(), true);
+							}
+						}
+						if (R.RuleKind == ETransitionRuleKind::AlwaysTrue)
+						{
+							AddValidationMessage(LastValidationMessages, bLastValidationOk,
+								NodeTitleForDisplay(Node) + " has an explicit Always True transition rule.", false);
+						}
 					}
 				}
 				break;
@@ -3876,7 +3857,8 @@ void FAnimGraphEditorWidget::RenderTransitionRuleEditor(UAnimGraphAsset& Asset, 
 	RuleProxy.Type = EAnimGraphNodeType::VariableGet;
 	ed::BeginNode(ToNodeId(RuleNodeId));
 	{
-		DrawNodeHeaderBlock(RuleProxy, 270.0f, 44.0f, FormatTransitionRuleNodeTitle(T), TransitionRuleKindLabel(T.RuleKind));
+		DrawNodeHeaderBlock(RuleProxy, 270.0f, 44.0f, FormatTransitionRuleNodeTitle(T),
+			T.Rules.size() == 1 ? TransitionRuleKindLabel(T.Rules[0].RuleKind) : "AND rules");
 		ImGui::Dummy(ImVec2(270.0f, 4.0f));
 		TextClippedWithTooltip(FormatTransitionSummary(T), 258.0f);
 		ed::BeginPin(ToPinId(RuleOutPinId), ed::PinKind::Output);
@@ -3996,8 +3978,8 @@ void FAnimGraphEditorWidget::RenderStateMachineEditor(UAnimGraphAsset& Asset, FA
 			FAnimGraphTransition T;
 			T.FromStateName = StateMachineNode.States[i].StateName;
 			T.ToStateName   = StateMachineNode.States[i + 1].StateName;
-			T.RuleKind      = ETransitionRuleKind::AlwaysFalse;
 			T.BlendTime     = 0.2f;
+			// Rules 를 비워 둔다(= 전환 안 함). 사용자가 규칙을 추가해 활성화한다.
 			StateMachineNode.Transitions.push_back(T);
 		}
 		Asset.BumpVersion();
@@ -4277,8 +4259,7 @@ void FAnimGraphEditorWidget::RenderStateMachineEditor(UAnimGraphAsset& Asset, FA
 							FAnimGraphTransition NewT;
 							NewT.FromStateName = FName::None;
 							NewT.ToStateName   = StateMachineNode.States[ToStateIdx].StateName;
-							NewT.RuleKind      = ETransitionRuleKind::AlwaysFalse;
-							NewT.BlendTime     = 0.2f;
+							NewT.BlendTime     = 0.2f; // Rules 비어 있음(= 전환 안 함) — 사용자가 규칙 추가
 							if (AddTransitionIfMissing(StateMachineNode, NewT))
 							{
 								Asset.BumpVersion();
@@ -4292,8 +4273,7 @@ void FAnimGraphEditorWidget::RenderStateMachineEditor(UAnimGraphAsset& Asset, FA
 							FAnimGraphTransition NewT;
 							NewT.FromStateName = StateMachineNode.States[FromStateIdx].StateName;
 							NewT.ToStateName   = StateMachineNode.States[ToStateIdx].StateName;
-							NewT.RuleKind      = ETransitionRuleKind::AlwaysFalse;
-							NewT.BlendTime     = 0.2f;
+							NewT.BlendTime     = 0.2f; // Rules 비어 있음(= 전환 안 함) — 사용자가 규칙 추가
 							bool bAdded = AddTransitionIfMissing(StateMachineNode, NewT);
 							if (bAdded && (bCreateReverseTransitionOnDrag || ImGui::GetIO().KeyShift))
 							{
@@ -4339,8 +4319,7 @@ void FAnimGraphEditorWidget::RenderStateMachineEditor(UAnimGraphAsset& Asset, FA
 					FAnimGraphTransition T;
 					T.FromStateName = bFromAny ? FName::None : StateMachineNode.States[FromStateIdx].StateName;
 					T.ToStateName   = NewStateName;
-					T.RuleKind      = ETransitionRuleKind::AlwaysFalse;
-					T.BlendTime     = 0.2f;
+					T.BlendTime     = 0.2f; // Rules 비어 있음(= 전환 안 함) — 사용자가 규칙 추가
 					const bool bAdded = AddTransitionIfMissing(StateMachineNode, T);
 					if (bAdded && bFromState && (bCreateReverseTransitionOnDrag || ImGui::GetIO().KeyShift))
 					{

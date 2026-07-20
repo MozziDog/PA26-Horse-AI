@@ -1,4 +1,4 @@
-#include "AnimGraphAsset.h"
+﻿#include "AnimGraphAsset.h"
 
 #include "Animation/Sequence/AnimSequenceBase.h"
 #include "Object/GarbageCollection.h"
@@ -23,15 +23,21 @@
 // 보다 우선 선택하여 element-wise 경로 강제. FAnimGraphNode/FAnimGraphState 는 nested TArray /
 // FString 보유로 자연스럽게 non-trivially-copyable → 영향 없음.
 
-FArchive& operator<<(FArchive& Ar, FAnimGraphPin&        Pin);
-FArchive& operator<<(FArchive& Ar, FAnimGraphTransition& T);
-FArchive& operator<<(FArchive& Ar, FAnimGraphVariable&   Var);
-FArchive& operator<<(FArchive& Ar, FBlendSample&         Sample);
+FArchive& operator<<(FArchive& Ar, FAnimGraphPin&            Pin);
+FArchive& operator<<(FArchive& Ar, FAnimGraphTransitionRule& R);
+FArchive& operator<<(FArchive& Ar, FAnimGraphTransition&     T);
+FArchive& operator<<(FArchive& Ar, FAnimGraphVariable&       Var);
+FArchive& operator<<(FArchive& Ar, FBlendSample&             Sample);
 
 namespace
 {
 	constexpr uint32 kAnimGraphAssetMagic   = 0x46475241u; // 'AGRF' - Anim Graph File
-	constexpr uint32 kAnimGraphAssetVersion = 5u;          // v5 adds StateMachine editor node positions (state/entry/anystate). v4 adds BlendSpace node samples + axis ranges. v3 adds AnimGraph-owned variables.
+
+	// v3 adds AnimGraph-owned variables.
+	// v4 adds BlendSpace node samples + axis ranges. 
+	// v5 adds StateMachine editor node positions (state/entry/anystate). 
+	// v6 replaces a transition's single inline rule with an AND-combined FAnimGraphTransitionRule array. 
+	constexpr uint32 kAnimGraphAssetVersion = 6u;          
 	thread_local bool g_LoadLegacyTransitionFormat = false;
 
 	// 로드 중인 자산의 버전 — FAnimGraphNode::operator<< 가 신규(v4) 필드 존재 여부를 판단하는 데 사용.
@@ -74,6 +80,17 @@ inline FArchive& operator<<(FArchive& Ar, TArray<FAnimGraphPin>& Array)
 }
 
 inline FArchive& operator<<(FArchive& Ar, TArray<FAnimGraphTransition>& Array)
+{
+	uint32 N = static_cast<uint32>(Array.size());
+	Ar << N;
+	if (Ar.IsLoading()) Array.resize(N);
+	for (auto& Item : Array) Ar << Item;
+	return Ar;
+}
+
+// FAnimGraphTransitionRule 도 멤버가 모두 trivially_copyable(enum/FName/enum/float)이라서
+// FAnimGraphTransition 같이 raw-memcpy 문제 발생 가능 → 명시적 overload 로 고정.
+inline FArchive& operator<<(FArchive& Ar, TArray<FAnimGraphTransitionRule>& Array)
 {
 	uint32 N = static_cast<uint32>(Array.size());
 	Ar << N;
@@ -157,22 +174,46 @@ FArchive& operator<<(FArchive& Ar, FAnimGraphState& State)
 	return Ar;
 }
 
+FArchive& operator<<(FArchive& Ar, FAnimGraphTransitionRule& R)
+{
+	Ar << R.RuleKind;
+	Ar << R.VariableName;
+	Ar << R.Op;
+	Ar << R.Threshold;
+	return Ar;
+}
+
 FArchive& operator<<(FArchive& Ar, FAnimGraphTransition& T)
 {
 	Ar << T.FromStateName;
 	Ar << T.ToStateName;
-	Ar << T.VariableName;
-	Ar << T.Op;
-	Ar << T.Threshold;
-	Ar << T.BlendTime;
-	if (Ar.IsLoading() && g_LoadLegacyTransitionFormat)
+
+	if (Ar.IsLoading() && g_AnimGraphLoadVersion < 6)
 	{
-		// v1 assets stored only Variable/Op/Threshold/Blend. Preserve the old compare-based behavior.
-		T.RuleKind = ETransitionRuleKind::FloatCompare;
+		// 구버전(~v5) 마이그레이션
+		// transition 당 단일 규칙 -> Rules[0]으로 매핑
+		FAnimGraphTransitionRule R;
+		Ar << R.VariableName;
+		Ar << R.Op;
+		Ar << R.Threshold;
+		Ar << T.BlendTime;
+		if (g_LoadLegacyTransitionFormat)
+		{
+			// v1 assets stored only Variable/Op/Threshold/Blend. Preserve the old compare-based behavior.
+			R.RuleKind = ETransitionRuleKind::FloatCompare;
+		}
+		else
+		{
+			Ar << R.RuleKind;
+		}
+		T.Rules.clear();
+		T.Rules.push_back(R);
 	}
 	else
 	{
-		Ar << T.RuleKind;
+		// v6+ : BlendTime + AND 로 결합되는 규칙 배열.
+		Ar << T.BlendTime;
+		Ar << T.Rules;
 	}
 	return Ar;
 }
@@ -195,20 +236,15 @@ FArchive& operator<<(FArchive& Ar, FAnimGraphNode& Node)
 	Ar << Node.States;
 	Ar << Node.Transitions;
 	Ar << Node.InitialStateName;
-
-	// v4+ : BlendSpace 노드 샘플 + 축 범위. 구버전(로드) 자산에는 없으므로 스킵하고 기본값 유지.
-	// 저장 시 g_AnimGraphLoadVersion == 최신 → 항상 기록.
-	if (!Ar.IsLoading() || g_AnimGraphLoadVersion >= 4)
-	{
-		Ar << Node.BlendSamples;
-		Ar << Node.AxisMinX;
-		Ar << Node.AxisMaxX;
-		Ar << Node.AxisMinY;
-		Ar << Node.AxisMaxY;
-	}
-
-	// v5+ : StateMachine 내부 에디터의 Entry / Any State pseudo 노드 위치. 구버전 자산엔 없으므로
-	// 스킵 → bStateMachineEditorPosValid=false 유지 → 다음 오픈 시 기본 위치로 초기화.
+	// NOTE: BlendSpace 관련 필드는 v3 이하에는 없는 필드지만 
+	//       현재로썬 해당되는 에셋이 없으므로 따로 마이그레이션하지 않음.
+	Ar << Node.BlendSamples;
+	Ar << Node.AxisMinX;
+	Ar << Node.AxisMaxX;
+	Ar << Node.AxisMinY;
+	Ar << Node.AxisMaxY;
+	// NOTE: StateMachine 내부의 노드 위치 관련 필드는 v4 이하에는 없는 필드지만
+	//       현재로썬 해당되는 에셋이 없으므로 따로 마이그레이션하지 않음.
 	if (!Ar.IsLoading() || g_AnimGraphLoadVersion >= 5)
 	{
 		Ar << Node.EntryPosX;
@@ -258,7 +294,10 @@ bool UAnimGraphAsset::RemoveVariable(const FName& Name)
 		if (Node.VariableName == Name) Node.VariableName = FName::None;
 		for (FAnimGraphTransition& T : Node.Transitions)
 		{
-			if (T.VariableName == Name) T.VariableName = FName::None;
+			for (FAnimGraphTransitionRule& R : T.Rules)
+			{
+				if (R.VariableName == Name) R.VariableName = FName::None;
+			}
 		}
 	}
 	BumpVersion();
@@ -279,7 +318,10 @@ bool UAnimGraphAsset::RenameVariable(const FName& OldName, const FName& NewName)
 		if (Node.VariableName == OldName) Node.VariableName = NewName;
 		for (FAnimGraphTransition& T : Node.Transitions)
 		{
-			if (T.VariableName == OldName) T.VariableName = NewName;
+			for (FAnimGraphTransitionRule& R : T.Rules)
+			{
+				if (R.VariableName == OldName) R.VariableName = NewName;
+			}
 		}
 	}
 	BumpVersion();
