@@ -145,10 +145,6 @@ protected:
 	// PendingRootMotion 이 identity 라도 "이번 frame 에 root motion 이 있었다" 와 구분 필요해 bool 별도.
 	FTransform    PendingRootMotion;
 	bool          bHasPendingRootMotion = false;
-	// Continuous root-motion translation is evaluated against the actor basis captured at
-	// segment start, while root-motion rotation is applied separately to the capsule.
-	FQuat         RootMotionTranslationBasis = FQuat::Identity;
-	bool          bHasRootMotionTranslationBasis = false;
 
 	// 직전 TickComponent 에서 root motion 회전이 실제 적용됐는지 (외부 query 용).
 	// 매 Tick 시작에 reset 후 root motion rotation 적용 시 true.

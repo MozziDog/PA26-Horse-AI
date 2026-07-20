@@ -232,24 +232,18 @@ void UCharacterMovementComponent::TickComponent(float DeltaTime, ELevelTick Tick
 		}
 	}
 
-	// 2) Root motion 소비 — extracted translation is already authored in the sequence's
-	//    root-track frame. Keep one world-space basis for a continuous root-motion segment;
-	//    otherwise the root rotation applied to the capsule re-rotates later translation deltas.
+	// 2) Root motion 소비 — 생산자(UAnimSequence::ExtractRootMotion)가 basis 를 소유하는 통일 계약.
+	//    delta.Location 은 이미 "모션의 고유 회전량"만큼 역보정되어 있으므로, 소비 측에서는 매 프레임
+	//    "현재 월드 회전"을 곱하기만 하면 이중 회전 없이 애니메이션의 경로를 재현 가능
+	//    회전은 아래 (4) 에서 처리 (Post-Multiply)
 	FTransform RootMotionDelta;
 	const bool bHadRootMotion = ConsumePendingRootMotion(RootMotionDelta);
 	FVector RootMotionWorldDelta(0.0f, 0.0f, 0.0f);
 	if (bHadRootMotion)
 	{
-		if (!bHasRootMotionTranslationBasis)
-		{
-			RootMotionTranslationBasis = Updated->GetWorldRotation().ToQuaternion().GetNormalized();
-			bHasRootMotionTranslationBasis = true;
-		}
-		RootMotionWorldDelta = RootMotionTranslationBasis.RotateVector(RootMotionDelta.Location);
-	}
-	else
-	{
-		bHasRootMotionTranslationBasis = false;
+		// Root motion의 이동은 회전보다 먼저 처리, 현재의 WorldRotation을 사용하여 이동방향 계산
+		const FQuat Basis = Updated->GetWorldRotation().ToQuaternion().GetNormalized();
+		RootMotionWorldDelta = Basis.RotateVector(RootMotionDelta.Location);
 	}
 
 	const FVector DashWorldXY = ConsumeDashOffset(DeltaTime);
