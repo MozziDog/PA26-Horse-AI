@@ -39,6 +39,9 @@ private:
 	UPROPERTY(Edit, Save, Category="AI|Sensor", DisplayName="Jump Probe Up", Min=0.0f, Max=3.0f, Speed=0.02f)
 	float JumpProbeUp = 1.0f;     // m — center 방향을 이만큼 올려 쏨. 그 위가 뚫려 있으면 장애물 윗변이 아래 → 점프 가능.
 
+	UPROPERTY(Edit, Save, Category = "AI|Sensor", DisplayName = "Jump Probe Down", Min = 0.0f, Max = 3.0f, Speed = 0.02f)
+	float JumpProbeDown = 1.0f;     // m — center 방향을 이만큼 올려 쏨. 그 위가 뚫려 있으면 장애물 윗변이 아래 → 점프 가능.
+
 	UPROPERTY(Edit, Save, Category="AI|Sensor", DisplayName="Draw Debug")
 	bool  bDrawDebug = true;
 

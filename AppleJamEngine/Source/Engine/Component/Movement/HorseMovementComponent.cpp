@@ -153,6 +153,15 @@ void UHorseMovementComponent::ConsumeRootMotion(FVector& OutWorldDelta)
 void UHorseMovementComponent::TickGrounded(float DeltaTime, const FVector& WorldDelta)
 {
 	USceneComponent* Updated = GetUpdatedComponent();
+
+	// 점프 요청 소비 — 접지 상태인 이 frame 에서만 launch 한다. Jump() 는 async(notify) 로 호출될 수
+	// 있어 flag 만 세우고, 실제 물리 전환은 여기서 결정론적으로 처리한다(CMC 의 bWantsJump 패턴).
+	if (bWantJump)
+	{
+		PerformJump();
+		return;   // 이 frame 의 XY root motion 은 버린다(1 frame). 다음 tick 부터 TickFalling.
+	}
+
 	Velocity.Z = 0.0f;
 
 	FVector Loc = Updated->GetWorldLocation();
@@ -160,9 +169,8 @@ void UHorseMovementComponent::TickGrounded(float DeltaTime, const FVector& World
 	const FVector DeltaXY = ResolveTorsoCollision(Loc, FVector(WorldDelta.X, WorldDelta.Y, 0.0f));
 	Loc.X += DeltaXY.X;
 	Loc.Y += DeltaXY.Y;
-	// Root motion Z 소비 — 지면 스냅이 step 범위 내 최종 Z 를 소유하므로 보행 bob 은 스냅에
-	// 흡수되고, 점프 클립처럼 스냅 범위를 벗어나는 상승만 모드 전환(낙하 판정)으로 이어진다.
-	Loc.Z += WorldDelta.Z;
+	// NOTE: Root motion Z는 버림. 
+	// 걷는 중의 Bobbing 등은 루트 모션이 아닌 애니메이션으로 처리하고 점프는 PerformJump()에서 직접 처리
 
 	// 수평 속도 리포팅/관성 — root motion 이 만든 실제 이동에서 역산(이륙 시 momentum 으로 넘어감).
 	Velocity.X = DeltaXY.X / DeltaTime;
@@ -170,7 +178,7 @@ void UHorseMovementComponent::TickGrounded(float DeltaTime, const FVector& World
 
 	// 지면 raycast 는 몸통 box 중심(root)에서 아래로. snap 시 root=지면+StandHeight(발이 지면 접점).
 	FHitResult Ground;
-	if (TraceGround(Loc, Ground))
+	if (!bJumpActive && TraceGround(Loc, Ground))
 	{
 		const float TargetZ = Ground.WorldHitLocation.Z + StandHeight;
 		if (Loc.Z - TargetZ <= GroundSnapMaxStep)
@@ -181,7 +189,8 @@ void UHorseMovementComponent::TickGrounded(float DeltaTime, const FVector& World
 			// 경사가 급하면 보행 불가 → 미끄러짐 진입(다음 tick 부터 TickSliding).
 			if (GroundNormal(Ground).Z < WalkableSlopeZ)
 			{
-				MoveMode = EHorseMoveMode::Sliding;
+				MoveMode       = EHorseMoveMode::Sliding;
+				bJumpRequested = false;   // wind-up 중 미끄러짐 진입 → 점프 요청 취소.
 			}
 			return;
 		}
@@ -190,8 +199,9 @@ void UHorseMovementComponent::TickGrounded(float DeltaTime, const FVector& World
 
 	// 지면 없음(또는 너무 아래) → 낙하 시작. XY 는 진행시키되 Z 는 유지하고 mode 전환.
 	Updated->SetWorldLocation(Loc);
-	MoveMode = EHorseMoveMode::Falling;
-	AirTime  = 0.0f;   // walk-off 낙하: bJumpActive 는 false 유지(점프 애니 아님).
+	MoveMode       = EHorseMoveMode::Falling;
+	AirTime        = 0.0f;      // walk-off 낙하: bJumpActive 는 false 유지(점프 애니 아님).
+	bJumpRequested = false;     // wind-up 중 발밑 지면이 사라짐 → 점프 요청 취소.
 }
 
 void UHorseMovementComponent::TickFalling(float DeltaTime)
@@ -278,16 +288,42 @@ void UHorseMovementComponent::TickSliding(float DeltaTime)
 	}
 }
 
-void UHorseMovementComponent::Jump()
+void UHorseMovementComponent::StartJump()
 {
 	if (MoveMode != EHorseMoveMode::Grounded)
 	{
 		return;   // 공중/미끄러짐 중엔 재점프 불가.
 	}
-	Velocity.Z  = JumpSpeed;
-	MoveMode    = EHorseMoveMode::Falling;
-	bJumpActive = true;   // 의도적 점프 — 착지까지 bJump 유지(walk-off 와 구분).
-	AirTime     = 0.0f;
+	// 점프 애니 시작만 요청(bJump anim 변수). 물리 이륙은 애니 takeoff 의 NotifyJumpTakeoff() 가 건다.
+	// 접지 상태에서 매 frame 호출돼도 idempotent — 이미 요청/공중이면 아래에서 걸러진다.
+	bJumpRequested = true;
+}
+
+void UHorseMovementComponent::OnJumpNotify()
+{
+	if (MoveMode != EHorseMoveMode::Grounded)
+	{
+		return;   // Grounded에서만 점프 가능
+	}
+	bWantJump = true;
+}
+
+void UHorseMovementComponent::PerformJump()
+{
+	bWantJump      = false;
+	bJumpRequested = false;                       // bJump anim pulse 종료 — 클립은 이미 진입, auto-exit 로 1회만 재생.
+	Velocity.Z     = JumpSpeed;                   // 상향 임펄스. 없으면 즉시 착지 판정되어 지면을 못 벗어난다.
+	MoveMode       = EHorseMoveMode::Falling;      // 점프 즉시 Falling 전환.
+	bJumpActive    = true;                         // 의도적 점프 표식 — 착지까지 유지(walk-off 낙하와 구분·착지 리셋용). anim 은 구동 안 함.
+	AirTime        = 0.0f;
+
+	// 접지 frame 에서 곧바로 낙하 tick 을 돌리면 root box 가 아직 지면 접점에 있어 착지로 오인될 수
+	// 있다. TickFalling 이 상승 중(Velocity.Z>0) 지면 체크를 건너뛰긴 하지만, 방어적으로 살짝 띄운다.
+	if (USceneComponent* Updated = GetUpdatedComponent())
+	{
+		const float Lift = std::clamp(GroundSnapMaxStep * 0.1f, 0.02f, 0.05f);
+		Updated->SetWorldLocation(Updated->GetWorldLocation() + FVector(0.0f, 0.0f, Lift));
+	}
 }
 
 void UHorseMovementComponent::Brake()
@@ -358,7 +394,11 @@ void UHorseMovementComponent::PushAnimGraphVariables()
 	Graph->SetGraphVariableFloat(FName("InclineAngle"),    bGrounded ? InclineAngle : 0.0f);
 	Graph->SetGraphVariableFloat(FName("AirTime"),         AirTime);
 	Graph->SetGraphVariableBool(FName("bBrake"),           bBrakeRequested);
-	Graph->SetGraphVariableBool(FName("bJump"),            bJumpActive);
+	// bJump 은 점프 애니 진입 pulse — bJumpRequested 만(공중 내내 유지되는 bJumpActive 는 넣지 않는다).
+	// 점프 스테이트 exit 가 Automatic Sequence End 라, bJump 을 공중 동안 true 로 물고 있으면 클립이
+	// 끝나 자동 exit 된 직후 진입 전환(bJump==true)이 다시 걸려 무한 재진입한다. takeoff(PerformJump)
+	// 에서 bJumpRequested 가 꺼지므로 bJump 은 클립 도중 false 로 떨어지고 클립은 1회만 재생된다.
+	Graph->SetGraphVariableBool(FName("bJump"),            bJumpRequested);
 }
 
 FVector UHorseMovementComponent::GetGravity() const

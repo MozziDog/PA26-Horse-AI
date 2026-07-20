@@ -64,10 +64,14 @@ public:
 	UFUNCTION(Pure, Category="HorseMovement")
 	bool    CanAccelerate() const { return MoveMode != EHorseMoveMode::Falling; }
 
-	// 점프 — 접지 상태에서만 수직 임펄스(JumpSpeed)를 주고 Falling 으로 전환. Locomotion 이 장애물
-	// 회피 게이트에서 트리거한다. bJump/AirTime AnimGraph 변수도 여기서 시작된다.
+	// 점프 시작 요청
+	// 도움닫기 + 점프 애니메이션을 시작한다. 실제 이륙은 AnimNotify_HorseJump → NotifyJumpTakeoff() 가 담당
 	UFUNCTION(Callable, Category="HorseMovement")
-	void    Jump();
+	void    StartJump();
+	// AnimNotify_HorseJump에 의해 콜백으로 호출
+	// bWantJump를 통해 간접적으로 점프하므로 중복 호출도 문제 없음
+	UFUNCTION(Callable, Category="HorseMovement")
+	void    OnJumpNotify();
 	// 급정지 요청 — 이 frame bBrake AnimGraph 변수를 켜고 목표 NormalizedSpeed 를 0 으로 끌어내린다.
 	// Locomotion 이 막다른 벽 등에서 매 frame 호출한다(무입력만으로도 자연 감속은 됨).
 	UFUNCTION(Callable, Category="HorseMovement")
@@ -120,6 +124,10 @@ protected:
 	void TickSliding(float DeltaTime);
 	void TickFalling(float DeltaTime);
 
+	// bWantJump 소비 — 상향 임펄스(JumpSpeed) + 즉시 Falling 전환 + 착지 오인 방지용 살짝 띄우기.
+	// TickGrounded 가 접지 frame 에서만 호출한다(CharacterMovementComponent 의 launch 패턴).
+	void PerformJump();
+
 	// FromLoc 에서 DeltaXY 만큼 몸통 box 를 sweep. 벽/급경사면에 막히면 히트 지점(skin 여유)까지로 줄인다.
 	FVector ResolveTorsoCollision(const FVector& FromLoc, const FVector& DeltaXY);
 
@@ -139,7 +147,10 @@ protected:
 	float TurnRate        = 0.0f;   // 이번 프레임에서의 초당 선회각
 	float InclineAngle    = 0.0f;   // 이징된 경사([-1,1])
 	float AirTime         = 0.0f;   // 공중 체류 시간(초)
-	bool  bJumpActive     = false;  // 의도적 점프로 공중에 있는 동안 true
+	UPROPERTY(Edit, ReadOnly, Category="Debug")	// 디버그
+	bool  bJumpActive     = false;  // 점프로 [이륙~착지] 동안 true. 비자발적 낙하와 구분 & 착지 리셋용
+	bool  bJumpRequested  = false;  // 점프 애니메이션 요청. 'bJump' AnimInstance parameter와 동기화됨
+	bool  bWantJump       = false;  // NotifyJumpTakeoff()에서 플래그 설정, TickGrounded()에서 소비, 점프.
 	bool  bBrakeRequested = false;  // 이 frame Brake() 호출됨(tick 끝에서 소비 후 클리어)
 
 	TWeakObjectPtr<USkeletalMeshComponent> Mesh = nullptr;

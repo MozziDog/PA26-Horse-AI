@@ -77,8 +77,9 @@ void UObstacleFanSensorComponent::TickComponent(float DeltaTime, ELevelTick Tick
 	}
 
 	// ── 점프 가능 판정 ── 
+	const FVector LowOrigin = Origin - FVector(0.0f, 0.0f, JumpProbeDown);
 	FHitResult LowHit;
-	Physics->Raycast(Origin, Forward, ProbeRange, LowHit, ECollisionChannel::WorldStatic, Owner);   // 자기 몸통 box 제외.
+	Physics->Raycast(LowOrigin, Forward, ProbeRange, LowHit, ECollisionChannel::WorldStatic, Owner);   // 자기 몸통 box 제외.
 	const float LowClear = LowHit.bHit ? LowHit.Distance : ProbeRange;
 
 	const FVector HighOrigin = Origin + FVector(0.0f, 0.0f, JumpProbeUp);

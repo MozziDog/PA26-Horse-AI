@@ -119,14 +119,26 @@ void UHorseLocomotionComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 	}
 
 	// ── 점프 게이트 ── 정면 장애물이 점프 가능(ObsJumpable)하고 트리거 거리 안이면 도약(heading 유지).
+	// 이미 bJumpPerformed인 경우에는 다시 점프 안함. (제자리 혹은 점프 후 연속 점프 방지)
 	if (BB)
 	{
 		bool  bJumpable = false;
 		float FwdDist   = 0.0f;
-		if (BB->TryGetBool(HorseBBKeys::ObsJumpable, bJumpable) && bJumpable
-			&& BB->TryGetFloat(HorseBBKeys::ObsFwdDist, FwdDist) && FwdDist < JumpTriggerDist)
+		const bool bGateActive =
+			BB->TryGetBool(HorseBBKeys::ObsJumpable, bJumpable) && bJumpable
+			&& BB->TryGetFloat(HorseBBKeys::ObsFwdDist, FwdDist) && FwdDist < JumpTriggerDist;
+
+		if (!Movement->IsFalling())   // Falling 상태에서는 점프 불가
 		{
-			Movement->Jump();
+			if (bGateActive && !bJumpPerformed)
+			{
+				Movement->StartJump();
+				bJumpPerformed = true;   // 이번 접근에 대한 점프 소진
+			}
+			else if (!bGateActive)
+			{
+				bJumpPerformed = false;  // 장애물 벗어남 → 다음 장애물 상황을 위해 리셋
+			}
 		}
 	}
 

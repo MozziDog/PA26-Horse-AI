@@ -245,6 +245,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClCompile Include="Source\Editor\Viewport\Asset\MeshEditorViewportClient.cpp" />
     <ClCompile Include="Source\Editor\Viewport\Asset\StaticMeshEditorViewportClient.cpp" />
     <ClCompile Include="Source\Editor\Viewport\Level\FLevelViewportLayout.cpp" />
+    <ClCompile Include="Source\Engine\Animation\Notify\AnimNotify_HorseJump.cpp" />
     <ClCompile Include="Source\Engine\pch.cpp">
       <PrecompiledHeader>Create</PrecompiledHeader>
     </ClCompile>
@@ -793,6 +794,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClInclude Include="Source\Editor\Viewport\Asset\StaticMeshEditorViewportClient.h" />
     <ClInclude Include="Source\Editor\Viewport\Level\FLevelViewportLayout.h" />
     <ClInclude Include="Source\Editor\Viewport\Level\LevelEditorViewportClient.h" />
+    <ClInclude Include="Source\Engine\Animation\Notify\AnimNotify_HorseJump.h" />
     <ClInclude Include="Source\Engine\pch.h" />
     <ClInclude Include="Source\Engine\AI\Blackboard.h" />
     <ClInclude Include="Source\Engine\AI\HorseBlackboardKeys.h" />

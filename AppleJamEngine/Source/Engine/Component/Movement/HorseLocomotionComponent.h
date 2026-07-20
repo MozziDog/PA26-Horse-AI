@@ -127,4 +127,5 @@ protected:
 	FVector    SteerDir      = FVector(0.0f, 0.0f, 0.0f);   // 직전 프레임에 선택한 회피 heading(커밋 히스테리시스용). 0=미초기화.
 	float      PrevDanger[MaxFanSlots] = {};   // slot 별 직전 프레임 danger(slow-release 감쇠용).
 	float      SteerAngle    = 0.0f;   // 현재 조향각(forward 기준 deg). 목표각으로 slew 되는 상태값.
+	bool       bJumpPerformed = false;   // 이번 점프 요청에 실제로 점프했는지 여부 (무한 점프 방지)
 };
