@@ -1,4 +1,4 @@
-#include "AssetRegistry.h"
+﻿#include "AssetRegistry.h"
 #include "Mesh/MeshManager.h"
 #include "Mesh/Skeletal/SkeletalMesh.h"
 #include "Animation/AnimationManager.h"
@@ -63,6 +63,12 @@ namespace FAssetRegistry
 			// 콤보 열 때마다 재스캔 — 방금 ContentBrowser 에서 만든 자산이 즉시 노출되도록.
 			FAnimGraphManager::Get().RefreshAvailableGraphs();
 			return FAnimGraphManager::Get().GetAvailableGraphFiles();
+		}
+		if (std::strcmp(AssetTypeName, "UAnimMontage") == 0 || std::strcmp(AssetTypeName, "AnimMontage") == 0)
+		{
+			// 콤보 열 때마다 재스캔 — 방금 만든 몽타주가 즉시 노출되도록.
+			FAnimationManager::Get().RefreshAvailableMontages();
+			return FAnimationManager::Get().GetAvailableMontageFiles();
 		}
         if (std::strcmp(AssetTypeName, "UParticleSystem") == 0
             || std::strcmp(AssetTypeName, "ParticleSystem") == 0
