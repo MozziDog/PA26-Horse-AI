@@ -29,7 +29,6 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
-#include "GameFramework/ProjectilePoolSubSystem.h"
 
 using namespace physx;
 

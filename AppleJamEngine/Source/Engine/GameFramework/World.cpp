@@ -14,9 +14,6 @@
 #include <memory>
 #include "GameFramework/GameMode/PlayerController.h"
 #include "GameFramework/Camera/PlayerCameraManager.h"
-#include "GameFramework/ProjectilePoolSubSystem.h"
-#include "Actor/ProjectileActor.h"
-#include "Actor/ArrowProjectileActor.h"
 #include "Object/Reflection/UClass.h"
 #include "Profiling/Stats/Stats.h"
 #include "Profiling/Time/Timer.h"
@@ -81,7 +78,6 @@ void UWorld::RouteWorldDestroyed()
 
 	bWorldDestroyRouted = true;
 	EndPlay();
-	ShutdownProjectilePool();         // ▼ 추가(방어적): 멱등이므로 EndPlay 를 우회한 경로도 
 	PhysicsSnapshotReceivers.clear();
 	bHasRoutedPostBeginPlay = false;
 	bHasRoutedPostStartMatch = false;
@@ -561,14 +557,6 @@ void UWorld::InitWorld()
 	// 물리 시스템 초기화
 	PhysicsScene = std::make_unique<FPhysXPhysicsScene>();
 	PhysicsScene->Initialize(this);
-
-	ProjectilePool = std::make_unique<FProjectilePoolSubsystem>();
-	ProjectilePool->Initialize(this);
-	// 참고: 실제 Prewarm 은 GameMode/게임 셋업 코드에서 호출 (아래 G 참조).
-//       UWorld::BeginPlay() 이전에 Prewarm 하면 SpawnActor 가 즉시 BeginPlay 를
-//       트리거하지 않고, 월드 BeginPlay 에서 컴포넌트까지 일괄 BeginPlay 된다.
-	//ProjectilePool->Prewarm<AProjectileActor>(64);
-
 }
 
 void UWorld::BeginPlay()
@@ -582,9 +570,6 @@ void UWorld::BeginPlay()
 		AActor* Spawned = SpawnActorByClass(GameModeClass);
 		GameMode.Reset(Cast<AGameModeBase>(Spawned));
 	}
-	// test를 위해서 editor 관리를 위해 initworld에서 prewarm
-	ProjectilePool->Prewarm<AProjectileActor>(64);
-	ProjectilePool->Prewarm<AArrowProjectileActor>(1);
 	if (PersistentLevel)
 	{
 		PersistentLevel->BeginPlay();
@@ -797,20 +782,8 @@ void UWorld::EndPlay()
 	Partition.Reset(FBoundingBox());
 	MarkWorldPrimitivePickingBVHDirty();
 
-	ShutdownProjectilePool();         // ▼ 추가: 풀 액터 정리 (물리 씬보다 먼저 → 물리 해제 깔끔)
 	PhysicsSnapshotReceivers.clear();
 	ShutdownPhysicsScene();
 	Partition.Reset(FBoundingBox());
 	MarkWorldPrimitivePickingBVHDirty();
-}
-
-
-// ▼ 추가: ShutdownPhysicsScene 과 대칭. 멱등.
-void UWorld::ShutdownProjectilePool()
-{
-	if (ProjectilePool)
-	{
-		ProjectilePool->Shutdown();   // 보관/대여 액터 DestroyActor (PersistentLevel 살아있을 때)
-		ProjectilePool.reset();       // FGCObject 소멸자가 외부 루트 자동 해제
-	}
 }

@@ -1,4 +1,4 @@
-#include "Editor/Subsystem/OverlayStatSystem.h"
+﻿#include "Editor/Subsystem/OverlayStatSystem.h"
 
 #include "Editor/EditorEngine.h"
 #include "Engine/Profiling/Time/Timer.h"
@@ -6,8 +6,6 @@
 #include "Engine/Profiling/Stats/ShadowStats.h"
 #include "Engine/Profiling/Stats/ParticleStats.h"
 #include "Engine/Profiling/Stats/ClothCollisionStats.h"
-#include "Engine/Profiling/Stats/BulletHellStats.h"
-#include "Engine/Component/Gameplay/BossPatternDebug.h"
 #include "Engine/AI/BT/BehaviorTreeDebug.h"
 #include "Engine/Profiling/Stats/Stats.h"
 #include "GameFramework/World.h"
@@ -21,7 +19,7 @@
 #include <cstdio>
 #include <cstring>
 
-// バイト数を適切な単位 (B / KB / MB / GB) に変換して文字列化
+// 바이트 수를 (B / KB / MB / GB)단위로 변환, 문자열화
 static int FormatBytes(char* Buffer, int32 BufferSize, const char* Label, uint64 Bytes)
 {
 	const double B = static_cast<double>(Bytes);
@@ -704,157 +702,6 @@ void FOverlayStatSystem::BuildClothCollisionLines(TArray<FString>& OutLines) con
 #endif
 }
 
-void FOverlayStatSystem::BuildBulletHellLines(TArray<FString>& OutLines) const
-{
-#if STATS
-	char Buffer[192] = {};
-
-	snprintf(Buffer, sizeof(Buffer), "Components : %u   Active Bullets : %u",
-		FBulletHellStats::ComponentCount,
-		FBulletHellStats::ActiveBulletCount);
-	OutLines.push_back(FString(Buffer));
-
-	snprintf(Buffer, sizeof(Buffer), "Lifetime : Spawned %u   Killed %u   Expired %u",
-		FBulletHellStats::TotalSpawned,
-		FBulletHellStats::TotalKilled,
-		FBulletHellStats::TotalExpired);
-	OutLines.push_back(FString(Buffer));
-
-	snprintf(Buffer, sizeof(Buffer), "Collision : Queries %u   Hits %u   Killed %u   EraseKilled %u",
-		FBulletHellStats::CollisionQueryCount,
-		FBulletHellStats::CollisionHitCount,
-		FBulletHellStats::CollisionKilledCount,
-		FBulletHellStats::EraseKilledCount);
-	OutLines.push_back(FString(Buffer));
-
-	snprintf(Buffer, sizeof(Buffer), "Runtime : Mods %u   NonHoming/Homing %u/%u",
-		FBulletHellStats::RuntimeModificationCount,
-		FBulletHellStats::ActiveNonHomingCount,
-		FBulletHellStats::ActiveHomingCount);
-	OutLines.push_back(FString(Buffer));
-
-	snprintf(Buffer, sizeof(Buffer), "Archetype : Primary %u   Secondary %u",
-		FBulletHellStats::ActivePrimaryArchetypeCount,
-		FBulletHellStats::ActiveSecondaryArchetypeCount);
-	OutLines.push_back(FString(Buffer));
-
-	snprintf(Buffer, sizeof(Buffer), "Render : Instances %u   Slots %u   Slot0/1 %u/%u   Mismatch %u",
-		FBulletHellStats::RenderInstanceCount,
-		FBulletHellStats::RendererSlotCount,
-		FBulletHellStats::RendererSlot0InstanceCount,
-		FBulletHellStats::RendererSlot1InstanceCount,
-		FBulletHellStats::RenderMismatchCount);
-	OutLines.push_back(FString(Buffer));
-
-	snprintf(Buffer, sizeof(Buffer), "Trail : Enabled %u   Samples %u   Batches %u   Vtx/Idx %u/%u",
-		FBulletHellStats::TrailEnabledBulletCount,
-		FBulletHellStats::TrailSampleCount,
-		FBulletHellStats::TrailBatchCount,
-		FBulletHellStats::TrailVertexCount,
-		FBulletHellStats::TrailIndexCount);
-	OutLines.push_back(FString(Buffer));
-
-	snprintf(Buffer, sizeof(Buffer), "Trail Budget : Truncated %u   MissingMaterial %u",
-		FBulletHellStats::TrailTruncatedCount,
-		FBulletHellStats::TrailMaterialMissingCount);
-	OutLines.push_back(FString(Buffer));
-
-	snprintf(Buffer, sizeof(Buffer), "Death FX : Components %u   Events %u   Dropped %u",
-		FBulletHellStats::DeathEffectComponentCount,
-		FBulletHellStats::DeathEffectEventCount,
-		FBulletHellStats::DeathEffectDroppedCount);
-	OutLines.push_back(FString(Buffer));
-
-	snprintf(Buffer, sizeof(Buffer), "Death FX Budget : Missing %u   BudgetExceeded %u",
-		FBulletHellStats::DeathEffectMissingAssetCount,
-		FBulletHellStats::DeathEffectBudgetExceededCount);
-	OutLines.push_back(FString(Buffer));
-
-	snprintf(Buffer, sizeof(Buffer), "DebugDraw : Selected %u   Truncated %u",
-		FBulletHellStats::DebugDrawSelectedCount,
-		FBulletHellStats::DebugDrawTruncatedCount);
-	OutLines.push_back(FString(Buffer));
-#else
-	OutLines.push_back(FString("BulletHell stats unavailable (STATS=0)"));
-#endif
-}
-
-void FOverlayStatSystem::BuildBossPatternLines(TArray<FOverlayStatLine>& OutLines) const
-{
-#if STATS
-	const FVector4 HeaderColor(0.90f, 0.94f, 1.0f, 0.95f);
-	const FVector4 ReadyColor(0.35f, 1.0f, 0.45f, 0.95f);
-	const FVector4 ActiveColor(0.35f, 0.62f, 1.0f, 0.98f);
-	const FVector4 BlockedColor(1.0f, 0.30f, 0.28f, 0.95f);
-	const FVector4 MutedColor(0.74f, 0.76f, 0.80f, 0.88f);
-
-	char Buffer[512] = {};
-	snprintf(Buffer, sizeof(Buffer), "Components : %u", FBossPatternDebug::ComponentCount);
-	OutLines.push_back(MakeOverlayLine(FString(Buffer), HeaderColor));
-
-	if (FBossPatternDebug::Snapshots.empty())
-	{
-		OutLines.push_back(MakeOverlayLine("No boss pattern selector snapshot", MutedColor));
-		return;
-	}
-
-	for (const FBossPatternDebugSnapshot& Snapshot : FBossPatternDebug::Snapshots)
-	{
-		snprintf(Buffer, sizeof(Buffer), "Owner : %s   Active : %s   Phase %d   HealthRatio %.2f   Select %d/%d   Total %d   Fallback %d",
-			Snapshot.OwnerName.c_str(),
-			Snapshot.ActivePatternName.c_str(),
-			Snapshot.BossPhase,
-			Snapshot.BossHealthRatio,
-			Snapshot.UsableCandidateCount,
-			Snapshot.CandidateCount,
-			Snapshot.SelectionCount,
-			Snapshot.FallbackCount);
-		OutLines.push_back(MakeOverlayLine(FString(Buffer), HeaderColor));
-
-		if (!Snapshot.bSelectionEnabled)
-		{
-			OutLines.push_back(MakeOverlayLine("Selector disabled or not started", MutedColor));
-		}
-
-		if (!Snapshot.LastRejectedReason.empty() && Snapshot.LastRejectedReason != "None")
-		{
-			snprintf(Buffer, sizeof(Buffer), "LastReject : %s", Snapshot.LastRejectedReason.c_str());
-			OutLines.push_back(MakeOverlayLine(FString(Buffer), MutedColor));
-		}
-
-		for (const FBossPatternDebugEntry& Pattern : Snapshot.Patterns)
-		{
-			const char* StatusText = "BLOCK";
-			FVector4 Color = BlockedColor;
-			if (Pattern.Status == EBossPatternDebugStatus::Active)
-			{
-				StatusText = "ACTIVE";
-				Color = ActiveColor;
-			}
-			else if (Pattern.Status == EBossPatternDebugStatus::Ready)
-			{
-				StatusText = "READY";
-				Color = ReadyColor;
-			}
-
-			const char* DetailText = Pattern.Detail.empty() ? "" : Pattern.Detail.c_str();
-			snprintf(Buffer, sizeof(Buffer), "  [%s] %s  (%.2fs, %s)  W %.1f  Sel %d%s%s",
-				StatusText,
-				Pattern.PatternName.c_str(),
-				Pattern.CooldownRemaining,
-				Pattern.Reason.c_str(),
-				Pattern.Weight,
-				Pattern.SelectionCount,
-				Pattern.Detail.empty() ? "" : "  ",
-				DetailText);
-			OutLines.push_back(MakeOverlayLine(FString(Buffer), Color));
-		}
-	}
-#else
-	OutLines.push_back(MakeOverlayLine("BossPattern stats unavailable (STATS=0)", FVector4(1.0f, 1.0f, 1.0f, 0.95f)));
-#endif
-}
-
 void FOverlayStatSystem::BuildBehaviorTreeLines(TArray<FOverlayStatLine>& OutLines) const
 {
 #if STATS
@@ -964,14 +811,6 @@ void FOverlayStatSystem::BuildLines(const UEditorEngine& Editor, TArray<FOverlay
 	{
 		EstimatedLineCount += 12;
 	}
-	if (bShowBulletHell)
-	{
-		EstimatedLineCount += 7;
-	}
-	if (bShowBossPattern)
-	{
-		EstimatedLineCount += 16;
-	}
 	if (bShowBehaviorTree)
 	{
 		EstimatedLineCount += 24;
@@ -1053,20 +892,6 @@ void FOverlayStatSystem::BuildLines(const UEditorEngine& Editor, TArray<FOverlay
 		Lines.clear();
 		BuildClothCollisionLines(Lines);
 		AppendGroup(Lines);
-	}
-
-	if (bShowBulletHell)
-	{
-		Lines.clear();
-		BuildBulletHellLines(Lines);
-		AppendGroup(Lines);
-	}
-
-	if (bShowBossPattern)
-	{
-		ColoredLines.clear();
-		BuildBossPatternLines(ColoredLines);
-		AppendColoredGroup(ColoredLines);
 	}
 
 	if (bShowBehaviorTree)
@@ -1214,20 +1039,6 @@ void FOverlayStatSystem::RenderImGui(const UEditorEngine& Editor, const FRect& V
 		Lines.clear();
 		BuildClothCollisionLines(Lines);
 		RenderWindow("##StatClothCollisionOverlay", "Stat Cloth Collision", ImVec4(0.08f, 0.06f, 0.04f, 0.62f), MakeDefaultLines(Lines));
-	}
-
-	if (bShowBulletHell)
-	{
-		Lines.clear();
-		BuildBulletHellLines(Lines);
-		RenderWindow("##StatBulletHellOverlay", "Stat BulletHell", ImVec4(0.04f, 0.08f, 0.07f, 0.62f), MakeDefaultLines(Lines));
-	}
-
-	if (bShowBossPattern)
-	{
-		ColoredLines.clear();
-		BuildBossPatternLines(ColoredLines);
-		RenderWindow("##DebugBossPatternOverlay", "Debug BossPattern", ImVec4(0.05f, 0.06f, 0.09f, 0.70f), ColoredLines);
 	}
 
 	if (bShowBehaviorTree)

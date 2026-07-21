@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "Core/Types/CoreTypes.h"
 #include "Math/Vector.h"
@@ -36,8 +36,6 @@ public:
 	void ShowParticles(bool bEnable = true) { bShowParticles = bEnable; }
 	void ShowPhysics(bool bEnable = true) { bShowPhysics = bEnable; }
 	void ShowClothCollision(bool bEnable = true) { bShowClothCollision = bEnable; }
-	void ShowBulletHell(bool bEnable = true) { bShowBulletHell = bEnable; }
-	void ShowBossPattern(bool bEnable = true) { bShowBossPattern = bEnable; }
 	void ShowBehaviorTree(bool bEnable = true) { bShowBehaviorTree = bEnable; }
 	bool ToggleFPS() { bShowFPS = !bShowFPS; return bShowFPS; }
 	bool ToggleMemory() { bShowMemory = !bShowMemory; return bShowMemory; }
@@ -46,8 +44,6 @@ public:
 	bool ToggleParticles() { bShowParticles = !bShowParticles; return bShowParticles; }
 	bool TogglePhysics() { bShowPhysics = !bShowPhysics; return bShowPhysics; }
 	bool ToggleClothCollision() { bShowClothCollision = !bShowClothCollision; return bShowClothCollision; }
-	bool ToggleBulletHell() { bShowBulletHell = !bShowBulletHell; return bShowBulletHell; }
-	bool ToggleBossPattern() { bShowBossPattern = !bShowBossPattern; return bShowBossPattern; }
 	bool ToggleBehaviorTree() { bShowBehaviorTree = !bShowBehaviorTree; return bShowBehaviorTree; }
 	void RecordPickingAttempt(double ElapsedMs);
 	void HideAll()
@@ -60,8 +56,6 @@ public:
 		bShowParticles = false;
 		bShowPhysics = false;
 		bShowClothCollision = false;
-		bShowBulletHell = false;
-		bShowBossPattern = false;
 		bShowBehaviorTree = false;
 	}
 
@@ -82,7 +76,6 @@ private:
 	void BuildPhysicsLines(const UEditorEngine& Editor, TArray<FString>& OutLines) const;
 	void BuildClothCollisionLines(TArray<FString>& OutLines) const;
 	void BuildBulletHellLines(TArray<FString>& OutLines) const;
-	void BuildBossPatternLines(TArray<FOverlayStatLine>& OutLines) const;
 	void BuildBehaviorTreeLines(TArray<FOverlayStatLine>& OutLines) const;
 
 	bool bShowFPS = false;
@@ -93,8 +86,6 @@ private:
 	bool bShowParticles = false;
 	bool bShowPhysics = false;
 	bool bShowClothCollision = false;
-	bool bShowBulletHell = false;
-	bool bShowBossPattern = false;
 	bool bShowBehaviorTree = false;
 	double LastPickingTimeMs = 0.0;
 	double AccumulatedPickingTimeMs = 0.0;

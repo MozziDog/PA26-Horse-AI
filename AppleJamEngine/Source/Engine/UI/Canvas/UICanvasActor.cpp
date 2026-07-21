@@ -1,4 +1,4 @@
-#include "UI/Canvas/UICanvasActor.h"
+﻿#include "UI/Canvas/UICanvasActor.h"
 
 #include "UI/Canvas/UICanvas.h"
 #include "UI/Canvas/UITextElement.h"
@@ -9,9 +9,6 @@
 #include "GameFramework/World.h"
 #include "GameFramework/Pawn/Pawn.h"
 #include "GameFramework/GameMode/PlayerController.h"
-#include "Component/Gameplay/BossPatternSelectorComponent.h"
-#include "Component/Gameplay/BossPatternComponentBase.h"
-#include "Component/Gameplay/PlayerSprayProjectileComponent.h"
 #include "Render/Types/MinimalViewInfo.h"
 #include "Runtime/Engine.h"
 #include "Platform/WindowsWindow.h"
@@ -41,31 +38,6 @@ namespace
 		                0.15f, 1.0f);
 	}
 
-	// [사이클 5] 보스 컴포넌트의 디버그 상태(BossHealthRatio/BossPhase/ActivePatternName). 없으면 nullptr.
-	const FBossPatternDebugState* GetBossState(APawn* Pawn)
-	{
-		if (!Pawn)
-		{
-			return nullptr;
-		}
-		if (UBossPatternSelectorComponent* Boss = Pawn->GetComponentByClass<UBossPatternSelectorComponent>())
-		{
-			return &Boss->GetBossPatternDebugState();
-		}
-		return nullptr;
-	}
-
-	// [사이클 7] 플레이어 스프레이 컴포넌트(UPlayerSprayProjectileComponent). 없으면 nullptr.
-	// 보스값(GetBossState)과 동형 — GetComponentByClass 는 씬 로드분/런타임 추가분을 모두 찾는다.
-	UPlayerSprayProjectileComponent* GetPlayerSpray(APawn* Pawn)
-	{
-		if (!Pawn)
-		{
-			return nullptr;
-		}
-		return Pawn->GetComponentByClass<UPlayerSprayProjectileComponent>();
-	}
-
 	// [사이클 4/5] 바인딩 값 → 바 비율 [0,1]. 체력=GetHealthRatio, 보스HP=컴포넌트, 페이즈=색매핑, 그 외=full.
 	float ValueAsRatio(EHudBindingValue Value, APawn* Pawn)
 	{
@@ -75,31 +47,10 @@ namespace
 		case EHudBindingValue::HealthOverMax:
 		case EHudBindingValue::HealthPercent:
 			return Pawn ? Pawn->GetHealthRatio() : 0.0f;
-		case EHudBindingValue::BossHealthRatio:
-			if (const FBossPatternDebugState* S = GetBossState(Pawn)) { return S->BossHealthRatio; }
-			return Pawn ? Pawn->GetHealthRatio() : 0.0f;       // 컴포넌트 없으면 폰 체력 폴백
-		case EHudBindingValue::BossPhase:
-			// 페이즈 0→1.0(녹) · 1→0.5(노) · 2+→0.0(적) → BarColor 가 페이즈색이 된다.
-			if (const FBossPatternDebugState* S = GetBossState(Pawn))
-			{
-				return S->BossPhase <= 0 ? 1.0f : (S->BossPhase == 1 ? 0.5f : 0.0f);
-			}
-			return 1.0f;
-		case EHudBindingValue::PlayerUltimateRatio:
-		case EHudBindingValue::PlayerUltimateGauge:
-			// 궁극기 게이지 비율(현재/최대). 컴포넌트 없거나 최대=0 이면 0(빈 바).
-			if (UPlayerSprayProjectileComponent* Spray = GetPlayerSpray(Pawn))
-			{
-				const float Max = Spray->GetUltimateGaugeMax();
-				return Max > 0.0f ? (Spray->GetUltimateGauge() / Max) : 0.0f;
-			}
-			return 0.0f;
-		case EHudBindingValue::BossPatternName:
-		case EHudBindingValue::GameTime:
-		case EHudBindingValue::PlayerProjectileCount:
-			return 1.0f;       // 비-비율 값은 바에서 full
 		case EHudBindingValue::Score:
 			return FScoreManager::Get().GetCurrentScore() / 10000.0f;   // 점수/10000 → 바 비율(0~1)
+		default:
+			return 0;
 		}
 		return 0.0f;
 	}
@@ -118,41 +69,6 @@ namespace
 			break;
 		case EHudBindingValue::HealthPercent:
 			if (Pawn) { snprintf(Buf, sizeof(Buf), "%d%%", (int)(Pawn->GetHealthRatio() * 100.0f + 0.5f)); return FString(Buf); }
-			break;
-		case EHudBindingValue::BossHealthRatio:
-			if (const FBossPatternDebugState* S = GetBossState(Pawn)) { snprintf(Buf, sizeof(Buf), "%d%%", (int)(S->BossHealthRatio * 100.0f + 0.5f)); return FString(Buf); }
-			break;
-		case EHudBindingValue::BossPhase:
-			if (const FBossPatternDebugState* S = GetBossState(Pawn)) { snprintf(Buf, sizeof(Buf), "Phase %d", S->BossPhase); return FString(Buf); }
-			break;
-		case EHudBindingValue::BossPatternName:
-			if (const FBossPatternDebugState* S = GetBossState(Pawn)) { return S->ActivePatternName; }
-			break;
-		case EHudBindingValue::GameTime:
-			if (World) { snprintf(Buf, sizeof(Buf), "%ds", (int)World->GetGameTimeSeconds()); return FString(Buf); }
-			break;
-		case EHudBindingValue::PlayerUltimateRatio:
-			if (UPlayerSprayProjectileComponent* Spray = GetPlayerSpray(Pawn))
-			{
-				const float Max = Spray->GetUltimateGaugeMax();
-				const float Ratio = Max > 0.0f ? (Spray->GetUltimateGauge() / Max) : 0.0f;
-				snprintf(Buf, sizeof(Buf), "%d%%", (int)(Ratio * 100.0f + 0.5f));
-				return FString(Buf);
-			}
-			break;
-		case EHudBindingValue::PlayerUltimateGauge:
-			if (UPlayerSprayProjectileComponent* Spray = GetPlayerSpray(Pawn))
-			{
-				snprintf(Buf, sizeof(Buf), "%d / %d", (int)(Spray->GetUltimateGauge() + 0.5f), (int)(Spray->GetUltimateGaugeMax() + 0.5f));
-				return FString(Buf);
-			}
-			break;
-		case EHudBindingValue::PlayerProjectileCount:
-			if (UPlayerSprayProjectileComponent* Spray = GetPlayerSpray(Pawn))
-			{
-				snprintf(Buf, sizeof(Buf), "%d", Spray->GetProjectileCount());
-				return FString(Buf);
-			}
 			break;
 		case EHudBindingValue::Score:
 			// 전역 점수 — 보스 히트/발사 카운트로 산출(소스 액터 불필요).

@@ -1118,9 +1118,6 @@
     <ClCompile Include="Source\Engine\Animation\Notify\AnimNotifyState_Particle.cpp">
       <Filter>Source\Engine\Animation\Notify</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Engine\Animation\Notify\AnimNotify_BeamFire.cpp">
-      <Filter>Source\Engine\Animation\Notify</Filter>
-    </ClCompile>
     <ClCompile Include="Source\Engine\Animation\Notify\AnimNotify_LogMessage.cpp">
       <Filter>Source\Engine\Animation\Notify</Filter>
     </ClCompile>
@@ -1258,51 +1255,6 @@
     </ClCompile>
     <ClCompile Include="Source\Engine\Component\Debug\TemporaryBoneAnimatorComponent.cpp">
       <Filter>Source\Engine\Component\Debug</Filter>
-    </ClCompile>
-    <ClCompile Include="Source\Engine\Component\Gameplay\BeamAttackComponent.cpp">
-      <Filter>Source\Engine\Component\Gameplay</Filter>
-    </ClCompile>
-    <ClCompile Include="Source\Engine\Component\Gameplay\BossPatternComponentBase.cpp">
-      <Filter>Source\Engine\Component\Gameplay</Filter>
-    </ClCompile>
-    <ClCompile Include="Source\Engine\Component\Gameplay\BossPatternDebug.cpp">
-      <Filter>Source\Engine\Component\Gameplay</Filter>
-    </ClCompile>
-    <ClCompile Include="Source\Engine\Component\Gameplay\BossPatternSelectorComponent.cpp">
-      <Filter>Source\Engine\Component\Gameplay</Filter>
-    </ClCompile>
-    <ClCompile Include="Source\Engine\Component\Gameplay\BossPattern_AimedRingVolley.cpp">
-      <Filter>Source\Engine\Component\Gameplay</Filter>
-    </ClCompile>
-    <ClCompile Include="Source\Engine\Component\Gameplay\BossPattern_HomingOrbTrail.cpp">
-      <Filter>Source\Engine\Component\Gameplay</Filter>
-    </ClCompile>
-    <ClCompile Include="Source\Engine\Component\Gameplay\BossPattern_IdleTrackTarget.cpp">
-      <Filter>Source\Engine\Component\Gameplay</Filter>
-    </ClCompile>
-    <ClCompile Include="Source\Engine\Component\Gameplay\BossPattern_RendingClawArc.cpp">
-      <Filter>Source\Engine\Component\Gameplay</Filter>
-    </ClCompile>
-    <ClCompile Include="Source\Engine\Component\Gameplay\BossPattern_SphericalPulseBarrage.cpp">
-      <Filter>Source\Engine\Component\Gameplay</Filter>
-    </ClCompile>
-    <ClCompile Include="Source\Engine\Component\Gameplay\BossPattern_ThunderclapCascade.cpp">
-      <Filter>Source\Engine\Component\Gameplay</Filter>
-    </ClCompile>
-    <ClCompile Include="Source\Engine\Component\Gameplay\BulletHellComponent.cpp">
-      <Filter>Source\Engine\Component\Gameplay</Filter>
-    </ClCompile>
-    <ClCompile Include="Source\Engine\Component\Gameplay\BulletHellDamageReceiverComponent.cpp">
-      <Filter>Source\Engine\Component\Gameplay</Filter>
-    </ClCompile>
-    <ClCompile Include="Source\Engine\Component\Gameplay\BulletHellDebugComponent.cpp">
-      <Filter>Source\Engine\Component\Gameplay</Filter>
-    </ClCompile>
-    <ClCompile Include="Source\Engine\Component\Gameplay\BulletTrailComponent.cpp">
-      <Filter>Source\Engine\Component\Gameplay</Filter>
-    </ClCompile>
-    <ClCompile Include="Source\Engine\Component\Gameplay\PlayerSprayProjectileComponent.cpp">
-      <Filter>Source\Engine\Component\Gameplay</Filter>
     </ClCompile>
     <ClCompile Include="Source\Engine\Component\Gameplay\RagdollForceEmitterComponent.cpp">
       <Filter>Source\Engine\Component\Gameplay</Filter>
@@ -1490,14 +1442,8 @@
     <ClCompile Include="Source\Engine\GameFramework\Level.cpp">
       <Filter>Source\Engine\GameFramework</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Engine\GameFramework\ProjectilePoolSubSystem.cpp">
-      <Filter>Source\Engine\GameFramework</Filter>
-    </ClCompile>
     <ClCompile Include="Source\Engine\GameFramework\World.cpp">
       <Filter>Source\Engine\GameFramework</Filter>
-    </ClCompile>
-    <ClCompile Include="Source\Engine\GameFramework\Actor\ArrowProjectileActor.cpp">
-      <Filter>Source\Engine\GameFramework\Actor</Filter>
     </ClCompile>
     <ClCompile Include="Source\Engine\GameFramework\Actor\BoxActor.cpp">
       <Filter>Source\Engine\GameFramework\Actor</Filter>
@@ -1518,9 +1464,6 @@
       <Filter>Source\Engine\GameFramework\Actor</Filter>
     </ClCompile>
     <ClCompile Include="Source\Engine\GameFramework\Actor\PawnStaticMesh.cpp">
-      <Filter>Source\Engine\GameFramework\Actor</Filter>
-    </ClCompile>
-    <ClCompile Include="Source\Engine\GameFramework\Actor\ProjectileActor.cpp">
       <Filter>Source\Engine\GameFramework\Actor</Filter>
     </ClCompile>
     <ClCompile Include="Source\Engine\GameFramework\Actor\SkeletalMeshActor.cpp">
@@ -1943,9 +1886,6 @@
     <ClCompile Include="Source\Engine\Profiling\StartupProfiler.cpp">
       <Filter>Source\Engine\Profiling</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Engine\Profiling\Stats\BulletHellStats.cpp">
-      <Filter>Source\Engine\Profiling\Stats</Filter>
-    </ClCompile>
     <ClCompile Include="Source\Engine\Profiling\Stats\ClothCollisionStats.cpp">
       <Filter>Source\Engine\Profiling\Stats</Filter>
     </ClCompile>
@@ -2004,9 +1944,6 @@
       <Filter>Source\Engine\Render\Proxy</Filter>
     </ClCompile>
     <ClCompile Include="Source\Engine\Render\Proxy\BoneDebugSceneProxy.cpp">
-      <Filter>Source\Engine\Render\Proxy</Filter>
-    </ClCompile>
-    <ClCompile Include="Source\Engine\Render\Proxy\BulletTrailSceneProxy.cpp">
       <Filter>Source\Engine\Render\Proxy</Filter>
     </ClCompile>
     <ClCompile Include="Source\Engine\Render\Proxy\CylindricalBillboardSceneProxy.cpp">
@@ -2655,9 +2592,6 @@
     <ClInclude Include="Source\Engine\Animation\Notify\AnimNotifyState_Particle.h">
       <Filter>Source\Engine\Animation\Notify</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Engine\Animation\Notify\AnimNotify_BeamFire.h">
-      <Filter>Source\Engine\Animation\Notify</Filter>
-    </ClInclude>
     <ClInclude Include="Source\Engine\Animation\Notify\AnimNotify_LogMessage.h">
       <Filter>Source\Engine\Animation\Notify</Filter>
     </ClInclude>
@@ -2813,51 +2747,6 @@
     </ClInclude>
     <ClInclude Include="Source\Engine\Component\Debug\TemporaryBoneAnimatorComponent.h">
       <Filter>Source\Engine\Component\Debug</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Engine\Component\Gameplay\BeamAttackComponent.h">
-      <Filter>Source\Engine\Component\Gameplay</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Engine\Component\Gameplay\BossPatternComponentBase.h">
-      <Filter>Source\Engine\Component\Gameplay</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Engine\Component\Gameplay\BossPatternDebug.h">
-      <Filter>Source\Engine\Component\Gameplay</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Engine\Component\Gameplay\BossPatternSelectorComponent.h">
-      <Filter>Source\Engine\Component\Gameplay</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Engine\Component\Gameplay\BossPattern_AimedRingVolley.h">
-      <Filter>Source\Engine\Component\Gameplay</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Engine\Component\Gameplay\BossPattern_HomingOrbTrail.h">
-      <Filter>Source\Engine\Component\Gameplay</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Engine\Component\Gameplay\BossPattern_IdleTrackTarget.h">
-      <Filter>Source\Engine\Component\Gameplay</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Engine\Component\Gameplay\BossPattern_RendingClawArc.h">
-      <Filter>Source\Engine\Component\Gameplay</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Engine\Component\Gameplay\BossPattern_SphericalPulseBarrage.h">
-      <Filter>Source\Engine\Component\Gameplay</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Engine\Component\Gameplay\BossPattern_ThunderclapCascade.h">
-      <Filter>Source\Engine\Component\Gameplay</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Engine\Component\Gameplay\BulletHellComponent.h">
-      <Filter>Source\Engine\Component\Gameplay</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Engine\Component\Gameplay\BulletHellDamageReceiverComponent.h">
-      <Filter>Source\Engine\Component\Gameplay</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Engine\Component\Gameplay\BulletHellDebugComponent.h">
-      <Filter>Source\Engine\Component\Gameplay</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Engine\Component\Gameplay\BulletTrailComponent.h">
-      <Filter>Source\Engine\Component\Gameplay</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Engine\Component\Gameplay\PlayerSprayProjectileComponent.h">
-      <Filter>Source\Engine\Component\Gameplay</Filter>
     </ClInclude>
     <ClInclude Include="Source\Engine\Component\Gameplay\RagdollForceEmitterComponent.h">
       <Filter>Source\Engine\Component\Gameplay</Filter>
@@ -3069,13 +2958,7 @@
     <ClInclude Include="Source\Engine\GameFramework\AActor.h">
       <Filter>Source\Engine\GameFramework</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Engine\GameFramework\IPoolableProjectile.h">
-      <Filter>Source\Engine\GameFramework</Filter>
-    </ClInclude>
     <ClInclude Include="Source\Engine\GameFramework\Level.h">
-      <Filter>Source\Engine\GameFramework</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Engine\GameFramework\ProjectilePoolSubSystem.h">
       <Filter>Source\Engine\GameFramework</Filter>
     </ClInclude>
     <ClInclude Include="Source\Engine\GameFramework\World.h">
@@ -3086,9 +2969,6 @@
     </ClInclude>
     <ClInclude Include="Source\Engine\GameFramework\WorldSettings.h">
       <Filter>Source\Engine\GameFramework</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Engine\GameFramework\Actor\ArrowProjectileActor.h">
-      <Filter>Source\Engine\GameFramework\Actor</Filter>
     </ClInclude>
     <ClInclude Include="Source\Engine\GameFramework\Actor\BoxActor.h">
       <Filter>Source\Engine\GameFramework\Actor</Filter>
@@ -3112,9 +2992,6 @@
       <Filter>Source\Engine\GameFramework\Actor</Filter>
     </ClInclude>
     <ClInclude Include="Source\Engine\GameFramework\Actor\PawnStaticMesh.h">
-      <Filter>Source\Engine\GameFramework\Actor</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Engine\GameFramework\Actor\ProjectileActor.h">
       <Filter>Source\Engine\GameFramework\Actor</Filter>
     </ClInclude>
     <ClInclude Include="Source\Engine\GameFramework\Actor\SkeletalMeshActor.h">
@@ -3654,9 +3531,6 @@
     <ClInclude Include="Source\Engine\Profiling\StartupProfiler.h">
       <Filter>Source\Engine\Profiling</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Engine\Profiling\Stats\BulletHellStats.h">
-      <Filter>Source\Engine\Profiling\Stats</Filter>
-    </ClInclude>
     <ClInclude Include="Source\Engine\Profiling\Stats\ClothCollisionStats.h">
       <Filter>Source\Engine\Profiling\Stats</Filter>
     </ClInclude>
@@ -3724,9 +3598,6 @@
       <Filter>Source\Engine\Render\Proxy</Filter>
     </ClInclude>
     <ClInclude Include="Source\Engine\Render\Proxy\BoneDebugSceneProxy.h">
-      <Filter>Source\Engine\Render\Proxy</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Engine\Render\Proxy\BulletTrailSceneProxy.h">
       <Filter>Source\Engine\Render\Proxy</Filter>
     </ClInclude>
     <ClInclude Include="Source\Engine\Render\Proxy\CylindricalBillboardSceneProxy.h">

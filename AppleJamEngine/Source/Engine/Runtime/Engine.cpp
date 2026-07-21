@@ -1,4 +1,4 @@
-#include "Engine/Runtime/Engine.h"
+﻿#include "Engine/Runtime/Engine.h"
 
 #include "Platform/Paths.h"
 #include "Core/Logging/Log.h"
@@ -7,8 +7,6 @@
 #include "Profiling/Stats/Stats.h"
 #include "Profiling/Stats/ParticleStats.h"
 #include "Profiling/Stats/ClothCollisionStats.h"
-#include "Profiling/Stats/BulletHellStats.h"
-#include "Component/Gameplay/BossPatternDebug.h"
 #include "AI/BT/BehaviorTreeDebug.h"
 #include "Profiling/StartupProfiler.h"
 #include "Engine/Input/InputSystem.h"
@@ -257,8 +255,6 @@ void UEngine::WorldTick(float DeltaTime)
 	// 월드 tick 루프 진입 전 여기서 프레임 카운터를 리셋한다. (Peak은 유지)
 	PARTICLE_STATS_RESET();
 	CLOTH_COLLISION_STATS_RESET();
-	BULLETHELL_STATS_RESET();
-	BOSSPATTERN_DEBUG_RESET();
 	BT_DEBUG_RESET();
 
 	// PIE 활성 시 Editor 월드는 sleep (UE 동작과 동일).

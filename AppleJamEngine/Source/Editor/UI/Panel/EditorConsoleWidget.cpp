@@ -1,4 +1,4 @@
-#include "Editor/UI/Panel/EditorConsoleWidget.h"
+﻿#include "Editor/UI/Panel/EditorConsoleWidget.h"
 #include "Object/GarbageCollection.h"
 #include "Editor/EditorEngine.h"
 #include "Editor/Viewport/Level/LevelEditorViewportClient.h"
@@ -274,10 +274,6 @@ void FEditorConsoleWidget::RegisterDiagnosticsCommands()
 		"Diagnostics", "stat physics", "Shows the physics overlay stat (bodies/pairs/queries/timing).");
 	RegisterCommand("stat clothcollision", [this](const TArray<FString>& Args) { HandleStatClothCollision(Args); },
 		"Diagnostics", "stat clothcollision", "Shows the cloth collision overlay stat for the level world.");
-	RegisterCommand("stat bullethell", [this](const TArray<FString>& Args) { HandleStatBulletHell(Args); },
-		"Diagnostics", "stat bullethell", "Shows the BulletHell overlay stat.");
-	RegisterCommand("debug bosspattern", [this](const TArray<FString>& Args) { HandleDebugBossPattern(Args); },
-		"Diagnostics", "debug bosspattern", "Toggles the boss pattern selector debug overlay.");
 	RegisterCommand("stat none", [this](const TArray<FString>& Args) { HandleStatNone(Args); },
 		"Diagnostics", "stat none", "Hides all overlay stats.");
 	RegisterCommand("debug bt", [this](const TArray<FString>& Args) { HandleDebugBT(Args); },
@@ -1083,30 +1079,6 @@ void FEditorConsoleWidget::HandleStatClothCollision(const TArray<FString>& Args)
 	}
 	const bool bEnabled = EditorEngine->GetOverlayStatSystem().ToggleClothCollision();
 	AddLog("Overlay stat %s: clothcollision\n", bEnabled ? "enabled" : "disabled");
-}
-
-void FEditorConsoleWidget::HandleStatBulletHell(const TArray<FString>& Args)
-{
-	(void)Args;
-	if (!EditorEngine)
-	{
-		AddLog("[ERROR] EditorEngine is null.\n");
-		return;
-	}
-	const bool bEnabled = EditorEngine->GetOverlayStatSystem().ToggleBulletHell();
-	AddLog("Overlay stat %s: bullethell\n", bEnabled ? "enabled" : "disabled");
-}
-
-void FEditorConsoleWidget::HandleDebugBossPattern(const TArray<FString>& Args)
-{
-	(void)Args;
-	if (!EditorEngine)
-	{
-		AddLog("[ERROR] EditorEngine is null.\n");
-		return;
-	}
-	const bool bEnabled = EditorEngine->GetOverlayStatSystem().ToggleBossPattern();
-	AddLog("Debug overlay %s: bosspattern\n", bEnabled ? "enabled" : "disabled");
 }
 
 void FEditorConsoleWidget::HandleDebugBT(const TArray<FString>& Args)
