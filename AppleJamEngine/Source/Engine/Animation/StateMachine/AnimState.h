@@ -38,6 +38,11 @@ public:
 	float              PlayRate = 1.0f;
 	bool               bLooping = true;
 
+	// 트리 build 직후 1 회 — SubGraphOverride 에 진짜 Initialize 전파. OnEnter 의
+	// OnBecomeRelevant 와 달리 구조적 init (BlendSpace 삼각망 build 등) 을 수행하므로,
+	// 부모 SM 이 현재 state 여부와 무관하게 모든 등록 state 에 호출해야 한다.
+	void InitializeSubGraph(const FAnimationInitializeContext& Context);
+
 	// 후크 — 데이터 기반 FSM 에서는 대부분 기본 구현만으로 충분하지만,
 	// 자식이 진입 효과/특수 평가를 넣을 수 있도록 가상함수로 남긴다.
 	virtual void OnEnter(UAnimInstance* Instance);

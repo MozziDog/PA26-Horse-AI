@@ -10,6 +10,7 @@
 #include "Animation/StateMachine/AnimState.h"
 #include "Animation/AnimationManager.h"
 #include "Animation/Nodes/AnimNode_BlendListByEnum.h"
+#include "Animation/Nodes/AnimNode_BlendSpace.h"
 #include "Animation/Nodes/AnimNode_LayeredBlendPerBone.h"
 #include "Animation/Nodes/AnimNode_RefPose.h"
 #include "Animation/Nodes/AnimNode_SequencePlayer.h"
@@ -24,6 +25,7 @@
 #include "Object/Object.h"
 
 #include <cmath>
+#include <utility>
 
 namespace
 {
@@ -153,55 +155,84 @@ namespace
 		return std::max(0.0f, Length - GetCurrentStateElapsedSeconds(SM));
 	}
 
+	// 단일 leaf 규칙 하나를 평가. Reader 는 rule.VariableName 에 대한 MakeFloatReader 결과(property
+	// 기반 rule 만 사용). SM 은 시간 기반 rule 이 현재 state 를 조회하는 데 사용.
+	bool EvaluateTransitionRule(const FAnimGraphTransitionRule& Rule,
+	                            const TFunction<float(UAnimInstance*)>& Reader,
+	                            UAnimInstance* AI,
+	                            const FAnimNode_StateMachine* SM)
+	{
+		switch (Rule.RuleKind)
+		{
+			case ETransitionRuleKind::FloatCompare:
+				return Rule.VariableName != FName::None && CompareTransitionFloat(Reader(AI), Rule.Op, Rule.Threshold);
+
+			case ETransitionRuleKind::BoolProperty:
+			{
+				if (Rule.VariableName == FName::None) return false;
+				const bool bValue = Reader(AI) >= 0.5f;
+				const bool bExpected = Rule.Threshold >= 0.5f;
+				return bValue == bExpected;
+			}
+
+			case ETransitionRuleKind::TimeRemaining:
+				return GetCurrentStateLengthSeconds(SM) > 0.0f && GetCurrentStateRemainingSeconds(SM) <= std::max(0.0f, Rule.Threshold);
+
+			case ETransitionRuleKind::TimeRemainingRatio:
+			{
+				const float Length = GetCurrentStateLengthSeconds(SM);
+				if (Length <= 0.0f) return false;
+				const float Ratio = GetCurrentStateRemainingSeconds(SM) / Length;
+				return Ratio <= std::max(0.0f, Rule.Threshold);
+			}
+
+			case ETransitionRuleKind::TimeElapsed:
+				return GetCurrentStateElapsedSeconds(SM) >= std::max(0.0f, Rule.Threshold);
+
+			case ETransitionRuleKind::AutomaticSequenceEnd:
+			{
+				const UAnimState* State = SM ? SM->GetCurrentState() : nullptr;
+				if (!IsValid(State) || !IsValid(State->Sequence) || State->bLooping) return false;
+				const float Length = State->Sequence->GetPlayLength();
+				return Length > 0.0f && State->GetLocalTime() >= Length - 1e-4f;
+			}
+
+			case ETransitionRuleKind::AlwaysTrue:
+				return true;
+
+			case ETransitionRuleKind::AlwaysFalse:
+				return false;
+		}
+		return false;
+	}
+
 	// Transition rule — UE 의 Transition Rule Graph 에서 가장 많이 쓰는 노드들을 데이터 기반으로 평가.
 	// 전체 Blueprint VM 은 아니지만, bool/float property access 와 current state time 함수류는 런타임 반영된다.
+	// T.Rules 의 모든 규칙을 AND 로 결합한다(예: Speed>a AND Speed<b → 범위 이내). 규칙이 하나도
+	// 없으면 전환하지 않음(false) — AlwaysFalse placeholder 와 동일 취급.
 	TFunction<bool(UAnimInstance*)> MakeTransitionCondition(const FAnimGraphTransition& T, const FAnimNode_StateMachine* SM)
 	{
-		auto Reader = MakeFloatReader(T.VariableName);
-		return [Reader, T, SM](UAnimInstance* AI) -> bool
+		struct FCompiledRule
 		{
-			switch (T.RuleKind)
+			FAnimGraphTransitionRule         Rule;
+			TFunction<float(UAnimInstance*)> Reader;
+		};
+
+		TArray<FCompiledRule> CompiledRules;
+		CompiledRules.reserve(T.Rules.size());
+		for (const FAnimGraphTransitionRule& Rule : T.Rules)
+		{
+			CompiledRules.push_back({ Rule, MakeFloatReader(Rule.VariableName) });
+		}
+
+		return [Rules = std::move(CompiledRules), SM](UAnimInstance* AI) -> bool
+		{
+			if (Rules.empty()) return false;
+			for (const FCompiledRule& CR : Rules)
 			{
-				case ETransitionRuleKind::FloatCompare:
-					return T.VariableName != FName::None && CompareTransitionFloat(Reader(AI), T.Op, T.Threshold);
-
-				case ETransitionRuleKind::BoolProperty:
-				{
-					if (T.VariableName == FName::None) return false;
-					const bool bValue = Reader(AI) >= 0.5f;
-					const bool bExpected = T.Threshold >= 0.5f;
-					return bValue == bExpected;
-				}
-
-				case ETransitionRuleKind::TimeRemaining:
-					return GetCurrentStateLengthSeconds(SM) > 0.0f && GetCurrentStateRemainingSeconds(SM) <= std::max(0.0f, T.Threshold);
-
-				case ETransitionRuleKind::TimeRemainingRatio:
-				{
-					const float Length = GetCurrentStateLengthSeconds(SM);
-					if (Length <= 0.0f) return false;
-					const float Ratio = GetCurrentStateRemainingSeconds(SM) / Length;
-					return Ratio <= std::max(0.0f, T.Threshold);
-				}
-
-				case ETransitionRuleKind::TimeElapsed:
-					return GetCurrentStateElapsedSeconds(SM) >= std::max(0.0f, T.Threshold);
-
-				case ETransitionRuleKind::AutomaticSequenceEnd:
-				{
-					const UAnimState* State = SM ? SM->GetCurrentState() : nullptr;
-					if (!IsValid(State) || !IsValid(State->Sequence) || State->bLooping) return false;
-					const float Length = State->Sequence->GetPlayLength();
-					return Length > 0.0f && State->GetLocalTime() >= Length - 1e-4f;
-				}
-
-				case ETransitionRuleKind::AlwaysTrue:
-					return true;
-
-				case ETransitionRuleKind::AlwaysFalse:
-					return false;
+				if (!EvaluateTransitionRule(CR.Rule, CR.Reader, AI, SM)) return false;
 			}
-			return false;
+			return true;
 		};
 	}
 
@@ -400,13 +431,17 @@ namespace
 					if (Def.SubGraphNodeId != 0 && Def.SubGraphNodeId != Node.NodeId)
 					{
 						const FAnimGraphNode* SubNode = Graph.FindNode(Def.SubGraphNodeId);
-						if (SubNode && SubNode->Type == EAnimGraphNodeType::StateMachine)
+						// SubGraphOverride 는 임의 FAnimNode_Base 를 수용. StateMachine(nested SM) 에
+						// 더해 BlendSpace(방향 locomotion 블렌드)도 허용(설계 §3.4). State 가 시간 진행·
+						// pose 평가·RM 을 SubGraphOverride 에 위임하므로 두 타입 모두 그대로 동작.
+						if (SubNode && (SubNode->Type == EAnimGraphNodeType::StateMachine ||
+						                SubNode->Type == EAnimGraphNodeType::BlendSpace))
 						{
 							S->SubGraphOverride = CompileNode(Graph, Owner, *SubNode);
 						}
 						else
 						{
-							UE_LOG("AnimGraphCompiler: State '%s' 의 SubGraphNodeId=%u 가 StateMachine 노드 아님.",
+							UE_LOG("AnimGraphCompiler: State '%s' 의 SubGraphNodeId=%u 가 StateMachine/BlendSpace 노드 아님.",
 								Def.StateName.ToString().c_str(), Def.SubGraphNodeId);
 						}
 					}
@@ -435,6 +470,48 @@ namespace
 
 				SM->SetInitialState(Node.InitialStateName);
 				return SM;
+			}
+
+			case EAnimGraphNodeType::BlendSpace:
+			{
+				FAnimNode_BlendSpace* BS = Owner.MakeNode<FAnimNode_BlendSpace>();
+
+				// 각 내장 샘플 → 내부 SequencePlayer + 좌표. SequencePath 는 여기서 로드
+				// (StateMachine 의 state sequence 로드와 동일 경로).
+				for (const FBlendSample& Sample : Node.BlendSamples)
+				{
+					FAnimNode_SequencePlayer* SP = Owner.MakeNode<FAnimNode_SequencePlayer>();
+					SP->PlayRate = Sample.PlayRate;
+					SP->bLooping = true; // blend space 샘플은 보법 루프.
+					if (!Sample.SequencePath.empty() && Sample.SequencePath != "None")
+					{
+						SP->Sequence = FAnimationManager::Get().LoadAnimation(Sample.SequencePath);
+						if (!SP->Sequence)
+						{
+							UE_LOG("AnimGraphCompiler: BlendSpace 샘플 sequence 로드 실패. Path=%s",
+								Sample.SequencePath.c_str());
+						}
+					}
+					BS->SamplePlayers.push_back(SP);
+					BS->SampleCoords.push_back(FVector2(Sample.PosX, Sample.PosY));
+				}
+
+				// X/Y Float 입력 핀 source(VariableGet→Float Variable)를 MakeFloatReader 로 inline.
+				// 미연결 축은 reader 미주입 → 런타임에서 0 평가 → 자동 1D 퇴화(설계 §2-6, §2-7).
+				auto BindAxis = [&](const FName& PinName, TFunction<float(UAnimInstance*)>& OutFn)
+				{
+					const FAnimGraphPin* AxisPin = FindInputPinByName(Node, PinName);
+					if (!AxisPin) return;
+					const FAnimGraphNode* SrcNode = FindInputSourceNode(Graph, AxisPin->PinId);
+					if (SrcNode && SrcNode->Type == EAnimGraphNodeType::VariableGet)
+					{
+						OutFn = MakeFloatReader(SrcNode->VariableName);
+					}
+				};
+				BindAxis(FName("AxisX"), BS->AxisXFn);
+				BindAxis(FName("AxisY"), BS->AxisYFn);
+
+				return BS;
 			}
 
 			default:

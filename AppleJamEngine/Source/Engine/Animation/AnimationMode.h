@@ -55,6 +55,29 @@ inline const char* GRootMotionModeNames[] = {
 };
 inline constexpr uint32 GRootMotionModeCount = sizeof(GRootMotionModeNames) / sizeof(GRootMotionModeNames[0]);
 
+// Root motion 클립에서 rotation 을 어디까지 "이동" 으로 추출하고 pose 에서 잠글지 — per-asset
+// (UAnimSequence, bExtractRootMotionZ 와 같은 그룹). "pose 에서 제거한 성분 = delta 로 추출되는
+// 성분" 불변식을 클립 단위로 보장하므로 소비자가 무엇을 적용하든 이중 적용/유실이 없다.
+//
+//   Full    — rotation 전체를 추출하고 첫 키로 잠금 (default = 기존 동작. 몽타주/휴머노이드).
+//   YawOnly — up(+Z)축 yaw 만 추출+잠금. swing(pitch/roll) 은 pose 에 애니메이션 절대값 유지
+//             (클립 고유 기울기·흔들림이 상태 블렌드에 자연스럽게 섞임). 보행류 클립.
+//   None    — rotation 추출 안 함 (translation-only root motion). pose 에 회전 전체 유지.
+enum class ERootMotionRotationLock : uint8
+{
+	Full,
+	YawOnly,
+	None,
+};
+
+// Editor 콤보용 표시 이름. ERootMotionRotationLock 과 1:1 순서.
+inline const char* GRootMotionRotationLockNames[] = {
+	"Full",
+	"YawOnly",
+	"None",
+};
+inline constexpr uint32 GRootMotionRotationLockCount = sizeof(GRootMotionRotationLockNames) / sizeof(GRootMotionRotationLockNames[0]);
+
 // SingleNode 모드에서 직렬화/에디터 노출용으로 묶어 두는 재생 파라미터.
 // AnimToPlay 는 런타임 포인터, AnimToPlayPath 는 직렬화/에디터용 식별자 (= asset 경로).
 // SetAnimation 등 설정 경로는 두 멤버를 항상 동기화한다.

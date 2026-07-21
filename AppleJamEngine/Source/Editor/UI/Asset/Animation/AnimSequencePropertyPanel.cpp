@@ -1,4 +1,4 @@
-#include "AnimSequencePropertyPanel.h"
+﻿#include "AnimSequencePropertyPanel.h"
 
 #include "Animation/Sequence/AnimSequence.h"
 #include "Animation/Sequence/BoneAnimationTrack.h"
@@ -39,6 +39,37 @@ namespace
 			ImGui::SetTooltip("Root motion 본의 translation/rotation 을 본 pose 에서 제거하고\nowning actor 의 transform 에 반영 (캐릭터가 anim 으로 world 이동).");
 		}
 
+		// Root motion 성분 분해 — 무엇이 이동(추출+잠금)이고 무엇이 제자리 동작(pose 유지)인지는
+		// 클립의 속성 (per-asset).
+		if (bRootMotion)
+		{
+			bool bExtractZ = Seq->GetExtractRootMotionZ();
+			if (ImGui::Checkbox("Extract Root Motion Z", &bExtractZ))
+			{
+				Seq->SetExtractRootMotionZ(bExtractZ);
+				bChanged = true;
+			}
+			if (ImGui::IsItemHovered())
+			{
+				ImGui::SetTooltip("ON: Z 도 이동으로 추출 (점프 상승 등) — pose 에서 첫 키로 잠금.\nOFF: Z 는 제자리 bob (보행/구보) — pose 에 애니메이션 값 유지, delta Z = 0.");
+			}
+
+			ImGui::Dummy(ImVec2(0.0f, 4.0f));
+			ImGui::TextUnformatted("Root Rotation Lock");
+			ImGui::SetNextItemWidth(-1.0f);
+			int RotLockIdx = static_cast<int>(Seq->GetRootRotationLock());
+			if (ImGui::Combo("##rootRotationLock", &RotLockIdx,
+				GRootMotionRotationLockNames, static_cast<int>(GRootMotionRotationLockCount)))
+			{
+				Seq->SetRootRotationLock(static_cast<ERootMotionRotationLock>(RotLockIdx));
+				bChanged = true;
+			}
+			if (ImGui::IsItemHovered())
+			{
+				ImGui::SetTooltip("Full: rotation 전체 추출+잠금 (몽타주 등 기본).\nYawOnly: yaw 만 추출 — swing(pitch/roll)은 pose 유지 (보행류).\nNone: rotation 추출 안 함 (translation-only).");
+			}
+		}
+
 		// Root motion 본 선택 콤보 — 둘 중 하나라도 켜져 있을 때만 노출.
 		const bool bShowBoneCombo = bLock || bRootMotion;
 		if (bShowBoneCombo)
@@ -69,6 +100,22 @@ namespace
 				}
 				ImGui::EndCombo();
 			}
+		}
+
+		// Root Yaw Offset (Unity에서 따온 기능)
+		// Animation sequence의 몸통 기준 방향 재정의
+		ImGui::Dummy(ImVec2(0.0f, 4.0f));
+		ImGui::TextUnformatted("Root Yaw Offset (deg)");
+		ImGui::SetNextItemWidth(-1.0f);
+		float YawOffsetDeg = Seq->GetRootYawOffsetDegrees();
+		if (ImGui::DragFloat("##rootYawOffset", &YawOffsetDeg, 0.5f, -180.0f, 180.0f, "%.1f"))
+		{
+			Seq->SetRootYawOffsetDegrees(YawOffsetDeg);
+			bChanged = true;
+		}
+		if (ImGui::IsItemHovered())
+		{
+			ImGui::SetTooltip("Re-align animation sequence's 'direction'.\nApply to both character pose & root motion move direction.");
 		}
 
 		return bChanged;

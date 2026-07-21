@@ -1,5 +1,6 @@
 ﻿#pragma once
 
+#include "Animation/AnimationMode.h"
 #include "Animation/Sequence/AnimSequenceBase.h"
 #include "Animation/Sequence/BoneAnimationTrack.h"
 #include "Animation/Skeleton/SkeletonTypes.h"
@@ -109,14 +110,32 @@ public:
 
     // ─────────────────────────────────────────────────────────────
     // Root Motion (UE 의 bEnableRootMotion 과 동등).
-    //   true 면 GetBonePose 에서 RootMotionBoneName 본의 translation/rotation 을
-    //   애니메이션 시작 샘플로 고정하고, 대신 ExtractRootMotion 으로 같은 트랙의 delta 를
-    //   추출해 AnimInstance 가 owning actor 의 transform 에 반영한다.
-    //   → 캐릭터가 anim 의 motion 으로 실제로 world 에서 움직임.
+    //   true 면 GetBonePose 에서 RootMotionBoneName 본의 "이동" 성분을 첫 키로 고정하고,
+    //   대신 ExtractRootMotion 으로 같은 트랙의 delta 를 추출해 AnimInstance 가 owning actor
+    //   의 transform 에 반영한다 → 캐릭터가 anim 의 motion 으로 실제로 world 에서 움직임.
+    //   어떤 성분이 "이동" 인지는 아래 per-asset 분해 옵션(RootRotationLock /
+    //   bExtractRootMotionZ)이 결정한다.
     // Force Root Lock 과 상호 배제 (둘 다 root translation 을 다루므로 동시 활성 안 됨).
     // ─────────────────────────────────────────────────────────────
     bool GetEnableRootMotion() const { return bEnableRootMotion; }
     void SetEnableRootMotion(bool b) { bEnableRootMotion = b; if (b) bForceRootLock = false; }
+
+    // ── Root motion 성분 분해 옵션 (per-asset) ──
+    // "무엇이 이동(추출+pose 잠금)이고 무엇이 제자리 동작(pose 유지)인가" 는 클립의 속성.
+    // 불변식: pose 에서 잠근 성분만 delta 로 추출된다 → 소비자 측 이중 적용/유실 원천 차단.
+    //
+    // translation Z — true 면 Z 도 잠그고 추출 (default = 기존 동작. 점프 상승 등),
+    //                 false 면 Z(보행 bob)는 pose 에 애니메이션 값 유지, delta Z = 0.
+    bool GetExtractRootMotionZ() const { return bExtractRootMotionZ; }
+    void SetExtractRootMotionZ(bool b) { bExtractRootMotionZ = b; }
+    // rotation — Full(전체 추출+잠금, default) / YawOnly(yaw 만 추출, swing 은 pose 유지) / None.
+    ERootMotionRotationLock GetRootRotationLock() const { return RootRotationLock; }
+    void SetRootRotationLock(ERootMotionRotationLock InLock) { RootRotationLock = InLock; }
+    // RootYawOffsetDegrees: 클립의 기준 방향(root frame yaw)을 보정
+    // 첫 키부터 몸통 방향이 reference pose와 어긋난 클립 보정용
+	// GetBonePose(pose 움직임)와 ExtractRootMotion(Transform 움직임)에 동일한 FQuat로 동시에 적용됨
+    float GetRootYawOffsetDegrees() const { return RootYawOffsetDegrees; }
+    void  SetRootYawOffsetDegrees(float InDegrees) { RootYawOffsetDegrees = InDegrees; }
 
     // [PrevTime, CurTime) 구간에서 root motion 본의 local translation/rotation delta 를 추출.
     //   bLoop 면 시간이 끝에서 0 으로 wrap 되는 경계도 정확하게 누적 (두 구간 합산).
@@ -150,7 +169,12 @@ private:
     FString AssetPathFileName = "None";
     FSkeletonBinding TargetSkeleton;
 
-    bool    bForceRootLock    = false;
-    bool    bEnableRootMotion = false;
+    bool    bForceRootLock      = false;
+    bool    bEnableRootMotion   = false;
     FString RootMotionBoneName;
+
+    // Root motion 성분 분해 — Serialize 에서 파일 끝에 append (하위호환, AtEnd 가드).
+    bool                    bExtractRootMotionZ = true;
+    ERootMotionRotationLock RootRotationLock    = ERootMotionRotationLock::Full;
+    float                   RootYawOffsetDegrees = 0.0f;
 };

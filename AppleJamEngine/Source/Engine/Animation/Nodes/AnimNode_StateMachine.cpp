@@ -60,7 +60,14 @@ void FAnimNode_StateMachine::SetInitialState(FName StateName)
 
 void FAnimNode_StateMachine::Initialize(const FAnimationInitializeContext& Context)
 {
-	// 트리 build 직후 1 회 — 첫 CurrentState 의 OnEnter 호출해 sub-graph 까지 재귀 init.
+	// 트리 build 직후 1 회 — 모든 state 의 sub-graph 에 구조적 Initialize 전파.
+	// OnEnter 는 OnBecomeRelevant 만 호출하므로 BlendSpace 삼각망 build 등은 여기서만 가능.
+	// 나중에 전이로 진입하는 state 도 필요하므로 CurrentState 만이 아니라 전부 순회.
+	for (UAnimState* S : States)
+	{
+		if (IsUsableAnimState(S)) S->InitializeSubGraph(Context);
+	}
+
 	if (IsUsableAnimState(CurrentState)) CurrentState->OnEnter(Context.AnimInstance);
 }
 

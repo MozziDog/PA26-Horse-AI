@@ -1227,6 +1227,19 @@ bool FMeshManager::ImportFbxScene(
 	ImportOptions.bImportAnimations                     = Request.bImportAnimations;
 	ImportOptions.AnimationOptions.SelectedStackIndices = Request.SelectedAnimationStackIndices;
 
+	// When importing animation/skeleton against an existing skeleton (no fresh skeleton from this
+	// FBX), pass its bone names so animation-only FBX with eNull joints can be matched by name.
+	if (!Request.bImportSkeleton && !Request.bImportSkin)
+	{
+		if (USkeleton* TargetSkeleton = FSkeletonManager::Get().LoadSkeleton(Request.TargetSkeletonPath))
+		{
+			for (const FReferenceBone& Bone : TargetSkeleton->GetReferenceSkeleton().Bones)
+			{
+				ImportOptions.ReferenceBoneNames.insert(Bone.Name);
+			}
+		}
+	}
+
 	FFbxSkeletalSceneImportResult ImportResult;
 	FString                       ImportMessage;
 	if (!FFbxImporter::ImportSkeletalScene(Request.SourceFbxPath, ImportOptions, ImportResult, &ImportMessage))

@@ -18,8 +18,9 @@
     <VCProjectVersion>17.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
     <ProjectGuid>{55068e81-c0a0-49f9-ab7b-54aea968722b}</ProjectGuid>
-    <RootNamespace>Week14</RootNamespace>
+    <RootNamespace>AppleJamEngine</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <PreferredToolArchitecture>x64</PreferredToolArchitecture>
     <VcpkgEnabled>false</VcpkgEnabled>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -244,6 +245,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClCompile Include="Source\Editor\Viewport\Asset\MeshEditorViewportClient.cpp" />
     <ClCompile Include="Source\Editor\Viewport\Asset\StaticMeshEditorViewportClient.cpp" />
     <ClCompile Include="Source\Editor\Viewport\Level\FLevelViewportLayout.cpp" />
+    <ClCompile Include="Source\Engine\Animation\Notify\AnimNotify_HorseJump.cpp" />
     <ClCompile Include="Source\Engine\pch.cpp">
       <PrecompiledHeader>Create</PrecompiledHeader>
     </ClCompile>
@@ -261,6 +263,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClCompile Include="Source\Engine\Animation\Graph\AnimGraphCompiler.cpp" />
     <ClCompile Include="Source\Engine\Animation\Graph\AnimGraphInstance.cpp" />
     <ClCompile Include="Source\Engine\Animation\Graph\AnimGraphManager.cpp" />
+    <ClCompile Include="Source\Engine\Animation\Graph\BlendSpaceTriangulation.cpp" />
     <ClCompile Include="Source\Engine\Animation\Instance\AnimSingleNodeInstance.cpp" />
     <ClCompile Include="Source\Engine\Animation\Instance\CharacterAnimGraphInstance.cpp" />
     <ClCompile Include="Source\Engine\Animation\Instance\CharacterAnimInstance.cpp" />
@@ -268,6 +271,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClCompile Include="Source\Engine\Animation\Montage\AnimMontage.cpp" />
     <ClCompile Include="Source\Engine\Animation\Montage\AnimMontageInstance.cpp" />
     <ClCompile Include="Source\Engine\Animation\Nodes\AnimNode_BlendListByEnum.cpp" />
+    <ClCompile Include="Source\Engine\Animation\Nodes\AnimNode_BlendSpace.cpp" />
     <ClCompile Include="Source\Engine\Animation\Nodes\AnimNode_LayeredBlendPerBone.cpp" />
     <ClCompile Include="Source\Engine\Animation\Nodes\AnimNode_Root.cpp" />
     <ClCompile Include="Source\Engine\Animation\Nodes\AnimNode_SequencePlayer.cpp" />
@@ -790,6 +794,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClInclude Include="Source\Editor\Viewport\Asset\StaticMeshEditorViewportClient.h" />
     <ClInclude Include="Source\Editor\Viewport\Level\FLevelViewportLayout.h" />
     <ClInclude Include="Source\Editor\Viewport\Level\LevelEditorViewportClient.h" />
+    <ClInclude Include="Source\Engine\Animation\Notify\AnimNotify_HorseJump.h" />
     <ClInclude Include="Source\Engine\pch.h" />
     <ClInclude Include="Source\Engine\AI\Blackboard.h" />
     <ClInclude Include="Source\Engine\AI\HorseBlackboardKeys.h" />
@@ -809,6 +814,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClInclude Include="Source\Engine\Animation\Graph\AnimGraphInstance.h" />
     <ClInclude Include="Source\Engine\Animation\Graph\AnimGraphManager.h" />
     <ClInclude Include="Source\Engine\Animation\Graph\AnimGraphTypes.h" />
+    <ClInclude Include="Source\Engine\Animation\Graph\BlendSpaceTriangulation.h" />
     <ClInclude Include="Source\Engine\Animation\Instance\AnimSingleNodeInstance.h" />
     <ClInclude Include="Source\Engine\Animation\Instance\CharacterAnimGraphInstance.h" />
     <ClInclude Include="Source\Engine\Animation\Instance\CharacterAnimInstance.h" />
@@ -818,6 +824,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClInclude Include="Source\Engine\Animation\Nodes\AnimNodeContexts.h" />
     <ClInclude Include="Source\Engine\Animation\Nodes\AnimNode_Base.h" />
     <ClInclude Include="Source\Engine\Animation\Nodes\AnimNode_BlendListByEnum.h" />
+    <ClInclude Include="Source\Engine\Animation\Nodes\AnimNode_BlendSpace.h" />
     <ClInclude Include="Source\Engine\Animation\Nodes\AnimNode_LayeredBlendPerBone.h" />
     <ClInclude Include="Source\Engine\Animation\Nodes\AnimNode_RefPose.h" />
     <ClInclude Include="Source\Engine\Animation\Nodes\AnimNode_Root.h" />

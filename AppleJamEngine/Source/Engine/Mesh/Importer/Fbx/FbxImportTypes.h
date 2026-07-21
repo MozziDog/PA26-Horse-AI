@@ -59,6 +59,10 @@ struct FFbxAnimationImportOptions
 	// Empty means import every stack. Filled means import only matching FBX AnimStack indices.
 	TSet<int32> SelectedStackIndices;
 
+	// Target skeleton's bone names. When set, the skeleton importer selects bone nodes by name,
+	// allowing animation-only FBX (joints exported as eNull nodes) to import against the skeleton.
+	TSet<FString> ReferenceBoneNames;
+
 	bool ShouldImportStack(int32 StackIndex) const
 	{
 		return SelectedStackIndices.empty() || SelectedStackIndices.find(StackIndex) != SelectedStackIndices.end();
@@ -78,6 +82,10 @@ struct FFbxSkeletalSceneImportOptions
 	bool bImportAnimations = true;
 
 	FFbxAnimationImportOptions AnimationOptions;
+
+	// Target skeleton's bone names, used only when importing animation/skeleton against an existing
+	// skeleton (no skin). Lets animation-only FBX with eNull joints match bones by name.
+	TSet<FString> ReferenceBoneNames;
 };
 
 struct FFbxSkeletalSceneImportResult

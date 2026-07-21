@@ -69,6 +69,10 @@ private:
 	// 배경 우클릭 시 캡쳐한 캔버스 좌표 — 같은 프레임의 BeginPopup 안에서 신규 노드 spawn 위치로 사용.
 	ImVec2 PendingNewNodePosition = ImVec2(0, 0);
 
+	// My Blueprint 네비게이터에서 루트 그래프 노드(BlendSpace 등)를 클릭했을 때, 다음 루트
+	// 캔버스 렌더에서 해당 노드를 선택+포커스하도록 요청. 처리 후 0 으로 리셋.
+	uint32 PendingNavigateNodeId = 0;
+
 	// StateMachine 노드 내부 편집 모드. UE 처럼 StateMachine 노드를 열면 Entry/State/Transition
 	// 그래프를 별도 캔버스로 보여준다. 런타임 데이터 모델은 기존 Node.States / Transitions 를 그대로 사용.
 	uint32 OpenStateMachineNodeId = 0;

@@ -301,6 +301,10 @@ bool FFbxImporter::ImportAnimationOnly(
 
 	FFbxImportContext Context;
 	InitializeImportContext(Context, FilePath, LoadOptions);
+	if (Options)
+	{
+		Context.ReferenceBoneNames = Options->ReferenceBoneNames;
+	}
 	FFbxSceneQuery::CollectAllNodes(RootNode, Context.AllNodes);
 	FFbxSceneQuery::CollectMeshNodes(RootNode, Context.MeshNodes);
 
@@ -378,6 +382,7 @@ bool FFbxImporter::ImportSkeletalScene(
 	else
 	{
 		FFbxSceneQuery::CollectAllNodes(RootNode, Context.AllNodes);
+		Context.ReferenceBoneNames = Options.ReferenceBoneNames;
 
 		if (!FFbxSkeletonImporter::ImportSkeleton(SceneHandle.Scene, Context, OutMessage))
 		{

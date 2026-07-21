@@ -1058,6 +1058,9 @@
     <ClCompile Include="Source\Engine\Animation\Graph\AnimGraphManager.cpp">
       <Filter>Source\Engine\Animation\Graph</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Engine\Animation\Graph\BlendSpaceTriangulation.cpp">
+      <Filter>Source\Engine\Animation\Graph</Filter>
+    </ClCompile>
     <ClCompile Include="Source\Engine\Animation\Instance\AnimSingleNodeInstance.cpp">
       <Filter>Source\Engine\Animation\Instance</Filter>
     </ClCompile>
@@ -1077,6 +1080,9 @@
       <Filter>Source\Engine\Animation\Montage</Filter>
     </ClCompile>
     <ClCompile Include="Source\Engine\Animation\Nodes\AnimNode_BlendListByEnum.cpp">
+      <Filter>Source\Engine\Animation\Nodes</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Engine\Animation\Nodes\AnimNode_BlendSpace.cpp">
       <Filter>Source\Engine\Animation\Nodes</Filter>
     </ClCompile>
     <ClCompile Include="Source\Engine\Animation\Nodes\AnimNode_LayeredBlendPerBone.cpp">
@@ -2316,6 +2322,7 @@
     <ClCompile Include="Intermediate\Generated\Reflection.generated.cpp">
       <Filter>Intermediate\Generated</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Engine\Animation\Notify\AnimNotify_HorseJump.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Editor\EditorEngine.h">
@@ -2579,6 +2586,9 @@
     <ClInclude Include="Source\Engine\Animation\Graph\AnimGraphTypes.h">
       <Filter>Source\Engine\Animation\Graph</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Engine\Animation\Graph\BlendSpaceTriangulation.h">
+      <Filter>Source\Engine\Animation\Graph</Filter>
+    </ClInclude>
     <ClInclude Include="Source\Engine\Animation\Instance\AnimSingleNodeInstance.h">
       <Filter>Source\Engine\Animation\Instance</Filter>
     </ClInclude>
@@ -2604,6 +2614,9 @@
       <Filter>Source\Engine\Animation\Nodes</Filter>
     </ClInclude>
     <ClInclude Include="Source\Engine\Animation\Nodes\AnimNode_BlendListByEnum.h">
+      <Filter>Source\Engine\Animation\Nodes</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Engine\Animation\Nodes\AnimNode_BlendSpace.h">
       <Filter>Source\Engine\Animation\Nodes</Filter>
     </ClInclude>
     <ClInclude Include="Source\Engine\Animation\Nodes\AnimNode_LayeredBlendPerBone.h">
@@ -6497,6 +6510,7 @@
     <ClInclude Include="ThirdParty\sol2\include\sol\utility\to_string.hpp">
       <Filter>ThirdParty\sol2\include\sol\utility</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Engine\Animation\Notify\AnimNotify_HorseJump.h" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="AppleJamEngine.rc" />

@@ -1,8 +1,9 @@
-#include "Editor/UI/Asset/Animation/AnimGraphEditorWidget.h"
+﻿#include "Editor/UI/Asset/Animation/AnimGraphEditorWidget.h"
 
 #include "Animation/Graph/AnimGraphAsset.h"
 #include "Animation/Graph/AnimGraphManager.h"
 #include "Animation/Graph/AnimGraphTypes.h"
+#include "Animation/Graph/BlendSpaceTriangulation.h"
 #include "Animation/AnimInstance.h"
 #include "Asset/AssetRegistry.h"
 #include "Core/Types/PropertyTypes.h"
@@ -53,6 +54,7 @@ namespace
 			case EAnimGraphNodeType::BlendListByEnum:     return "Blend List By Enum";
 			case EAnimGraphNodeType::VariableGet:         return "Variable Get";
 			case EAnimGraphNodeType::RefPose:             return "Ref Pose";
+			case EAnimGraphNodeType::BlendSpace:          return "Blend Space";
 		}
 		return "Node";
 	}
@@ -67,6 +69,7 @@ namespace
 			case EAnimGraphNodeType::Slot:                return ImVec4(0.60f, 0.95f, 0.65f, 1.0f); // 녹색 — montage 진입점
 			case EAnimGraphNodeType::LayeredBlendPerBone: return ImVec4(0.75f, 0.60f, 0.95f, 1.0f); // 연보라 — blender
 			case EAnimGraphNodeType::BlendListByEnum:     return ImVec4(0.70f, 0.70f, 0.95f, 1.0f); // 연보라
+			case EAnimGraphNodeType::BlendSpace:          return ImVec4(0.55f, 0.80f, 0.95f, 1.0f); // 하늘 — 2D blender
 			case EAnimGraphNodeType::StateMachine:        return ImVec4(0.90f, 0.55f, 0.95f, 1.0f); // 보라 — FSM
 			case EAnimGraphNodeType::VariableGet:         return ImVec4(0.95f, 0.85f, 0.40f, 1.0f); // 노랑 — data
 			case EAnimGraphNodeType::RefPose:             return ImVec4(0.70f, 0.70f, 0.70f, 1.0f); // 회색 — neutral leaf
@@ -129,6 +132,9 @@ namespace
 
 	FString FormatTransitionSummary(const FAnimGraphTransition& T);
 	FString FormatTransitionRuleNodeTitle(const FAnimGraphTransition& T);
+	FString FormatSingleRuleSummary(const FAnimGraphTransitionRule& R);
+	const char* RuleKindNodeTitle(ETransitionRuleKind Kind);
+	bool RenderTransitionRuleCompactEditor(FAnimGraphTransition& T, UAnimGraphAsset* Asset, UClass* OwnerCls);
 	bool StringContainsInsensitive(const FString& Haystack, const char* Needle);
 
 	ImVec4 PinTypeColor(EAnimGraphPinType Type)
@@ -155,6 +161,7 @@ namespace
 			case EAnimGraphNodeType::Slot:                return ImVec4(0.62f, 0.96f, 0.70f, 1.0f);
 			case EAnimGraphNodeType::LayeredBlendPerBone: return ImVec4(0.82f, 0.68f, 1.00f, 1.0f);
 			case EAnimGraphNodeType::BlendListByEnum:     return ImVec4(0.78f, 0.70f, 1.00f, 1.0f);
+			case EAnimGraphNodeType::BlendSpace:          return ImVec4(0.66f, 0.86f, 1.00f, 1.0f);
 			case EAnimGraphNodeType::VariableGet:         return ImVec4(0.42f, 1.00f, 0.24f, 1.0f);
 			case EAnimGraphNodeType::RefPose:             return ImVec4(0.78f, 0.78f, 0.78f, 1.0f);
 		}
@@ -171,6 +178,7 @@ namespace
 			case EAnimGraphNodeType::Slot:                return ImVec4(0.12f, 0.28f, 0.16f, 1.0f);
 			case EAnimGraphNodeType::LayeredBlendPerBone: return ImVec4(0.25f, 0.18f, 0.36f, 1.0f);
 			case EAnimGraphNodeType::BlendListByEnum:     return ImVec4(0.23f, 0.19f, 0.38f, 1.0f);
+			case EAnimGraphNodeType::BlendSpace:          return ImVec4(0.14f, 0.26f, 0.34f, 1.0f);
 			case EAnimGraphNodeType::VariableGet:         return ImVec4(0.08f, 0.25f, 0.08f, 1.0f);
 			case EAnimGraphNodeType::RefPose:             return ImVec4(0.20f, 0.20f, 0.20f, 1.0f);
 		}
@@ -404,6 +412,7 @@ namespace
 			case EAnimGraphNodeType::Slot:                return "몽타주 삽입";
 			case EAnimGraphNodeType::LayeredBlendPerBone: return "본별 블렌드";
 			case EAnimGraphNodeType::BlendListByEnum:     return "값으로 포즈 선택";
+			case EAnimGraphNodeType::BlendSpace:          return "2D 방향 블렌드";
 			case EAnimGraphNodeType::VariableGet:         return "변수 읽기";
 			case EAnimGraphNodeType::RefPose:             return "기준 포즈";
 		}
@@ -426,6 +435,8 @@ namespace
 				return "Base Pose와 Blend Pose를 섞습니다. Root Bone을 지정하면 해당 본 이하만 섞습니다.";
 			case EAnimGraphNodeType::BlendListByEnum:
 				return "Selector 값으로 여러 Pose 중 하나를 고릅니다. 현재 구현에서는 숫자 입력 기반입니다.";
+			case EAnimGraphNodeType::BlendSpace:
+				return "AxisX/AxisY 값에 따라 산점 샘플 클립들을 삼각분할+무게중심 가중으로 연속 블렌드합니다. 방향 locomotion(예: 좌우 strafe × 전후)에 사용. 한 축만 연결하면 자동 1D로 퇴화합니다. State의 SubGraph로도 사용 가능합니다.";
 			case EAnimGraphNodeType::VariableGet:
 				return "AnimGraph 변수 또는 Owner AnimInstance 속성을 읽는 데이터 노드입니다. Lua BP/C++에서 갱신한 값을 여기서 읽습니다.";
 			case EAnimGraphNodeType::RefPose:
@@ -992,7 +1003,8 @@ namespace
 			}
 			for (const FAnimGraphNode& N : AllNodes)
 			{
-				if (N.Type != EAnimGraphNodeType::StateMachine) continue;
+				// nested StateMachine 또는 BlendSpace(방향 locomotion) 를 sub-graph 로 허용(설계 §3.4).
+				if (N.Type != EAnimGraphNodeType::StateMachine && N.Type != EAnimGraphNodeType::BlendSpace) continue;
 				if (N.NodeId == OwnerNodeId) continue; // 자기 자신 제외 (직접 self-ref 금지)
 				char Buf[64];
 				std::snprintf(Buf, sizeof(Buf), "%s #%u", N.DisplayName.ToString().c_str(), N.NodeId);
@@ -1094,6 +1106,8 @@ namespace
 		ImGui::Dummy(ImVec2(Width, Height));
 	}
 
+	// 규칙 그래프 스타일 뷰. 각 leaf 규칙을 작은 노드로 그려 AND 결합을 보여주고, "Add Rule Node"
+	// 팔레트로 규칙을 추가한 뒤 아래 목록 편집기(RenderTransitionRuleCompactEditor)로 상세 편집한다.
 	bool RenderTransitionRuleGraph(FAnimGraphTransition& T, UAnimGraphAsset* Asset, UClass* OwnerCls, int32 Index)
 	{
 		ImGui::PushID(Index + 100000);
@@ -1105,7 +1119,7 @@ namespace
 		{
 			ImGui::OpenPopup("TransitionRuleActionPalette");
 		}
-		ImGui::TextDisabled("The rule must output a boolean for Can Enter Transition.");
+		ImGui::TextDisabled("All rule nodes are AND-combined into Can Enter Transition.");
 
 		if (ImGui::BeginPopup("TransitionRuleActionPalette"))
 		{
@@ -1119,15 +1133,13 @@ namespace
 			{
 				const FString Search = FString(TransitionRuleKindLabel(Kind)) + FString(" ") + TransitionRuleKindSearchText(Kind);
 				if (!StringContainsInsensitive(Search, RuleSearchBuf)) return;
-				const bool bSelected = T.RuleKind == Kind;
-				if (ImGui::Selectable(TransitionRuleKindLabel(Kind), bSelected))
+				if (ImGui::Selectable(TransitionRuleKindLabel(Kind), false))
 				{
-					if (T.RuleKind != Kind) bChanged = true;
-					T.RuleKind = Kind;
-					if (Kind == ETransitionRuleKind::BoolProperty && T.Threshold < 0.5f)
-					{
-						T.Threshold = 1.0f;
-					}
+					FAnimGraphTransitionRule R;
+					R.RuleKind = Kind;
+					if (Kind == ETransitionRuleKind::BoolProperty) R.Threshold = 1.0f;
+					T.Rules.push_back(R);
+					bChanged = true;
 					ImGui::CloseCurrentPopup();
 				}
 			};
@@ -1153,179 +1165,73 @@ namespace
 		}
 
 		const float NodeWidth = std::max(150.0f, (ImGui::GetContentRegionAvail().x - 26.0f) * 0.50f);
-		const FString RuleTitle = FormatTransitionRuleNodeTitle(T);
-		const FString RuleSummary = FormatTransitionSummary(T);
-		DrawSmallRuleNode(RuleTitle.c_str(), RuleSummary.c_str(), ImVec4(0.30f, 0.85f, 0.30f, 1.0f), NodeWidth);
+		if (T.Rules.empty())
+		{
+			DrawSmallRuleNode("No Rules", "Never (add a rule)", ImVec4(0.55f, 0.55f, 0.55f, 1.0f), NodeWidth);
+		}
+		else
+		{
+			for (int32 i = 0; i < static_cast<int32>(T.Rules.size()); ++i)
+			{
+				if (i > 0) ImGui::TextColored(ImVec4(0.70f, 0.85f, 0.55f, 1.0f), "AND");
+				DrawSmallRuleNode(RuleKindNodeTitle(T.Rules[i].RuleKind), FormatSingleRuleSummary(T.Rules[i]).c_str(),
+					ImVec4(0.30f, 0.85f, 0.30f, 1.0f), NodeWidth);
+			}
+		}
 		ImGui::SameLine();
 		ImGui::TextColored(ImVec4(0.86f, 0.86f, 0.82f, 1.0f), "=>");
 		ImGui::SameLine();
 		DrawSmallRuleNode("Can Enter Transition", "Return Value", ImVec4(0.86f, 0.20f, 0.16f, 1.0f), NodeWidth);
 
 		ImGui::Spacing();
-		ImGui::TextUnformatted("Rule Type");
-		bChanged |= TransitionRuleKindCombo("##TransitionRuleKind", T.RuleKind);
-
-		if (ImGui::CollapsingHeader("Common UE-style Presets"))
-		{
-			ImGui::TextWrapped("Pick a preset, then adjust the variable and threshold. For an Idle <-> Run pair, use GroundSpeed > threshold on the forward transition and GroundSpeed <= threshold on the reverse transition.");
-			if (ImGui::Button("Locomotion Enter: GroundSpeed > 10"))
-			{
-				EnsureGraphVariable(Asset, FName("GroundSpeed"), EAnimGraphPinType::Float);
-				T.RuleKind = ETransitionRuleKind::FloatCompare;
-				T.VariableName = FName("GroundSpeed");
-				T.Op = ETransitionOp::Greater;
-				T.Threshold = 10.0f;
-				bChanged = true;
-			}
-			ImGui::SameLine();
-			if (ImGui::Button("Locomotion Exit: GroundSpeed <= 10"))
-			{
-				EnsureGraphVariable(Asset, FName("GroundSpeed"), EAnimGraphPinType::Float);
-				T.RuleKind = ETransitionRuleKind::FloatCompare;
-				T.VariableName = FName("GroundSpeed");
-				T.Op = ETransitionOp::LessEqual;
-				T.Threshold = 10.0f;
-				bChanged = true;
-			}
-			if (ImGui::Button("Jump/Fall: IsFalling == true"))
-			{
-				EnsureGraphVariable(Asset, FName("IsFalling"), EAnimGraphPinType::Bool);
-				T.RuleKind = ETransitionRuleKind::BoolProperty;
-				T.VariableName = FName("IsFalling");
-				T.Threshold = 1.0f;
-				bChanged = true;
-			}
-			ImGui::SameLine();
-			if (ImGui::Button("Land: IsFalling == false"))
-			{
-				EnsureGraphVariable(Asset, FName("IsFalling"), EAnimGraphPinType::Bool);
-				T.RuleKind = ETransitionRuleKind::BoolProperty;
-				T.VariableName = FName("IsFalling");
-				T.Threshold = 0.0f;
-				bChanged = true;
-			}
-			if (ImGui::Button("One-shot: Current Animation Reached End"))
-			{
-				T.RuleKind = ETransitionRuleKind::AutomaticSequenceEnd;
-				T.VariableName = FName::None;
-				T.Threshold = 0.0f;
-				bChanged = true;
-			}
-		}
-
-		switch (T.RuleKind)
-		{
-			case ETransitionRuleKind::FloatCompare:
-			{
-				ImGui::TextUnformatted("Property");
-				bChanged |= VariableNameCombo("##RuleFloatProperty", Asset, OwnerCls, T.VariableName);
-				ImGui::TextUnformatted("Compare");
-				ImGui::SetNextItemWidth(72.0f);
-				if (ImGui::BeginCombo("##RuleOp", TransitionOpLabel(T.Op)))
-				{
-					for (int i = 0; i <= static_cast<int>(ETransitionOp::NotEqual); ++i)
-					{
-						const ETransitionOp O = static_cast<ETransitionOp>(i);
-						const bool bSel = (T.Op == O);
-						if (ImGui::Selectable(TransitionOpLabel(O), bSel))
-						{
-							if (T.Op != O) bChanged = true;
-							T.Op = O;
-						}
-					}
-					ImGui::EndCombo();
-				}
-				ImGui::SameLine();
-				ImGui::SetNextItemWidth(-1.0f);
-				if (ImGui::DragFloat("##RuleThreshold", &T.Threshold, 0.1f, -1000.0f, 1000.0f, "%.2f")) bChanged = true;
-				break;
-			}
-			case ETransitionRuleKind::BoolProperty:
-			{
-				ImGui::TextUnformatted("Property");
-				bChanged |= VariableNameCombo("##RuleBoolProperty", Asset, OwnerCls, T.VariableName);
-				bool bExpected = T.Threshold >= 0.5f;
-				if (ImGui::Checkbox("Expected True", &bExpected))
-				{
-					T.Threshold = bExpected ? 1.0f : 0.0f;
-					bChanged = true;
-				}
-				break;
-			}
-			case ETransitionRuleKind::TimeRemaining:
-				ImGui::TextUnformatted("Remaining Seconds <=");
-				ImGui::SetNextItemWidth(-1.0f);
-				if (ImGui::DragFloat("##RuleTimeRemaining", &T.Threshold, 0.01f, 0.0f, 60.0f, "%.2fs")) bChanged = true;
-				break;
-			case ETransitionRuleKind::TimeRemainingRatio:
-				ImGui::TextUnformatted("Remaining Ratio <=");
-				ImGui::SetNextItemWidth(-1.0f);
-				if (ImGui::DragFloat("##RuleTimeRemainingRatio", &T.Threshold, 0.01f, 0.0f, 1.0f, "%.2f")) bChanged = true;
-				break;
-			case ETransitionRuleKind::TimeElapsed:
-				ImGui::TextUnformatted("Current State Time >=");
-				ImGui::SetNextItemWidth(-1.0f);
-				if (ImGui::DragFloat("##RuleTimeElapsed", &T.Threshold, 0.01f, 0.0f, 60.0f, "%.2fs")) bChanged = true;
-				break;
-			case ETransitionRuleKind::AutomaticSequenceEnd:
-				ImGui::TextWrapped("Uses the current non-looping state's sequence end. Looping states will not auto-transition.");
-				break;
-			case ETransitionRuleKind::AlwaysTrue:
-				ImGui::TextWrapped("This transition is unconditional. Use it only for intentional forced flow.");
-				break;
-			case ETransitionRuleKind::AlwaysFalse:
-				ImGui::TextWrapped("This transition is disabled until a real rule node is selected.");
-				break;
-		}
-
-		ImGui::TextUnformatted("Blend Duration");
-		ImGui::SetNextItemWidth(-1.0f);
-		if (ImGui::DragFloat("##RuleBlendTime", &T.BlendTime, 0.01f, 0.0f, 5.0f, "%.2fs")) bChanged = true;
+		bChanged |= RenderTransitionRuleCompactEditor(T, Asset, OwnerCls);
 
 		ImGui::PopID();
 		return bChanged;
 	}
 
-	bool RenderTransitionRuleCompactEditor(FAnimGraphTransition& T, UAnimGraphAsset* Asset, UClass* OwnerCls)
+	// 단일 leaf 규칙 하나의 편집 폼(RuleKind 콤보 + kind 별 필드). Blend 는 transition 레벨이라 여기서 안 다룸.
+	// 호출부가 rule 별로 ImGui::PushID 를 걸어 위젯 id 충돌을 막아야 한다.
+	bool RenderSingleRuleBody(FAnimGraphTransitionRule& R, UAnimGraphAsset* Asset, UClass* OwnerCls)
 	{
 		bool bChanged = false;
 		ImGui::TextUnformatted("Rule");
-		bChanged |= TransitionRuleKindCombo("##TransitionRuleKind", T.RuleKind);
+		bChanged |= TransitionRuleKindCombo("##TransitionRuleKind", R.RuleKind);
 
-		switch (T.RuleKind)
+		switch (R.RuleKind)
 		{
 			case ETransitionRuleKind::FloatCompare:
 			{
 				ImGui::TextUnformatted("Float / Int Variable");
-				bChanged |= VariableNameComboFiltered("##RuleFloatProperty", Asset, OwnerCls, T.VariableName, EAnimGraphPinType::Float, true);
+				bChanged |= VariableNameComboFiltered("##RuleFloatProperty", Asset, OwnerCls, R.VariableName, EAnimGraphPinType::Float, true);
 				ImGui::SetNextItemWidth(72.0f);
-				if (ImGui::BeginCombo("##RuleOp", TransitionOpLabel(T.Op)))
+				if (ImGui::BeginCombo("##RuleOp", TransitionOpLabel(R.Op)))
 				{
 					for (int i = 0; i <= static_cast<int>(ETransitionOp::NotEqual); ++i)
 					{
 						const ETransitionOp O = static_cast<ETransitionOp>(i);
-						const bool bSel = (T.Op == O);
+						const bool bSel = (R.Op == O);
 						if (ImGui::Selectable(TransitionOpLabel(O), bSel))
 						{
-							if (T.Op != O) bChanged = true;
-							T.Op = O;
+							if (R.Op != O) bChanged = true;
+							R.Op = O;
 						}
 					}
 					ImGui::EndCombo();
 				}
 				ImGui::SameLine();
 				ImGui::SetNextItemWidth(-1.0f);
-				if (ImGui::DragFloat("##RuleThreshold", &T.Threshold, 0.1f, -1000.0f, 1000.0f, "%.2f")) bChanged = true;
+				if (ImGui::DragFloat("##RuleThreshold", &R.Threshold, 0.1f, -1000.0f, 1000.0f, "%.2f")) bChanged = true;
 				break;
 			}
 			case ETransitionRuleKind::BoolProperty:
 			{
 				ImGui::TextUnformatted("Bool Variable");
-				bChanged |= VariableNameComboFiltered("##RuleBoolProperty", Asset, OwnerCls, T.VariableName, EAnimGraphPinType::Bool, false);
-				bool bExpected = T.Threshold >= 0.5f;
+				bChanged |= VariableNameComboFiltered("##RuleBoolProperty", Asset, OwnerCls, R.VariableName, EAnimGraphPinType::Bool, false);
+				bool bExpected = R.Threshold >= 0.5f;
 				if (ImGui::Checkbox("Expected True", &bExpected))
 				{
-					T.Threshold = bExpected ? 1.0f : 0.0f;
+					R.Threshold = bExpected ? 1.0f : 0.0f;
 					bChanged = true;
 				}
 				break;
@@ -1333,27 +1239,76 @@ namespace
 			case ETransitionRuleKind::TimeRemaining:
 				ImGui::TextUnformatted("Remaining Seconds <=");
 				ImGui::SetNextItemWidth(-1.0f);
-				if (ImGui::DragFloat("##RuleTimeRemaining", &T.Threshold, 0.01f, 0.0f, 60.0f, "%.2fs")) bChanged = true;
+				if (ImGui::DragFloat("##RuleTimeRemaining", &R.Threshold, 0.01f, 0.0f, 60.0f, "%.2fs")) bChanged = true;
 				break;
 			case ETransitionRuleKind::TimeRemainingRatio:
 				ImGui::TextUnformatted("Remaining Ratio <=");
 				ImGui::SetNextItemWidth(-1.0f);
-				if (ImGui::DragFloat("##RuleTimeRemainingRatio", &T.Threshold, 0.01f, 0.0f, 1.0f, "%.2f")) bChanged = true;
+				if (ImGui::DragFloat("##RuleTimeRemainingRatio", &R.Threshold, 0.01f, 0.0f, 1.0f, "%.2f")) bChanged = true;
 				break;
 			case ETransitionRuleKind::TimeElapsed:
 				ImGui::TextUnformatted("Current State Time >=");
 				ImGui::SetNextItemWidth(-1.0f);
-				if (ImGui::DragFloat("##RuleTimeElapsed", &T.Threshold, 0.01f, 0.0f, 60.0f, "%.2fs")) bChanged = true;
+				if (ImGui::DragFloat("##RuleTimeElapsed", &R.Threshold, 0.01f, 0.0f, 60.0f, "%.2fs")) bChanged = true;
 				break;
 			case ETransitionRuleKind::AutomaticSequenceEnd:
 				ImGui::TextDisabled("현재 State의 non-looping sequence가 끝나면 true입니다.");
 				break;
 			case ETransitionRuleKind::AlwaysTrue:
-				ImGui::TextDisabled("항상 전환됩니다. 의도한 경우에만 사용하세요.");
+				ImGui::TextDisabled("항상 참인 규칙입니다.");
 				break;
 			case ETransitionRuleKind::AlwaysFalse:
-				ImGui::TextDisabled("비활성 전환입니다. Rule을 선택해야 전환됩니다.");
+				ImGui::TextDisabled("항상 거짓인 규칙입니다.");
 				break;
+		}
+		return bChanged;
+	}
+
+	// Transition 의 규칙 목록 편집기. 모든 규칙은 AND 로 결합된다(모두 참이어야 전환). 규칙을
+	// 추가/삭제하고, float param 범위 이내(A<X<B) 같은 복합 조건을 GUI 로 구성할 수 있다.
+	bool RenderTransitionRuleCompactEditor(FAnimGraphTransition& T, UAnimGraphAsset* Asset, UClass* OwnerCls)
+	{
+		bool bChanged = false;
+
+		ImGui::TextColored(ImVec4(0.70f, 0.85f, 0.55f, 1.0f), "Rules (AND)");
+		ImGui::SameLine();
+		ImGui::TextDisabled("모든 규칙이 참일 때 전환");
+
+		if (T.Rules.empty())
+		{
+			ImGui::TextDisabled("규칙 없음 — 전환하지 않습니다. 아래에서 규칙을 추가하세요.");
+		}
+
+		int32 RemoveIndex = -1;
+		for (int32 i = 0; i < static_cast<int32>(T.Rules.size()); ++i)
+		{
+			ImGui::PushID(i);
+			if (i > 0)
+			{
+				ImGui::Spacing();
+				ImGui::TextColored(ImVec4(0.70f, 0.85f, 0.55f, 1.0f), "AND");
+			}
+			ImGui::BeginGroup();
+			bChanged |= RenderSingleRuleBody(T.Rules[i], Asset, OwnerCls);
+			if (ImGui::SmallButton("Remove Rule"))
+			{
+				RemoveIndex = i;
+			}
+			ImGui::EndGroup();
+			ImGui::Separator();
+			ImGui::PopID();
+		}
+
+		if (RemoveIndex >= 0)
+		{
+			T.Rules.erase(T.Rules.begin() + RemoveIndex);
+			bChanged = true;
+		}
+
+		if (ImGui::Button("+ Add Rule (AND)"))
+		{
+			T.Rules.push_back(FAnimGraphTransitionRule{}); // 기본 FloatCompare
+			bChanged = true;
 		}
 
 		ImGui::TextUnformatted("Blend");
@@ -1362,48 +1317,54 @@ namespace
 
 		if (ImGui::CollapsingHeader("Presets", ImGuiTreeNodeFlags_None))
 		{
+			auto SetSingleRule = [&](ETransitionRuleKind Kind, FName Var, ETransitionOp Op, float Threshold)
+			{
+				FAnimGraphTransitionRule R;
+				R.RuleKind = Kind;
+				R.VariableName = Var;
+				R.Op = Op;
+				R.Threshold = Threshold;
+				T.Rules.clear();
+				T.Rules.push_back(R);
+				bChanged = true;
+			};
+
+			// 범위 이내(A < X < B) — 두 FloatCompare 를 AND 로. 이번 작업의 핵심 유스케이스.
+			if (ImGui::Button("Range: 5 < GroundSpeed < 20"))
+			{
+				EnsureGraphVariable(Asset, FName("GroundSpeed"), EAnimGraphPinType::Float);
+				FAnimGraphTransitionRule Lo; Lo.RuleKind = ETransitionRuleKind::FloatCompare; Lo.VariableName = FName("GroundSpeed"); Lo.Op = ETransitionOp::Greater; Lo.Threshold = 5.0f;
+				FAnimGraphTransitionRule Hi; Hi.RuleKind = ETransitionRuleKind::FloatCompare; Hi.VariableName = FName("GroundSpeed"); Hi.Op = ETransitionOp::Less;    Hi.Threshold = 20.0f;
+				T.Rules.clear();
+				T.Rules.push_back(Lo);
+				T.Rules.push_back(Hi);
+				bChanged = true;
+			}
 			if (ImGui::Button("GroundSpeed > 10"))
 			{
 				EnsureGraphVariable(Asset, FName("GroundSpeed"), EAnimGraphPinType::Float);
-				T.RuleKind = ETransitionRuleKind::FloatCompare;
-				T.VariableName = FName("GroundSpeed");
-				T.Op = ETransitionOp::Greater;
-				T.Threshold = 10.0f;
-				bChanged = true;
+				SetSingleRule(ETransitionRuleKind::FloatCompare, FName("GroundSpeed"), ETransitionOp::Greater, 10.0f);
 			}
 			ImGui::SameLine();
 			if (ImGui::Button("GroundSpeed <= 10"))
 			{
 				EnsureGraphVariable(Asset, FName("GroundSpeed"), EAnimGraphPinType::Float);
-				T.RuleKind = ETransitionRuleKind::FloatCompare;
-				T.VariableName = FName("GroundSpeed");
-				T.Op = ETransitionOp::LessEqual;
-				T.Threshold = 10.0f;
-				bChanged = true;
+				SetSingleRule(ETransitionRuleKind::FloatCompare, FName("GroundSpeed"), ETransitionOp::LessEqual, 10.0f);
 			}
 			if (ImGui::Button("IsFalling true"))
 			{
 				EnsureGraphVariable(Asset, FName("IsFalling"), EAnimGraphPinType::Bool);
-				T.RuleKind = ETransitionRuleKind::BoolProperty;
-				T.VariableName = FName("IsFalling");
-				T.Threshold = 1.0f;
-				bChanged = true;
+				SetSingleRule(ETransitionRuleKind::BoolProperty, FName("IsFalling"), ETransitionOp::Greater, 1.0f);
 			}
 			ImGui::SameLine();
 			if (ImGui::Button("IsFalling false"))
 			{
 				EnsureGraphVariable(Asset, FName("IsFalling"), EAnimGraphPinType::Bool);
-				T.RuleKind = ETransitionRuleKind::BoolProperty;
-				T.VariableName = FName("IsFalling");
-				T.Threshold = 0.0f;
-				bChanged = true;
+				SetSingleRule(ETransitionRuleKind::BoolProperty, FName("IsFalling"), ETransitionOp::Greater, 0.0f);
 			}
 			if (ImGui::Button("Animation End"))
 			{
-				T.RuleKind = ETransitionRuleKind::AutomaticSequenceEnd;
-				T.VariableName = FName::None;
-				T.Threshold = 0.0f;
-				bChanged = true;
+				SetSingleRule(ETransitionRuleKind::AutomaticSequenceEnd, FName::None, ETransitionOp::Greater, 0.0f);
 			}
 		}
 		return bChanged;
@@ -1425,6 +1386,218 @@ namespace
 		bChanged |= RenderTransitionRuleCompactEditor(T, Asset, OwnerCls);
 
 		ImGui::PopID();
+		return bChanged;
+	}
+
+	// BlendSpace 캔버스 ↔ 숫자 리스트가 공유하는 노드별 에디터-only UI 상태(직렬화 안 됨).
+	// 선택(Selected)을 공유해 한쪽에서 고른 샘플이 다른 쪽에서도 하이라이트된다.
+	struct FBSCanvasState
+	{
+		FVector2 Preview     = FVector2(0.0f, 0.0f);
+		int32    Selected    = -1;
+		int32    Dragging    = -1;
+		bool     bScrollToSel = false; // 캔버스에서 선택이 바뀌면 리스트를 그 샘플로 스크롤.
+	};
+	FBSCanvasState& GetBSCanvasState(uint32 NodeId)
+	{
+		static std::unordered_map<uint32, FBSCanvasState> States;
+		return States[NodeId];
+	}
+
+	// ── Build 4.1 : BlendSpace 2D 캔버스 인스펙터 ──────────────────────────────
+	// 임시 숫자 인스펙터와 병행. 샘플을 축 좌표 공간에 점으로 찍어 드래그 배치하고,
+	// 런타임과 동일한 FBlendSpaceTriangulation 으로 삼각망 edge 를 그린다.
+	// 프리뷰 십자선(빈 곳 드래그로 이동)은 그 질의점의 활성 샘플/가중치를 라이브로 보여줘
+	// Build 3 런타임 블렌드 결과와 일치함을 저작 중에 눈으로 확인하게 한다.
+	// 반환값 true = 샘플 좌표가 바뀜(caller 가 BumpVersion). 프리뷰/선택은 에디터-only 상태라 미변경.
+	bool RenderBlendSpaceCanvas(FAnimGraphNode& Node)
+	{
+		bool bChanged = false;
+
+		FBSCanvasState& UI = GetBSCanvasState(Node.NodeId);
+
+		const int32 SampleCount = static_cast<int32>(Node.BlendSamples.size());
+		if (UI.Selected >= SampleCount) UI.Selected = -1;
+		if (UI.Dragging >= SampleCount) UI.Dragging = -1;
+
+		// 축 범위 — degenerate(min==max, 예: 한 축만 쓰는 1D) 는 0-width 매핑을 피하려 패딩.
+		float MinX = Node.AxisMinX, MaxX = Node.AxisMaxX;
+		float MinY = Node.AxisMinY, MaxY = Node.AxisMaxY;
+		if (MaxX - MinX < 1e-3f) { MinX -= 0.5f; MaxX += 0.5f; }
+		if (MaxY - MinY < 1e-3f) { MinY -= 0.5f; MaxY += 0.5f; }
+		const float SpanX = MaxX - MinX;
+		const float SpanY = MaxY - MinY;
+
+		const float CanvasW = ImGui::GetContentRegionAvail().x;
+		const float CanvasH = std::min(std::max(CanvasW, 180.0f), 280.0f);
+		const ImVec2 P0 = ImGui::GetCursorScreenPos();
+		const ImVec2 Size(CanvasW, CanvasH);
+
+		// 축 범위 경계의 샘플이 테두리에 붙어 잘리지 않도록 world 좌표를 캔버스 안쪽(패딩된
+		// 사각형)에만 매핑한다. 배경/클립 영역은 전체 캔버스 그대로.
+		const float Pad = 16.0f;
+		const float InnerW = std::max(CanvasW - 2.0f * Pad, 1.0f);
+		const float InnerH = std::max(CanvasH - 2.0f * Pad, 1.0f);
+
+		// world(축값) ↔ screen(px) 매핑. Y 는 화면좌표가 아래로 증가하므로 뒤집는다.
+		auto WorldToScreen = [&](float wx, float wy) -> ImVec2
+		{
+			const float u = (wx - MinX) / SpanX;
+			const float v = (wy - MinY) / SpanY;
+			return ImVec2(P0.x + Pad + u * InnerW, P0.y + Pad + (1.0f - v) * InnerH);
+		};
+		auto ScreenToWorld = [&](const ImVec2& s) -> FVector2
+		{
+			const float u = (s.x - P0.x - Pad) / InnerW;
+			const float v = 1.0f - (s.y - P0.y - Pad) / InnerH;
+			return FVector2(MinX + u * SpanX, MinY + v * SpanY);
+		};
+
+		ImGui::InvisibleButton("##BSCanvas", Size);
+		const bool bActive = ImGui::IsItemActive();
+		const ImVec2 Mouse = ImGui::GetIO().MousePos;
+
+		ImDrawList* DL = ImGui::GetWindowDrawList();
+		DL->AddRectFilled(P0, ImVec2(P0.x + CanvasW, P0.y + CanvasH), IM_COL32(28, 30, 36, 255), 4.0f);
+		DL->AddRect     (P0, ImVec2(P0.x + CanvasW, P0.y + CanvasH), IM_COL32(90, 94, 104, 255), 4.0f);
+		DL->PushClipRect(P0, ImVec2(P0.x + CanvasW, P0.y + CanvasH), true);
+
+		// world 0 축선(범위 안일 때만).
+		if (MinX <= 0.0f && MaxX >= 0.0f)
+		{
+			const ImVec2 a = WorldToScreen(0.0f, MinY), b = WorldToScreen(0.0f, MaxY);
+			DL->AddLine(a, b, IM_COL32(70, 74, 84, 255));
+		}
+		if (MinY <= 0.0f && MaxY >= 0.0f)
+		{
+			const ImVec2 a = WorldToScreen(MinX, 0.0f), b = WorldToScreen(MaxX, 0.0f);
+			DL->AddLine(a, b, IM_COL32(70, 74, 84, 255));
+		}
+
+		// 런타임과 동일한 삼각망 build → edge draw. 질의 가중치도 여기서 뽑는다.
+		TArray<FVector2> Pts;
+		Pts.reserve(SampleCount);
+		for (const FBlendSample& S : Node.BlendSamples) Pts.push_back(FVector2(S.PosX, S.PosY));
+		FBlendSpaceTriangulation Tri;
+		const bool bHasSamples = Tri.Build(Pts);
+
+		for (const FBlendTriangle& T : Tri.GetTriangles())
+		{
+			const ImVec2 v0 = WorldToScreen(Pts[T.V0].X, Pts[T.V0].Y);
+			const ImVec2 v1 = WorldToScreen(Pts[T.V1].X, Pts[T.V1].Y);
+			const ImVec2 v2 = WorldToScreen(Pts[T.V2].X, Pts[T.V2].Y);
+			const ImU32 EdgeCol = IM_COL32(120, 150, 190, 160);
+			DL->AddLine(v0, v1, EdgeCol);
+			DL->AddLine(v1, v2, EdgeCol);
+			DL->AddLine(v2, v0, EdgeCol);
+		}
+
+		// 프리뷰 질의점의 활성 샘플/가중치(런타임 CalculateWeights 와 동일 경로).
+		TArray<FBlendTriangulationWeight> Weights;
+		if (bHasSamples) Tri.CalculateWeights(UI.Preview, Weights);
+
+		// 커서 아래의 샘플(선택/드래그 대상) — screen 거리 최근접.
+		const float PickRadius = 10.0f;
+		int32 HoverIdx = -1;
+		float BestD2 = PickRadius * PickRadius;
+		for (int32 i = 0; i < SampleCount; ++i)
+		{
+			const ImVec2 sp = WorldToScreen(Node.BlendSamples[i].PosX, Node.BlendSamples[i].PosY);
+			const float dx = sp.x - Mouse.x, dy = sp.y - Mouse.y;
+			const float d2 = dx * dx + dy * dy;
+			if (d2 < BestD2) { BestD2 = d2; HoverIdx = i; }
+		}
+
+		// 상호작용: 샘플 위 클릭 = 선택+드래그 시작 · 빈 곳 클릭/드래그 = 프리뷰 이동.
+		if (ImGui::IsItemActivated())
+		{
+			if (HoverIdx >= 0)
+			{
+				if (UI.Selected != HoverIdx) UI.bScrollToSel = true; // 리스트를 이 샘플로 스크롤.
+				UI.Selected = HoverIdx; UI.Dragging = HoverIdx;
+			}
+			else               { UI.Dragging = -1; UI.Preview = ScreenToWorld(Mouse); }
+		}
+		if (bActive)
+		{
+			const FVector2 W = ScreenToWorld(Mouse);
+			if (UI.Dragging >= 0 && UI.Dragging < SampleCount)
+			{
+				const float NewX = std::min(std::max(W.X, MinX), MaxX);
+				const float NewY = std::min(std::max(W.Y, MinY), MaxY);
+				FBlendSample& S = Node.BlendSamples[UI.Dragging];
+				if (S.PosX != NewX || S.PosY != NewY) { S.PosX = NewX; S.PosY = NewY; bChanged = true; }
+			}
+			else
+			{
+				UI.Preview = FVector2(std::min(std::max(W.X, MinX), MaxX),
+				                      std::min(std::max(W.Y, MinY), MaxY));
+			}
+		}
+		else
+		{
+			UI.Dragging = -1;
+		}
+
+		// 프리뷰 십자선 + 활성 샘플로 향하는 가중 선.
+		const ImVec2 pv = WorldToScreen(UI.Preview.X, UI.Preview.Y);
+		for (const FBlendTriangulationWeight& Wt : Weights)
+		{
+			if (Wt.SampleIndex < 0 || Wt.SampleIndex >= SampleCount) continue;
+			const ImVec2 sp = WorldToScreen(Node.BlendSamples[Wt.SampleIndex].PosX,
+			                                Node.BlendSamples[Wt.SampleIndex].PosY);
+			const int32 A = static_cast<int32>(40.0f + 180.0f * Wt.Weight);
+			DL->AddLine(pv, sp, IM_COL32(250, 210, 120, A), 1.0f + 2.0f * Wt.Weight);
+		}
+
+		// 샘플 점 + 라벨. 활성 가중치는 외곽 링 크기로 표현.
+		for (int32 i = 0; i < SampleCount; ++i)
+		{
+			const FBlendSample& S = Node.BlendSamples[i];
+			const ImVec2 sp = WorldToScreen(S.PosX, S.PosY);
+
+			float w = 0.0f;
+			for (const FBlendTriangulationWeight& Wt : Weights)
+				if (Wt.SampleIndex == i) { w = Wt.Weight; break; }
+
+			if (w > 0.0f)
+				DL->AddCircle(sp, 6.0f + 8.0f * w, IM_COL32(250, 210, 120, 200), 0, 2.0f);
+
+			const bool bSel = (i == UI.Selected);
+			const ImU32 Fill = bSel ? IM_COL32(255, 220, 90, 255) : IM_COL32(120, 170, 230, 255);
+			DL->AddCircleFilled(sp, 5.0f, Fill);
+			DL->AddCircle(sp, 5.0f, IM_COL32(20, 22, 26, 255), 0, 1.5f);
+
+			const FString Stem = S.SequencePath.empty() ? FString("None") : GetStemFromPath(S.SequencePath);
+			DL->AddText(ImVec2(sp.x + 8.0f, sp.y - 6.0f), IM_COL32(210, 214, 224, 255), Stem.c_str());
+		}
+
+		// 프리뷰 십자선(맨 위).
+		DL->AddLine(ImVec2(pv.x - 7, pv.y), ImVec2(pv.x + 7, pv.y), IM_COL32(255, 235, 150, 255), 1.5f);
+		DL->AddLine(ImVec2(pv.x, pv.y - 7), ImVec2(pv.x, pv.y + 7), IM_COL32(255, 235, 150, 255), 1.5f);
+
+		DL->PopClipRect();
+
+		// 캔버스 하단: 좌표/가중치 리드아웃 + 안내.
+		ImGui::Spacing();
+		if (!bHasSamples)
+		{
+			ImGui::TextDisabled("샘플이 없습니다. 아래 'Add Sample' 또는 캔버스 편집 후 배치.");
+		}
+		else
+		{
+			ImGui::Text("Preview (%.2f, %.2f)", UI.Preview.X, UI.Preview.Y);
+			ImGui::SameLine();
+			ImGui::TextDisabled("| 빈 곳 드래그=프리뷰, 점 드래그=샘플 이동");
+			for (const FBlendTriangulationWeight& Wt : Weights)
+			{
+				if (Wt.SampleIndex < 0 || Wt.SampleIndex >= SampleCount) continue;
+				const FString Stem = Node.BlendSamples[Wt.SampleIndex].SequencePath.empty()
+					? FString("None") : GetStemFromPath(Node.BlendSamples[Wt.SampleIndex].SequencePath);
+				ImGui::BulletText("%s  %.0f%%", Stem.c_str(), Wt.Weight * 100.0f);
+			}
+		}
+
 		return bChanged;
 	}
 
@@ -1658,6 +1831,163 @@ namespace
 					if (PendingDeleteIdx >= 0)
 					{
 						Node.Transitions.erase(Node.Transitions.begin() + PendingDeleteIdx);
+						bChanged = true;
+					}
+				}
+				break;
+			}
+
+			case EAnimGraphNodeType::BlendSpace:
+			{
+				// 이름 — State 의 SubGraph 드롭다운에서 이 이름으로 지칭되므로 알아보기 쉽게.
+				{
+					char NameBuf[64];
+					const FString CurName = Node.DisplayName == FName::None ? FString() : Node.DisplayName.ToString();
+					std::snprintf(NameBuf, sizeof(NameBuf), "%s", CurName.c_str());
+					ImGui::TextUnformatted("Name");
+					ImGui::SameLine();
+					ImGui::SetNextItemWidth(-1.0f);
+					// 편집 중엔 버퍼만, 포커스 빠질 때 commit(빈 이름 = None → fallback 라벨).
+					ImGui::InputText("##BSName", NameBuf, sizeof(NameBuf));
+					if (ImGui::IsItemDeactivatedAfterEdit())
+					{
+						const FName NewName = (NameBuf[0] == '\0') ? FName::None : FName(NameBuf);
+						if (NewName != Node.DisplayName) { Node.DisplayName = NewName; bChanged = true; }
+					}
+				}
+
+				ImGui::Spacing();
+
+				if (ImGui::CollapsingHeader("2D Canvas", ImGuiTreeNodeFlags_DefaultOpen))
+				{
+					if (RenderBlendSpaceCanvas(Node)) bChanged = true;
+				}
+
+				ImGui::Spacing();
+
+				// ── 임시 숫자입력 인스펙터 (Build 3.5). Build 4 에서 2D 캔버스와 병행 유지. ──
+				ImGui::TextDisabled("AxisX/AxisY 핀에 Variable Get(Float)을 연결. (미연결 축 = 0)");
+				ImGui::Spacing();
+
+				// 축 범위(에디터/정규화 참고). 삼각분할은 실제 좌표를 그대로 사용.
+				if (ImGui::CollapsingHeader("Axis Range", ImGuiTreeNodeFlags_DefaultOpen))
+				{
+					ImGui::TextUnformatted("X");
+					ImGui::SameLine();
+					float RangeX[2] = { Node.AxisMinX, Node.AxisMaxX };
+					ImGui::SetNextItemWidth(-1.0f);
+					if (ImGui::DragFloat2("##AxisRangeX", RangeX, 0.05f, -3600.0f, 3600.0f, "%.2f"))
+					{
+						Node.AxisMinX = RangeX[0]; Node.AxisMaxX = RangeX[1]; bChanged = true;
+					}
+					ImGui::TextUnformatted("Y");
+					ImGui::SameLine();
+					float RangeY[2] = { Node.AxisMinY, Node.AxisMaxY };
+					ImGui::SetNextItemWidth(-1.0f);
+					if (ImGui::DragFloat2("##AxisRangeY", RangeY, 0.05f, -3600.0f, 3600.0f, "%.2f"))
+					{
+						Node.AxisMinY = RangeY[0]; Node.AxisMaxY = RangeY[1]; bChanged = true;
+					}
+				}
+
+				ImGui::Spacing();
+
+				// ── Samples ──
+				// 캔버스와 공유하는 선택 상태 — 리스트에서 고르면 캔버스가, 캔버스에서 고르면 리스트가 하이라이트.
+				FBSCanvasState& UI = GetBSCanvasState(Node.NodeId);
+				char BSHeader[64];
+				std::snprintf(BSHeader, sizeof(BSHeader), "Samples (%zu)###BSSamples", Node.BlendSamples.size());
+				if (ImGui::CollapsingHeader(BSHeader, ImGuiTreeNodeFlags_DefaultOpen))
+				{
+					if (ImGui::Button("Add Sample"))
+					{
+						Node.BlendSamples.push_back(FBlendSample{});
+						UI.Selected = static_cast<int32>(Node.BlendSamples.size()) - 1;
+						UI.bScrollToSel = true;
+						bChanged = true;
+					}
+
+					const int32 NumSamples = static_cast<int32>(Node.BlendSamples.size());
+					int32 PendingDeleteIdx = -1;
+
+					// 캔버스를 밀어내지 않도록 리스트를 높이 제한 child(스크롤)로 감싼다.
+					// 샘플이 적으면 내용 높이에 맞춰 줄고, 많으면 상한에서 스크롤바가 생긴다.
+					if (NumSamples > 0)
+					{
+						const float ListH = std::min(NumSamples * 132.0f + 8.0f, 400.0f);
+						ImGui::BeginChild("##BSSampleList", ImVec2(0.0f, ListH), true);
+						for (int32 i = 0; i < NumSamples; ++i)
+						{
+							FBlendSample& Sample = Node.BlendSamples[i];
+							ImGui::PushID(i);
+
+							// 선택 헤더 행 — 클릭 시 선택(캔버스와 공유). 선택 시 지속 하이라이트.
+							const FString Stem = Sample.SequencePath.empty() ? FString("None") : GetStemFromPath(Sample.SequencePath);
+							char RowLabel[96];
+							std::snprintf(RowLabel, sizeof(RowLabel), "#%d  %s", i, Stem.c_str());
+							const bool bRowSel = (UI.Selected == i);
+							if (ImGui::Selectable(RowLabel, bRowSel)) UI.Selected = i;
+							// 캔버스에서 선택이 바뀌었으면 그 행으로 스크롤.
+							if (bRowSel && UI.bScrollToSel) { ImGui::SetScrollHereY(0.5f); UI.bScrollToSel = false; }
+
+							// 클립 피커 (SequencePlayer 노드와 동일 패턴).
+							ImGui::TextUnformatted("Clip");
+							ImGui::SameLine();
+							ImGui::SetNextItemWidth(-1.0f);
+							if (ImGui::BeginCombo("##BSClip", Stem.c_str()))
+							{
+								const bool bSelNone = Sample.SequencePath.empty();
+								if (ImGui::Selectable("None", bSelNone))
+								{
+									if (!Sample.SequencePath.empty()) bChanged = true;
+									Sample.SequencePath.clear();
+								}
+								const TArray<FAssetListItem>& AnimFiles = FAssetRegistry::ListByTypeName("UAnimSequence");
+								for (const FAssetListItem& Item : AnimFiles)
+								{
+									const bool bSel = (Sample.SequencePath == Item.FullPath);
+									if (ImGui::Selectable(Item.DisplayName.c_str(), bSel))
+									{
+										if (Sample.SequencePath != Item.FullPath) bChanged = true;
+										Sample.SequencePath = Item.FullPath;
+									}
+									if (bSel) ImGui::SetItemDefaultFocus();
+								}
+								ImGui::EndCombo();
+							}
+
+							// PosX/PosY — DragFloatN 은 포맷을 컴포넌트마다 따로 적용(컴포넌트당 %f 1개)하므로
+							// X/Y 를 별도 DragFloat 2개로 분리(포맷에 %f 2개 넣으면 두 번째가 스택 쓰레기값 읽음).
+							ImGui::SetNextItemWidth(-1.0f);
+							if (ImGui::DragFloat("##BSPosX", &Sample.PosX, 0.02f, -3600.0f, 3600.0f, "PosX %.2f"))
+							{
+								bChanged = true;
+							}
+							ImGui::SetNextItemWidth(-1.0f);
+							if (ImGui::DragFloat("##BSPosY", &Sample.PosY, 0.02f, -3600.0f, 3600.0f, "PosY %.2f"))
+							{
+								bChanged = true;
+							}
+
+							// PlayRate.
+							ImGui::SetNextItemWidth(-1.0f);
+							if (ImGui::DragFloat("##BSPlayRate", &Sample.PlayRate, 0.02f, 0.0f, 4.0f, "PlayRate %.2f"))
+							{
+								bChanged = true;
+							}
+
+							if (ImGui::Button("Delete##BSSample")) PendingDeleteIdx = i;
+							ImGui::Separator();
+							ImGui::PopID();
+						}
+						ImGui::EndChild();
+					}
+
+					if (PendingDeleteIdx >= 0)
+					{
+						Node.BlendSamples.erase(Node.BlendSamples.begin() + PendingDeleteIdx);
+						if (UI.Selected == PendingDeleteIdx) UI.Selected = -1;
+						else if (UI.Selected > PendingDeleteIdx) --UI.Selected; // 인덱스 시프트 보정.
 						bChanged = true;
 					}
 				}
@@ -1928,69 +2258,85 @@ namespace
 		return Buf;
 	}
 
-	FString FormatTransitionSummary(const FAnimGraphTransition& T)
+	// 단일 leaf 규칙 하나의 요약(Blend 제외). FormatTransitionSummary 가 여러 개를 " AND " 로 잇는다.
+	FString FormatSingleRuleSummary(const FAnimGraphTransitionRule& R)
 	{
-		char Buf[192];
-		switch (T.RuleKind)
+		char Buf[160];
+		switch (R.RuleKind)
 		{
 			case ETransitionRuleKind::FloatCompare:
 			{
-				const FString Var = (T.VariableName == FName::None) ? FString("<select variable>") : T.VariableName.ToString();
-				std::snprintf(Buf, sizeof(Buf), "%s %s %.2f  |  Blend %.2fs",
-					Var.c_str(), TransitionOpLabel(T.Op), T.Threshold, T.BlendTime);
+				const FString Var = (R.VariableName == FName::None) ? FString("<select variable>") : R.VariableName.ToString();
+				std::snprintf(Buf, sizeof(Buf), "%s %s %.2f", Var.c_str(), TransitionOpLabel(R.Op), R.Threshold);
 				return Buf;
 			}
 			case ETransitionRuleKind::BoolProperty:
 			{
-				const FString Var = (T.VariableName == FName::None) ? FString("<select bool>") : T.VariableName.ToString();
-				std::snprintf(Buf, sizeof(Buf), "%s is %s  |  Blend %.2fs",
-					Var.c_str(), T.Threshold >= 0.5f ? "true" : "false", T.BlendTime);
+				const FString Var = (R.VariableName == FName::None) ? FString("<select bool>") : R.VariableName.ToString();
+				std::snprintf(Buf, sizeof(Buf), "%s is %s", Var.c_str(), R.Threshold >= 0.5f ? "true" : "false");
 				return Buf;
 			}
 			case ETransitionRuleKind::TimeRemaining:
-				std::snprintf(Buf, sizeof(Buf), "Current state time remaining <= %.2fs  |  Blend %.2fs", T.Threshold, T.BlendTime);
+				std::snprintf(Buf, sizeof(Buf), "state time remaining <= %.2fs", R.Threshold);
 				return Buf;
 			case ETransitionRuleKind::TimeRemainingRatio:
-				std::snprintf(Buf, sizeof(Buf), "Current state time remaining ratio <= %.2f  |  Blend %.2fs", T.Threshold, T.BlendTime);
+				std::snprintf(Buf, sizeof(Buf), "state time remaining ratio <= %.2f", R.Threshold);
 				return Buf;
 			case ETransitionRuleKind::TimeElapsed:
-				std::snprintf(Buf, sizeof(Buf), "Current state time >= %.2fs  |  Blend %.2fs", T.Threshold, T.BlendTime);
+				std::snprintf(Buf, sizeof(Buf), "state time >= %.2fs", R.Threshold);
 				return Buf;
 			case ETransitionRuleKind::AutomaticSequenceEnd:
-				std::snprintf(Buf, sizeof(Buf), "When non-looping source sequence reaches the end  |  Blend %.2fs", T.BlendTime);
-				return Buf;
+				return "non-looping sequence reached end";
 			case ETransitionRuleKind::AlwaysTrue:
-				std::snprintf(Buf, sizeof(Buf), "Always true  |  Blend %.2fs", T.BlendTime);
-				return Buf;
+				return "always true";
 			case ETransitionRuleKind::AlwaysFalse:
-				std::snprintf(Buf, sizeof(Buf), "Always false  |  Blend %.2fs", T.BlendTime);
-				return Buf;
+				return "always false";
 		}
-		return "Transition Rule";
+		return "rule";
+	}
+
+	FString FormatTransitionSummary(const FAnimGraphTransition& T)
+	{
+		char BlendBuf[48];
+		std::snprintf(BlendBuf, sizeof(BlendBuf), "  |  Blend %.2fs", T.BlendTime);
+
+		if (T.Rules.empty())
+		{
+			return FString("No rules (never)") + BlendBuf;
+		}
+
+		FString Joined;
+		for (int32 i = 0; i < static_cast<int32>(T.Rules.size()); ++i)
+		{
+			if (i > 0) Joined += " AND ";
+			Joined += FormatSingleRuleSummary(T.Rules[i]);
+		}
+		return Joined + BlendBuf;
+	}
+
+	const char* RuleKindNodeTitle(ETransitionRuleKind Kind)
+	{
+		switch (Kind)
+		{
+			case ETransitionRuleKind::FloatCompare:         return "Float Compare";
+			case ETransitionRuleKind::BoolProperty:         return "Bool Property";
+			case ETransitionRuleKind::TimeRemaining:        return "Time Remaining";
+			case ETransitionRuleKind::TimeRemainingRatio:   return "Time Remaining Ratio";
+			case ETransitionRuleKind::TimeElapsed:          return "Current State Time";
+			case ETransitionRuleKind::AutomaticSequenceEnd: return "Automatic Rule";
+			case ETransitionRuleKind::AlwaysTrue:           return "Literal True";
+			case ETransitionRuleKind::AlwaysFalse:          return "Literal False";
+		}
+		return "Rule Node";
 	}
 
 	FString FormatTransitionRuleNodeTitle(const FAnimGraphTransition& T)
 	{
-		switch (T.RuleKind)
-		{
-			case ETransitionRuleKind::FloatCompare:
-				return "Float > Compare";
-			case ETransitionRuleKind::BoolProperty:
-				return "Bool Property";
-			case ETransitionRuleKind::TimeRemaining:
-				return "Time Remaining";
-			case ETransitionRuleKind::TimeRemainingRatio:
-				return "Time Remaining Ratio";
-			case ETransitionRuleKind::TimeElapsed:
-				return "Current State Time";
-			case ETransitionRuleKind::AutomaticSequenceEnd:
-				return "Automatic Rule";
-			case ETransitionRuleKind::AlwaysTrue:
-				return "Literal True";
-			case ETransitionRuleKind::AlwaysFalse:
-				return "Literal False";
-		}
-		return "Rule Node";
+		if (T.Rules.empty()) return "No Rules";
+		if (T.Rules.size() == 1) return RuleKindNodeTitle(T.Rules[0].RuleKind);
+		char Buf[48];
+		std::snprintf(Buf, sizeof(Buf), "%zu Rules (AND)", T.Rules.size());
+		return Buf;
 	}
 
 	FName MakeUniqueStateName(const TArray<FAnimGraphState>& States, const char* Prefix)
@@ -2075,26 +2421,31 @@ namespace
 		Reverse.FromStateName = Source.ToStateName;
 		Reverse.ToStateName   = Source.FromStateName;
 
-		// Safe auto-inversion is only possible for simple scalar/bool property rules.
-		// Time-based rules are bound to the source state and cannot be meaningfully inverted.
-		switch (Source.RuleKind)
+		// 편의용 best-effort 반전 — 규칙별로 뒤집는다. (AND 배열의 엄밀한 논리 부정은 De Morgan 상
+		// OR 가 되어 단일 transition 으로 표현 불가하므로, 각 rule 을 개별 반전하는 기존 방침을 유지.)
+		// FloatCompare 는 Op 반전, Bool 은 기대값 반전, 시간/Always 류는 반전 불가 → 해당 rule 을
+		// AlwaysFalse 로 두어 사용자가 직접 작성하게 한다.
+		for (FAnimGraphTransitionRule& R : Reverse.Rules)
 		{
-			case ETransitionRuleKind::FloatCompare:
-				Reverse.Op = InvertTransitionOp(Source.Op);
-				break;
-			case ETransitionRuleKind::BoolProperty:
-				Reverse.Threshold = Source.Threshold >= 0.5f ? 0.0f : 1.0f;
-				break;
-			case ETransitionRuleKind::AlwaysTrue:
-			case ETransitionRuleKind::AlwaysFalse:
-			case ETransitionRuleKind::TimeRemaining:
-			case ETransitionRuleKind::TimeRemainingRatio:
-			case ETransitionRuleKind::TimeElapsed:
-			case ETransitionRuleKind::AutomaticSequenceEnd:
-				Reverse.RuleKind = ETransitionRuleKind::AlwaysFalse;
-				Reverse.VariableName = FName::None;
-				Reverse.Threshold = 0.0f;
-				break;
+			switch (R.RuleKind)
+			{
+				case ETransitionRuleKind::FloatCompare:
+					R.Op = InvertTransitionOp(R.Op);
+					break;
+				case ETransitionRuleKind::BoolProperty:
+					R.Threshold = R.Threshold >= 0.5f ? 0.0f : 1.0f;
+					break;
+				case ETransitionRuleKind::AlwaysTrue:
+				case ETransitionRuleKind::AlwaysFalse:
+				case ETransitionRuleKind::TimeRemaining:
+				case ETransitionRuleKind::TimeRemainingRatio:
+				case ETransitionRuleKind::TimeElapsed:
+				case ETransitionRuleKind::AutomaticSequenceEnd:
+					R.RuleKind = ETransitionRuleKind::AlwaysFalse;
+					R.VariableName = FName::None;
+					R.Threshold = 0.0f;
+					break;
+			}
 		}
 		return Reverse;
 	}
@@ -2239,10 +2590,13 @@ namespace
 	}
 
 
+	// State.SubGraphNodeId 가 가리켜도 되는 노드 — nested StateMachine 또는 BlendSpace(방향 locomotion).
+	// UAnimState::SubGraphOverride 가 임의 위임을 지원(설계 §3.4).
 	bool IsStateMachineNodeRefValid(const UAnimGraphAsset& Asset, uint32 NodeId)
 	{
 		const FAnimGraphNode* Node = Asset.FindNode(NodeId);
-		return Node && Node->Type == EAnimGraphNodeType::StateMachine;
+		return Node && (Node->Type == EAnimGraphNodeType::StateMachine ||
+		                Node->Type == EAnimGraphNodeType::BlendSpace);
 	}
 
 	bool DoesStateMachineReachNode(const UAnimGraphAsset& Asset, uint32 CurrentNodeId, uint32 TargetNodeId, std::unordered_set<uint32>& Visiting)
@@ -2535,6 +2889,38 @@ bool FAnimGraphEditorWidget::RenderAnimBlueprintNavigator(UAnimGraphAsset& Asset
 		ImGui::TreePop();
 	}
 
+	// Blend Space 노드 — State 의 SubGraph 로 지칭되므로 여기서 이름을 알아보기 쉽게 노출.
+	if (ImGui::TreeNodeEx("Blend Spaces", ImGuiTreeNodeFlags_DefaultOpen))
+	{
+		bool bAnyBlendSpace = false;
+		for (const FAnimGraphNode& Node : Asset.GetNodes())
+		{
+			if (Node.Type != EAnimGraphNodeType::BlendSpace) continue;
+			bAnyBlendSpace = true;
+			ImGui::PushID(static_cast<int>(Node.NodeId));
+			char BsLabel[160];
+			std::snprintf(BsLabel, sizeof(BsLabel), "%s  (%zu samples)",
+				NodeTitleForDisplay(Node).c_str(), Node.BlendSamples.size());
+			// 클릭하면 루트 그래프에서 이 노드를 선택·포커스 → 우측 inspector 가 편집 대상으로 잡는다.
+			const bool bBsSelected = (PendingNavigateNodeId == Node.NodeId);
+			if (ImGui::Selectable(BsLabel, bBsSelected))
+			{
+				ViewMode = EViewMode::RootAnimGraph;
+				OpenStateMachineNodeId = 0;
+				OpenStateIndex = -1;
+				OpenTransitionIndex = -1;
+				PendingNavigateNodeId = Node.NodeId;
+			}
+			if (ImGui::IsItemHovered()) ImGui::SetTooltip("2D 방향 블렌드 노드. 클릭하면 루트 그래프에서 선택되어 우측에서 편집·이름 변경할 수 있습니다.");
+			ImGui::PopID();
+		}
+		if (!bAnyBlendSpace)
+		{
+			ImGui::TextDisabled("Blend Space 없음");
+		}
+		ImGui::TreePop();
+	}
+
 	if (ImGui::TreeNodeEx("Variables", ImGuiTreeNodeFlags_None))
 	{
 		for (const FAnimGraphVariable& Var : Asset.GetVariables())
@@ -2711,6 +3097,11 @@ bool FAnimGraphEditorWidget::CloneNodeFragment(UAnimGraphAsset* Asset, const TAr
 		NewNode->States = SrcNode.States;
 		NewNode->Transitions = SrcNode.Transitions;
 		NewNode->InitialStateName = SrcNode.InitialStateName;
+		NewNode->BlendSamples = SrcNode.BlendSamples;
+		NewNode->AxisMinX = SrcNode.AxisMinX;
+		NewNode->AxisMaxX = SrcNode.AxisMaxX;
+		NewNode->AxisMinY = SrcNode.AxisMinY;
+		NewNode->AxisMaxY = SrcNode.AxisMaxY;
 
 		const size_t PinCount = std::min(SrcNode.Pins.size(), NewPins.size());
 		for (size_t i = 0; i < PinCount; ++i)
@@ -3076,30 +3467,38 @@ void FAnimGraphEditorWidget::ValidateGraph(UAnimGraphAsset* Asset)
 						AddValidationMessage(LastValidationMessages, bLastValidationOk,
 							NodeTitleForDisplay(Node) + " has a transition with a missing source state.", true);
 					}
-					if ((T.RuleKind == ETransitionRuleKind::FloatCompare || T.RuleKind == ETransitionRuleKind::BoolProperty) && T.VariableName == FName::None)
+					if (T.Rules.empty())
 					{
 						AddValidationMessage(LastValidationMessages, bLastValidationOk,
-							NodeTitleForDisplay(Node) + " has a property-based transition rule without a selected variable.", true);
+							NodeTitleForDisplay(Node) + " has a transition with no rules (it will never fire).", false);
 					}
-					else if ((T.RuleKind == ETransitionRuleKind::FloatCompare || T.RuleKind == ETransitionRuleKind::BoolProperty)
-						&& !IsVariableResolvable(Asset, OwnerCls, T.VariableName))
+					for (const FAnimGraphTransitionRule& R : T.Rules)
 					{
-						AddValidationMessage(LastValidationMessages, bLastValidationOk,
-							NodeTitleForDisplay(Node) + " has a transition rule referencing an unknown variable: " + T.VariableName.ToString(), true);
-					}
-					else if (T.RuleKind == ETransitionRuleKind::FloatCompare || T.RuleKind == ETransitionRuleKind::BoolProperty)
-					{
-						EAnimGraphPinType VarType = EAnimGraphPinType::Float;
-						if (TryResolveVariableType(Asset, OwnerCls, T.VariableName, VarType) && !VariableTypeMatchesRule(T.RuleKind, VarType))
+						const bool bPropertyRule = (R.RuleKind == ETransitionRuleKind::FloatCompare || R.RuleKind == ETransitionRuleKind::BoolProperty);
+						if (bPropertyRule && R.VariableName == FName::None)
 						{
 							AddValidationMessage(LastValidationMessages, bLastValidationOk,
-								NodeTitleForDisplay(Node) + " has a transition rule with a mismatched variable type: " + T.VariableName.ToString(), true);
+								NodeTitleForDisplay(Node) + " has a property-based transition rule without a selected variable.", true);
 						}
-					}
-					if (T.RuleKind == ETransitionRuleKind::AlwaysTrue)
-					{
-						AddValidationMessage(LastValidationMessages, bLastValidationOk,
-							NodeTitleForDisplay(Node) + " has an explicit Always True transition rule.", false);
+						else if (bPropertyRule && !IsVariableResolvable(Asset, OwnerCls, R.VariableName))
+						{
+							AddValidationMessage(LastValidationMessages, bLastValidationOk,
+								NodeTitleForDisplay(Node) + " has a transition rule referencing an unknown variable: " + R.VariableName.ToString(), true);
+						}
+						else if (bPropertyRule)
+						{
+							EAnimGraphPinType VarType = EAnimGraphPinType::Float;
+							if (TryResolveVariableType(Asset, OwnerCls, R.VariableName, VarType) && !VariableTypeMatchesRule(R.RuleKind, VarType))
+							{
+								AddValidationMessage(LastValidationMessages, bLastValidationOk,
+									NodeTitleForDisplay(Node) + " has a transition rule with a mismatched variable type: " + R.VariableName.ToString(), true);
+							}
+						}
+						if (R.RuleKind == ETransitionRuleKind::AlwaysTrue)
+						{
+							AddValidationMessage(LastValidationMessages, bLastValidationOk,
+								NodeTitleForDisplay(Node) + " has an explicit Always True transition rule.", false);
+						}
 					}
 				}
 				break;
@@ -3217,6 +3616,7 @@ void FAnimGraphEditorWidget::RenderPinSpawnMenu(UAnimGraphAsset* Asset)
 	{
 		AddContextItem(EAnimGraphNodeType::LayeredBlendPerBone, "Blend Layered Per Bone Pose");
 		AddContextItem(EAnimGraphNodeType::BlendListByEnum, "Blend List Enum Selector Pose");
+		AddContextItem(EAnimGraphNodeType::BlendSpace, "Blend Space 2D Directional Locomotion Pose");
 	}
 	if (ImGui::CollapsingHeader("State Machines", ImGuiTreeNodeFlags_DefaultOpen))
 	{
@@ -3457,7 +3857,8 @@ void FAnimGraphEditorWidget::RenderTransitionRuleEditor(UAnimGraphAsset& Asset, 
 	RuleProxy.Type = EAnimGraphNodeType::VariableGet;
 	ed::BeginNode(ToNodeId(RuleNodeId));
 	{
-		DrawNodeHeaderBlock(RuleProxy, 270.0f, 44.0f, FormatTransitionRuleNodeTitle(T), TransitionRuleKindLabel(T.RuleKind));
+		DrawNodeHeaderBlock(RuleProxy, 270.0f, 44.0f, FormatTransitionRuleNodeTitle(T),
+			T.Rules.size() == 1 ? TransitionRuleKindLabel(T.Rules[0].RuleKind) : "AND rules");
 		ImGui::Dummy(ImVec2(270.0f, 4.0f));
 		TextClippedWithTooltip(FormatTransitionSummary(T), 258.0f);
 		ed::BeginPin(ToPinId(RuleOutPinId), ed::PinKind::Output);
@@ -3577,8 +3978,8 @@ void FAnimGraphEditorWidget::RenderStateMachineEditor(UAnimGraphAsset& Asset, FA
 			FAnimGraphTransition T;
 			T.FromStateName = StateMachineNode.States[i].StateName;
 			T.ToStateName   = StateMachineNode.States[i + 1].StateName;
-			T.RuleKind      = ETransitionRuleKind::AlwaysFalse;
 			T.BlendTime     = 0.2f;
+			// Rules 를 비워 둔다(= 전환 안 함). 사용자가 규칙을 추가해 활성화한다.
 			StateMachineNode.Transitions.push_back(T);
 		}
 		Asset.BumpVersion();
@@ -3636,16 +4037,39 @@ void FAnimGraphEditorWidget::RenderStateMachineEditor(UAnimGraphAsset& Asset, FA
 	const int StateMachineStyleColors = PushUnrealAnimGraphCanvasStyle();
 	ed::Begin("StateMachineCanvas");
 
+	// 첫 프레임(또는 상태 추가/삭제로 리셋된 뒤)에 자산에 저장된 위치를 ed 컨텍스트로 push.
+	// 저장 위치가 없는(bValid=false) 노드만 기본 레이아웃으로 초기화한 뒤 valid 로 승격 → 이후
+	// 프레임의 readback 이 드래그 위치를 자산에 되돌려 저장한다(root 그래프와 동일한 단방향 흐름).
 	if (!bStateMachinePositionsPushed)
 	{
-		ed::SetNodePosition(ToNodeId(MakeEntryNodeId(StateMachineNode.NodeId)), ImVec2(-360.0f, -55.0f));
-		ed::SetNodePosition(ToNodeId(MakeAnyStateNodeId(StateMachineNode.NodeId)), ImVec2(-360.0f, 115.0f));
+		if (!StateMachineNode.bStateMachineEditorPosValid)
+		{
+			StateMachineNode.EntryPosX    = -360.0f;
+			StateMachineNode.EntryPosY    =  -55.0f;
+			StateMachineNode.AnyStatePosX = -360.0f;
+			StateMachineNode.AnyStatePosY =  115.0f;
+			StateMachineNode.bStateMachineEditorPosValid = true;
+			MarkDirty();
+		}
+		ed::SetNodePosition(ToNodeId(MakeEntryNodeId(StateMachineNode.NodeId)),
+			ImVec2(StateMachineNode.EntryPosX, StateMachineNode.EntryPosY));
+		ed::SetNodePosition(ToNodeId(MakeAnyStateNodeId(StateMachineNode.NodeId)),
+			ImVec2(StateMachineNode.AnyStatePosX, StateMachineNode.AnyStatePosY));
+
 		for (int32 i = 0; i < static_cast<int32>(StateMachineNode.States.size()); ++i)
 		{
-			const int32 Col = i % 3;
-			const int32 Row = i / 3;
+			FAnimGraphState& State = StateMachineNode.States[i];
+			if (!State.bEditorPosValid)
+			{
+				const int32 Col = i % 3;
+				const int32 Row = i / 3;
+				State.EditorPosX = 0.0f + Col * 300.0f;
+				State.EditorPosY = Row * 170.0f;
+				State.bEditorPosValid = true;
+				MarkDirty();
+			}
 			ed::SetNodePosition(ToNodeId(MakeStateNodeId(StateMachineNode.NodeId, i)),
-				ImVec2(0.0f + Col * 300.0f, Row * 170.0f));
+				ImVec2(State.EditorPosX, State.EditorPosY));
 		}
 		bStateMachinePositionsPushed = true;
 	}
@@ -3835,8 +4259,7 @@ void FAnimGraphEditorWidget::RenderStateMachineEditor(UAnimGraphAsset& Asset, FA
 							FAnimGraphTransition NewT;
 							NewT.FromStateName = FName::None;
 							NewT.ToStateName   = StateMachineNode.States[ToStateIdx].StateName;
-							NewT.RuleKind      = ETransitionRuleKind::AlwaysFalse;
-							NewT.BlendTime     = 0.2f;
+							NewT.BlendTime     = 0.2f; // Rules 비어 있음(= 전환 안 함) — 사용자가 규칙 추가
 							if (AddTransitionIfMissing(StateMachineNode, NewT))
 							{
 								Asset.BumpVersion();
@@ -3850,8 +4273,7 @@ void FAnimGraphEditorWidget::RenderStateMachineEditor(UAnimGraphAsset& Asset, FA
 							FAnimGraphTransition NewT;
 							NewT.FromStateName = StateMachineNode.States[FromStateIdx].StateName;
 							NewT.ToStateName   = StateMachineNode.States[ToStateIdx].StateName;
-							NewT.RuleKind      = ETransitionRuleKind::AlwaysFalse;
-							NewT.BlendTime     = 0.2f;
+							NewT.BlendTime     = 0.2f; // Rules 비어 있음(= 전환 안 함) — 사용자가 규칙 추가
 							bool bAdded = AddTransitionIfMissing(StateMachineNode, NewT);
 							if (bAdded && (bCreateReverseTransitionOnDrag || ImGui::GetIO().KeyShift))
 							{
@@ -3897,8 +4319,7 @@ void FAnimGraphEditorWidget::RenderStateMachineEditor(UAnimGraphAsset& Asset, FA
 					FAnimGraphTransition T;
 					T.FromStateName = bFromAny ? FName::None : StateMachineNode.States[FromStateIdx].StateName;
 					T.ToStateName   = NewStateName;
-					T.RuleKind      = ETransitionRuleKind::AlwaysFalse;
-					T.BlendTime     = 0.2f;
+					T.BlendTime     = 0.2f; // Rules 비어 있음(= 전환 안 함) — 사용자가 규칙 추가
 					const bool bAdded = AddTransitionIfMissing(StateMachineNode, T);
 					if (bAdded && bFromState && (bCreateReverseTransitionOnDrag || ImGui::GetIO().KeyShift))
 					{
@@ -3908,6 +4329,9 @@ void FAnimGraphEditorWidget::RenderStateMachineEditor(UAnimGraphAsset& Asset, FA
 
 				const ImVec2 NewPos = ed::ScreenToCanvas(ImGui::GetMousePos());
 				ed::SetNodePosition(ToNodeId(MakeStateNodeId(StateMachineNode.NodeId, NewStateIdx)), NewPos);
+				StateMachineNode.States[NewStateIdx].EditorPosX = NewPos.x;
+				StateMachineNode.States[NewStateIdx].EditorPosY = NewPos.y;
+				StateMachineNode.States[NewStateIdx].bEditorPosValid = true;
 				Asset.BumpVersion();
 				CommitGraphEdit(&Asset);
 			}
@@ -3963,6 +4387,40 @@ void FAnimGraphEditorWidget::RenderStateMachineEditor(UAnimGraphAsset& Asset, FA
 		}
 	}
 	ed::EndDelete();
+
+	// ── 위치 동기화 (ed → model) — 드래그한 Entry/AnyState/State 노드 좌표를 자산에 반영해 영구 저장.
+	// State 노드 id 는 인덱스 기반이라, 상태 추가/삭제로 인덱스가 밀려 re-push 가 예약된(!Pushed)
+	// 프레임에는 ed 좌표가 최신 인덱스와 어긋난다 → 그 프레임은 readback 을 건너뛰어 오염을 막는다.
+	if (bStateMachinePositionsPushed)
+	{
+		auto SyncPos = [](float& X, float& Y, const ImVec2& P) -> bool
+		{
+			if (std::fabs(X - P.x) > 0.01f || std::fabs(Y - P.y) > 0.01f)
+			{
+				X = P.x;
+				Y = P.y;
+				return true;
+			}
+			return false;
+		};
+
+		bool bMoved = false;
+		bMoved |= SyncPos(StateMachineNode.EntryPosX, StateMachineNode.EntryPosY,
+			ed::GetNodePosition(ToNodeId(MakeEntryNodeId(StateMachineNode.NodeId))));
+		bMoved |= SyncPos(StateMachineNode.AnyStatePosX, StateMachineNode.AnyStatePosY,
+			ed::GetNodePosition(ToNodeId(MakeAnyStateNodeId(StateMachineNode.NodeId))));
+		for (int32 i = 0; i < static_cast<int32>(StateMachineNode.States.size()); ++i)
+		{
+			FAnimGraphState& State = StateMachineNode.States[i];
+			if (SyncPos(State.EditorPosX, State.EditorPosY,
+				ed::GetNodePosition(ToNodeId(MakeStateNodeId(StateMachineNode.NodeId, i)))))
+			{
+				State.bEditorPosValid = true;
+				bMoved = true;
+			}
+		}
+		if (bMoved) MarkDirty();
+	}
 
 	// Context menus.
 	ed::NodeId ContextNodeId = 0;
@@ -4662,6 +5120,7 @@ void FAnimGraphEditorWidget::Render(float DeltaTime)
 		{
 			bAddedNodeFromMenu |= RenderAddNodeAction(EAnimGraphNodeType::LayeredBlendPerBone, *Asset, PendingNewNodePosition, AddNodeSearchBuf, "Blend Layered Per Bone Pose");
 			bAddedNodeFromMenu |= RenderAddNodeAction(EAnimGraphNodeType::BlendListByEnum,     *Asset, PendingNewNodePosition, AddNodeSearchBuf, "Blend List Enum Selector Pose");
+			bAddedNodeFromMenu |= RenderAddNodeAction(EAnimGraphNodeType::BlendSpace,          *Asset, PendingNewNodePosition, AddNodeSearchBuf, "Blend Space 2D Directional Locomotion Pose");
 		}
 		if (ImGui::CollapsingHeader("State Machines", ImGuiTreeNodeFlags_DefaultOpen))
 		{
@@ -4706,6 +5165,18 @@ void FAnimGraphEditorWidget::Render(float DeltaTime)
 	ed::Resume();
 
 	ProcessQueuedRootGraphCommands(Asset);
+
+	// 네비게이터에서 요청한 노드(BlendSpace 등)를 이 프레임에 선택+포커스 — 아래 selection
+	// 캡쳐가 그대로 집어 inspector 에 반영된다.
+	if (PendingNavigateNodeId != 0)
+	{
+		if (Asset->FindNode(PendingNavigateNodeId))
+		{
+			SelectOnlyNodes(TArray<uint32>{ PendingNavigateNodeId });
+			ed::NavigateToSelection();
+		}
+		PendingNavigateNodeId = 0;
+	}
 
 	// ed::End 직전에 선택된 노드 캡쳐 (inspector pane 이 ed 컨텍스트 외부에서 참조).
 	{

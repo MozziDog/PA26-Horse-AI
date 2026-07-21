@@ -115,8 +115,14 @@ protected:
 	UPROPERTY(Edit, Save, Category="Locomotion|Gait", DisplayName="Gait Up Cooldown", Min=0.0f, Max=5.0f, Speed=0.01f)
 	float GaitUpCooldown = 0.6f; 	// 가속 쿨타임(초 단위)
 
-	UPROPERTY(Edit, Save, Category = "Locomotion|Jump", DisplayName = "Jump Trigger Dist", Min = 0.0f, Max = 20.0f, Speed = 0.05f)
-	float JumpTriggerDist = 2.5f; // m — 정면 장애물이 이 거리 안이고 점프 가능(ObsJumpable)하면 도약.
+	// ── 정명의 장애물이 설정된 거리 이하로 다가왔을 때 점프 동작 시작 ──
+	UPROPERTY(Edit, Save, Category = "Locomotion|Jump", DisplayName = "Trot Jump Trigger Dist", Min = 0.0f, Max = 20.0f, Speed = 0.05f)
+	float TrotJumpTriggerDist = 2.5f;
+	UPROPERTY(Edit, Save, Category = "Locomotion|Jump", DisplayName = "Canter Jump Trigger Dist", Min = 0.0f, Max = 20.0f, Speed = 0.05f)
+	float CanterJumpTriggerDist = 3.5f;
+	UPROPERTY(Edit, Save, Category = "Locomotion|Jump", DisplayName = "Gallop Jump Trigger Dist", Min = 0.0f, Max = 20.0f, Speed = 0.05f)
+	float GallopJumpTriggerDist = 5.0f;
+
 
 	// ── runtime states ──
 	static constexpr int MaxFanSlots = 8;   // PrevDanger 버퍼 상한. cpp 에서 ObsFanCount <= 이 값 검증.
@@ -127,4 +133,5 @@ protected:
 	FVector    SteerDir      = FVector(0.0f, 0.0f, 0.0f);   // 직전 프레임에 선택한 회피 heading(커밋 히스테리시스용). 0=미초기화.
 	float      PrevDanger[MaxFanSlots] = {};   // slot 별 직전 프레임 danger(slow-release 감쇠용).
 	float      SteerAngle    = 0.0f;   // 현재 조향각(forward 기준 deg). 목표각으로 slew 되는 상태값.
+	bool       bJumpPerformed = false;   // 이번 점프 요청에 실제로 점프했는지 여부 (무한 점프 방지)
 };

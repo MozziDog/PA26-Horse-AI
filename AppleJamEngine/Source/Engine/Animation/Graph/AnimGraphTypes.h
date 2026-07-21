@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "Core/Types/CoreTypes.h"
 #include "Object/FName.h"
@@ -36,6 +36,7 @@ enum class EAnimGraphNodeType : uint8
 	BlendListByEnum,
 	VariableGet,          // UAnimInstance UPROPERTY 참조
 	RefPose,              // FAnimNode_RefPose — mesh ref pose 출력. 보통 Slot/LayeredBlend 의 fallback 입력으로.
+	BlendSpace,           // FAnimNode_BlendSpace — 2D(및 1D 퇴화) 산점 샘플 연속 블렌드. 노드 내장 샘플 리스트.
 };
 
 
@@ -124,20 +125,56 @@ struct FAnimGraphState
 	// SubGraphNodeId 가 있으면 SequencePath 는 무시.
 	uint32   SubGraphNodeId = 0;
 
+	// StateMachine 내부 에디터에서의 이 state 노드 캔버스 위치. bEditorPosValid 가 false 면 첫 오픈
+	// 시 grid 로 자동 배치되고 true 로 승격된다. 이후 드래그 위치가 자산에 저장돼 재오픈/다른
+	// StateMachine 전환 후 복귀에도 레이아웃이 유지된다.
+	float    EditorPosX      = 0.0f;
+	float    EditorPosY      = 0.0f;
+	bool     bEditorPosValid = false;
+
 	friend FArchive& operator<<(FArchive& Ar, FAnimGraphState& State);
+};
+
+// 단일 leaf node 전환 규칙. 
+// RuleKind가 property 기반이 아닐 경우 변수/비교연산/임계값 등은 무시함.
+// FAnimGraphTransition::Rules 에 여러 개가 담겨 AND 조건으로 결합
+// 필드 순서/타입은 구버전(단일 규칙) FAnimGraphTransition 과 동일하게 유지
+struct FAnimGraphTransitionRule
+{
+	ETransitionRuleKind   RuleKind      = ETransitionRuleKind::FloatCompare;
+	FName                 VariableName;  // FloatCompare/BoolProperty 만 사용 (OwnerClass UPROPERTY 또는 AnimGraph 변수)
+	ETransitionOp         Op            = ETransitionOp::Greater; // FloatCompare 만 사용
+	float                 Threshold     = 0.0f;                   // Bool 은 >=0.5 == true
+
+	friend FArchive& operator<<(FArchive& Ar, FAnimGraphTransitionRule& R);
 };
 
 struct FAnimGraphTransition
 {
 	FName                 FromStateName; // FName::None == AnyState
 	FName                 ToStateName;
-	FName                 VariableName;  // OwnerClass 의 UPROPERTY 이름 (Float/Int/Bool 등)
-	ETransitionOp         Op            = ETransitionOp::Greater;
-	float                 Threshold     = 0.0f;
 	float                 BlendTime     = 0.2f;
-	ETransitionRuleKind   RuleKind      = ETransitionRuleKind::FloatCompare;
+
+	// AND 로 결합되는 규칙들. 모두 true 여야 전환한다. 비어 있으면 전환하지 않음(AlwaysFalse 동등).
+	// float param 범위 이내(예: Speed>a AND Speed<b)를 여기서 표현한다. 범위 바깥(OR)은 후속
+	// Unity 식 중복 transition / condition graph 로 처리하며, 그때 각 rule 이 AND 항으로 재사용된다.
+	TArray<FAnimGraphTransitionRule> Rules;
 
 	friend FArchive& operator<<(FArchive& Ar, FAnimGraphTransition& T);
+};
+
+// ── BlendSpace 노드 보조 자료구조 ──
+// 독립 asset(UBlendSpace) 대신 노드에 산점 샘플을 내장(설계 §2-1). 각 샘플은 하나의 시퀀스와
+// 그 2D 좌표(PosX/PosY). 축 의미는 노드가 고정하지 않음 — 범용 (AxisX,AxisY). 좌표 공간 범위는
+// FAnimGraphNode 의 AxisMin/Max 필드가 정의(에디터 캔버스/정규화 참고용).
+struct FBlendSample
+{
+	FString SequencePath;      // 디스크 path. 컴파일러가 LoadAnimation 으로 내부 SequencePlayer 에 해상.
+	float   PosX     = 0.0f;   // AxisX 좌표.
+	float   PosY     = 0.0f;   // AxisY 좌표.
+	float   PlayRate = 1.0f;   // 샘플별 재생속도(보법 내 길이 정렬은 전제, 미세 조정용).
+
+	friend FArchive& operator<<(FArchive& Ar, FBlendSample& Sample);
 };
 
 struct FAnimGraphNode
@@ -185,6 +222,24 @@ struct FAnimGraphNode
 	TArray<FAnimGraphState>      States;
 	TArray<FAnimGraphTransition> Transitions;
 	FName                        InitialStateName;
+
+	// StateMachine 내부 에디터의 Entry / Any State pseudo 노드 위치(캔버스 좌표). 개별 State 노드
+	// 위치는 각 FAnimGraphState.EditorPos* 에 저장한다. bStateMachineEditorPosValid 가 false 면 첫
+	// 오픈 시 기본 위치로 초기화 후 true 로 승격 — 이후 드래그 위치가 자산에 저장돼 유지된다.
+	float                        EntryPosX    = -360.0f;
+	float                        EntryPosY    =  -55.0f;
+	float                        AnyStatePosX = -360.0f;
+	float                        AnyStatePosY =  115.0f;
+	bool                         bStateMachineEditorPosValid = false;
+
+	// BlendSpace 노드 — 내장 산점 샘플과 축 좌표 범위. 다른 노드 타입에선 미사용.
+	// 컴파일러가 각 샘플을 내부 FAnimNode_SequencePlayer 로, 좌표를 삼각망 입력으로 주입.
+	// X/Y Float 입력 핀(축값)은 그래프 링크(VariableGet → Float Variable)로 자립 해석(설계 §2-6).
+	TArray<FBlendSample>         BlendSamples;
+	float                        AxisMinX = -1.0f;
+	float                        AxisMaxX =  1.0f;
+	float                        AxisMinY = -1.0f;
+	float                        AxisMaxY =  1.0f;
 
 	friend FArchive& operator<<(FArchive& Ar, FAnimGraphNode& Node);
 };

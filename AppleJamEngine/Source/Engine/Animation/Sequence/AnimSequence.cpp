@@ -494,6 +494,21 @@ void UAnimSequence::Serialize(FArchive& Ar)
         DataModel->Serialize(Ar);
     }
 
+    // ── 하위호환 append 필드 — 반드시 파일 끝에 유지. 구버전 uasset 로드는 여기서 EOF 라
+    // skip 되어 default 를 쓴다 (Ar.AtEnd() 가드). 새 필드는 이 아래에 같은 패턴으로 추가.
+    if (!Ar.IsLoading() || !Ar.AtEnd())
+    {
+        Ar << bExtractRootMotionZ;
+    }
+    if (!Ar.IsLoading() || !Ar.AtEnd())
+    {
+        Ar << RootRotationLock;
+    }
+    if (!Ar.IsLoading() || !Ar.AtEnd())
+    {
+        Ar << RootYawOffsetDegrees;
+    }
+
     if (IsValid(DataModel))
     {
         PlayLength = DataModel->PlayLength;
@@ -828,15 +843,66 @@ void UAnimSequence::GetBonePose(FPoseContext& Output, const FAnimExtractContext&
 
         if (!RootMotionLockTrack->PosKeys.empty())
         {
-            LockedRoot.Location = RootMotionLockTrack->PosKeys[0];
+            // Translation lock — X/Y 는 항상 첫 키로 고정 (이동은 movement 가 delta 로 소비).
+            // Z 는 클립 선언(bExtractRootMotionZ)에 따라: 이동(점프 상승)이면 잠그고 delta 로
+            // 추출, 제자리 bob 이면 pose 에 남긴다 (ExtractRootMotion 이 delta Z 를 0 으로 추출).
+            const FVector& FirstPos = RootMotionLockTrack->PosKeys[0];
+            LockedRoot.Location.X = FirstPos.X;
+            LockedRoot.Location.Y = FirstPos.Y;
+            if (bExtractRootMotionZ)
+            {
+                LockedRoot.Location.Z = FirstPos.Z;
+            }
         }
 
+        // Rotation 잠금은 클립이 선언한 만큼만 (RootRotationLock, per-asset) — 잠근 성분만
+        // ExtractRootMotion 이 delta 로 추출하므로 이중 적용/유실이 없다 (ERootMotionRotationLock 주석).
+        // NOTE: root motion 본이 스켈레톤 root 라는 전제에서 local == component space 로 계산.
+        //       부모가 있는 본이 검출되면 up 축을 부모 space 로 옮기는 처리가 필요해진다.
         if (!RootMotionLockTrack->RotKeys.empty())
         {
-            LockedRoot.Rotation = RootMotionLockTrack->RotKeys[0].GetNormalized();
+            const FQuat FirstKey = RootMotionLockTrack->RotKeys[0].GetNormalized();
+            switch (RootRotationLock)
+            {
+            case ERootMotionRotationLock::Full:
+                LockedRoot.Rotation = FirstKey;
+                break;
+            case ERootMotionRotationLock::YawOnly:
+            {
+                // 첫 키 기준 component-space delta (D = R(t) * R0⁻¹ — ExtractRootMotion 과 동일한
+                // pre-multiply delta) 에서 up(+Z)축 twist(yaw)만 걷어낸다: R_locked = TwistZ(D)⁻¹ * R(t).
+                // raw quat R(t) 에 직접 twist 분해를 하면 본의 rest 방향(축 보정 pre-rotation)이 섞여
+                // pitch 가 quat z 성분으로 새어 들어가 가짜 yaw 흔들림이 생긴다 — 반드시 delta 기준.
+                static const FVector UpAxis(0.0f, 0.0f, 1.0f);
+                const FQuat Animated       = LockedRoot.Rotation.GetNormalized();
+                const FQuat DeltaFromFirst = (Animated * FirstKey.Inverse()).GetNormalized();
+                const FQuat YawTwist       = DeltaFromFirst.GetTwist(UpAxis);
+                LockedRoot.Rotation        = (YawTwist.Inverse() * Animated).GetNormalized();
+                break;
+            }
+            case ERootMotionRotationLock::None:
+                break;
+            }
         }
 
         Output.Pose[RootMotionLockBoneIndex] = LockedRoot;
+    }
+
+    // ── Root Yaw Offset (per-asset) ──
+    // 클립의 기준 방향을 yaw offset을 적용하여 보정: root bone rotation에 QOffset을 pre-multiply
+    // 여기서는 포즈만 보정 적용, 이동은 ExtractRootMotion에서 보정 적용.
+    // NOTE: root lock bone space 와 component space 가 같다는 가정 (root lock bone = 스켈레톤 root 또는 root lock bone의 부모의 회전 일절 없음)
+    if (std::fabs(RootYawOffsetDegrees) > 1.0e-4f &&
+        RootMotionLockBoneIndex >= 0 &&
+        RootMotionLockBoneIndex < static_cast<int32>(Output.Pose.size()))
+    {
+        const FQuat QOffset = FQuat::FromAxisAngle(
+            FVector::UpVector,
+            RootYawOffsetDegrees * FMath::DegToRad);
+
+        FTransform& Root = Output.Pose[RootMotionLockBoneIndex];
+        Root.Rotation = (QOffset * Root.Rotation.GetNormalized()).GetNormalized();
+        Root.Location = QOffset.RotateVector(Root.Location);
     }
 }
 
@@ -998,16 +1064,59 @@ FTransform UAnimSequence::ExtractRootMotion(float PrevTime, float CurTime, bool 
         SampleTrackPosRot(*Raw, std::clamp(T, 0.0f, Length), Length, NumFrames, OutP, OutR);
     };
 
-    auto ComputeDelta = [](const FVector& P0, const FQuat& R0, const FVector& P1, const FQuat& R1) -> FTransform {
+    // ── Root motion 분해 계약 (per-asset RootRotationLock) 
+    // ExtractRootMotion(생산자) 이 root motion 의 basis 를 소유, 소비하는 MovementComponent 측에서는 basis를 모름.
+	// 반환하는 delta 는 이미 basis 계산이 끝난 것이므로 RootMotion 소비 측에서는 Actor rotation만 반영해서 사용 가능.
+    //  - Rotation delta : ReduceByLock(세그먼트 로컬 delta 회전 R0⁻¹R1) — YawOnly=+Z twist, Full=전체, None=Identity.
+    //  - Translation    : 소비자 basis W(t0)=Ws·(누적 추출 회전) 가 다시 곱해질 것을 상쇄하도록,
+    //                     세그먼트 시작 회전만큼 미리 de-rotate 한다(아래 lock 별). 이러면 소비자가
+    //                     어떤 누적 basis 든 상쇄되어 클립 저작 경로(Ws·F⁻¹·(P1-P0))를 재현 → 발 미끄러짐 0.
+    const FQuat FirstRootRot = Raw->RotKeys.empty()
+        ? FQuat::Identity
+        : Raw->RotKeys[0].GetNormalized();
+
+    // 클립이 actor 로 추출하는 회전 성분만 남긴다 (회전 축약 공용).
+    auto ReduceByLock = [lock = RootRotationLock](const FQuat& Rot) -> FQuat {
+        switch (lock)
+        {
+        case ERootMotionRotationLock::YawOnly: return Rot.GetTwist(FVector(0.0f, 0.0f, 1.0f)).GetNormalized();
+        case ERootMotionRotationLock::None:    return FQuat::Identity;
+        case ERootMotionRotationLock::Full:
+        default:                               return Rot.GetNormalized();
+        }
+    };
+
+    auto ComputeDelta = [&](const FVector& P0, const FQuat& R0, const FVector& P1, const FQuat& R1) -> FTransform {
+        FTransform D;
+
+        // Rotation delta 계산
         const FTransform T0(P0, R0, FVector(1.0f, 1.0f, 1.0f));
         const FTransform T1(P1, R1, FVector(1.0f, 1.0f, 1.0f));
         const FMatrix DeltaMatrix = T0.ToMatrix().GetInverse() * T1.ToMatrix();
-
-        FTransform D;
-        // Translation must stay in the animation/root track frame. Using the full relative
-        // matrix here makes root rotation steer the extracted movement during turn sections.
-        D.Location = P1 - P0;
         D.Rotation = DeltaMatrix.ToQuat().GetNormalized();
+
+        // "세그먼트 시작 시점의 클립 추출 회전"만큼 되돌린다.
+        // e.g 오른쪽을 본 상태로 직진하는 모션일 때, 이를 Actor Forward 방향으로 보정
+        const FVector RawDisp = P1 - P0;   // 클립 저작(parent) 프레임 변위
+        switch (RootRotationLock)
+        {
+        case ERootMotionRotationLock::Full:
+			// 모든 회전 성분에 적용
+            D.Location = R0.Inverse().RotateVector(RawDisp);
+            break;
+        case ERootMotionRotationLock::YawOnly:
+        {
+            // yaw 성분만 적용
+            const FQuat SegYaw = ReduceByLock((R0 * FirstRootRot.Inverse()).GetNormalized());
+            D.Location = SegYaw.Inverse().RotateVector(RawDisp);
+            break;
+        }
+        case ERootMotionRotationLock::None:
+        default:
+            // 회전 미추출
+            D.Location = RawDisp;
+            break;
+        }
         return D;
     };
 
@@ -1025,13 +1134,36 @@ FTransform UAnimSequence::ExtractRootMotion(float PrevTime, float CurTime, bool 
         const FTransform D2 = ComputeDelta(PA, RA, PB, RB);
         Delta.Location = D1.Location + D2.Location;
         Delta.Rotation = (D1.Rotation * D2.Rotation).GetNormalized();
-        return Delta;
+    }
+    else
+    {
+        FVector P0, P1; FQuat R0, R1;
+        SampleAt(PrevTime, P0, R0);
+        SampleAt(CurTime,  P1, R1);
+        Delta = ComputeDelta(P0, R0, P1, R1);
     }
 
-    FVector P0, P1; FQuat R0, R1;
-    SampleAt(PrevTime, P0, R0);
-    SampleAt(CurTime,  P1, R1);
-    return ComputeDelta(P0, R0, P1, R1);
+    if (!bExtractRootMotionZ)
+    {
+        Delta.Location.Z = 0.0f;   // Z 는 제자리 bob — pose 가 보유 (lock 도 Z 를 안 잠금)
+    }
+
+    // Rotation — 클립이 추출하는 성분만 (ReduceByLock, 이동 de-rotate 와 동일 lock 정책). 합산 delta 에 1회.
+    // delta 는 component-space 라 본 rest 방향이 상쇄되어 +Z twist 가 순수 yaw (pose 잠금과 대칭).
+    Delta.Rotation = ReduceByLock(Delta.Rotation);
+
+    // Root Yaw Offset — pose 회전과 대칭으로 delta 도 offset frame 으로 (GetBonePose 참고).
+    // rotation 은 켤레 변환 — 순수 yaw delta 면 no-op (+Z twist 는 QOffset 과 가환).
+    if (std::fabs(RootYawOffsetDegrees) > 1.0e-4f)
+    {
+        const FQuat QOffset = FQuat::FromAxisAngle(
+            FVector::UpVector,
+            RootYawOffsetDegrees * FMath::DegToRad);
+
+        Delta.Location = QOffset.RotateVector(Delta.Location);
+        Delta.Rotation = (QOffset * Delta.Rotation * QOffset.Inverse()).GetNormalized();
+    }
+    return Delta;
 }
 
 // ──────────────────────────────────────────────

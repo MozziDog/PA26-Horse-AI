@@ -7,6 +7,7 @@
 #include "Debug/DrawDebugHelpers.h"
 #include "GameFramework/AActor.h"
 #include "Serialization/Archive.h"
+#include "Math/MathUtils.h"
 
 #include <algorithm>
 #include <cfloat>
@@ -22,7 +23,7 @@ namespace
 	// V 를 world +Z 축 기준 Deg(도) 만큼 회전(수평 부채꼴 slot 생성용). Z 성분 보존.
 	FVector RotateAroundZ(const FVector& V, float Deg)
 	{
-		const float R = Deg * (3.14159265358979f / 180.0f);
+		const float R = Deg * FMath::DegToRad;
 		const float C = std::cos(R);
 		const float S = std::sin(R);
 		return FVector(V.X * C - V.Y * S, V.X * S + V.Y * C, V.Z);
@@ -71,9 +72,9 @@ void UHorseLocomotionComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 	UpdateGait();
 
 	AActor* Owner = GetOwner();
-	if (!Movement || !Owner || Gait == EHorseGait::Stop)
+	if (!Movement || !Owner)
 	{
-		return;   // 정지 상태면 Movement에 입력 전달하지 않음 → 자연 감속
+		return;
 	}
 
 	FVector Forward = Owner->GetActorForward();
@@ -118,14 +119,31 @@ void UHorseLocomotionComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 	}
 
 	// ── 점프 게이트 ── 정면 장애물이 점프 가능(ObsJumpable)하고 트리거 거리 안이면 도약(heading 유지).
+	// 이미 bJumpPerformed인 경우에는 다시 점프 안함. (제자리 혹은 점프 후 연속 점프 방지)
 	if (BB)
 	{
 		bool  bJumpable = false;
 		float FwdDist   = 0.0f;
-		if (BB->TryGetBool(HorseBBKeys::ObsJumpable, bJumpable) && bJumpable
-			&& BB->TryGetFloat(HorseBBKeys::ObsFwdDist, FwdDist) && FwdDist < JumpTriggerDist)
+		const float JumpTriggerDist =
+			GetGait() == EHorseGait::Gallop ? GallopJumpTriggerDist :
+			GetGait() == EHorseGait::Canter ? CanterJumpTriggerDist :
+			GetGait() == EHorseGait::Trot ? TrotJumpTriggerDist : -1.0f;
+			
+		const bool bGateActive =
+			BB->TryGetBool(HorseBBKeys::ObsJumpable, bJumpable) && bJumpable
+			&& BB->TryGetFloat(HorseBBKeys::ObsFwdDist, FwdDist) && FwdDist < JumpTriggerDist;
+
+		if (!Movement->IsFalling())   // Falling 상태에서는 점프 불가
 		{
-			Movement->Jump();
+			if (bGateActive && !bJumpPerformed)
+			{
+				Movement->StartJump();
+				bJumpPerformed = true;   // 이번 접근에 대한 점프 소진
+			}
+			else if (!bGateActive)
+			{
+				bJumpPerformed = false;  // 장애물 벗어남 → 다음 장애물 상황을 위해 리셋
+			}
 		}
 	}
 
@@ -251,19 +269,29 @@ void UHorseLocomotionComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 
 		const FVector Heading = RotateAroundZ(Forward, SteerAngle).Normalized();
 		SteerDir = Heading;   // 다음 프레임 커밋 기준.
-
-		if (bDrawSteeringDebug && World.IsValid())
+		if (GetGait() != EHorseGait::Stop)
 		{
-			DrawDebugLine(World, DebugBase, DebugBase + Heading * 3.0f, FColor::Blue());   // 선택된 heading.
-		}
 
-		// gait → scale([0,1]). Movement 는 MaxSpeed*scale 을 목표속도로 삼는다(yaw 선회율은 Movement 가 제한).
-		Movement->AddInputVector(Heading, GetGaitScaledSpeed());
+			if (bDrawSteeringDebug && World.IsValid())
+			{
+				DrawDebugLine(World, DebugBase, DebugBase + Heading * 3.0f, FColor::Blue());   // 선택된 heading.
+			}
+			// gait → scale([0,1]). Movement 는 MaxSpeed*scale 을 목표속도로 삼는다(yaw 선회율은 Movement 가 제한).
+			Movement->AddInputVector(Heading, GetGaitScaledSpeed());
+		}
+		else
+		{
+			// 제자리 회전
+			// const FVector RotateInput = Heading - Forward * Heading.Dot(Forward);
+			const FVector RotateInput = Heading;
+			Movement->AddInputVector(RotateInput, 0.01f);
+		}
 	}
 	// 모든 slot 이 하드 제외면(막다른 벽) 급브레이크
 	else
 	{
 		Movement->Brake();
+		Gait = EHorseGait::Stop;
 		if (bDrawSteeringDebug && World.IsValid())
 		{
 			DrawDebugSphere(World, DebugBase, 0.4f, 12, FColor::Red());
@@ -381,7 +409,9 @@ void UHorseLocomotionComponent::Serialize(FArchive& Ar)
 	Ar << UserWeight;
 	Ar << RoadWeight;
 	Ar << InertiaWeight;
-	Ar << JumpTriggerDist;
+	Ar << TrotJumpTriggerDist;
+	Ar << CanterJumpTriggerDist;
+	Ar << GallopJumpTriggerDist;
 	Ar << bDrawSteeringDebug;
 	Ar << HardBlockDistance;
 	Ar << DangerWeight;
