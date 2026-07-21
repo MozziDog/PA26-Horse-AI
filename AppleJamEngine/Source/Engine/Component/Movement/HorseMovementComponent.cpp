@@ -66,7 +66,7 @@ void UHorseMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType
 
 	// 조향
 	// 목표 진행방향을 yaw rate(deg/s)으로 변환 (anim blend space에 맞추기)
-	if (TargetSpeed > 1.e-3f && !Desired.IsNearlyZero())
+	if (!Desired.IsNearlyZero())
 	{
 		FVector Forward = Updated->GetForwardVector();
 		Forward.Z = 0.0f;

@@ -144,6 +144,7 @@ protected:
 
 	// ── AnimGraph 로 내보낼 상태 ──
 	float NormalizedSpeed = 0.0f;   // 이징된 현재 속도 스칼라([0,1])
+	UPROPERTY(Edit, ReadOnly, Category = "Debug")	// 디버그 
 	float TurnRate        = 0.0f;   // 이번 프레임에서의 초당 선회각
 	float InclineAngle    = 0.0f;   // 이징된 경사([-1,1])
 	float AirTime         = 0.0f;   // 공중 체류 시간(초)

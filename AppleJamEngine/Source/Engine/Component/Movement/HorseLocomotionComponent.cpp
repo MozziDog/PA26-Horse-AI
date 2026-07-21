@@ -72,9 +72,9 @@ void UHorseLocomotionComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 	UpdateGait();
 
 	AActor* Owner = GetOwner();
-	if (!Movement || !Owner || Gait == EHorseGait::Stop)
+	if (!Movement || !Owner)
 	{
-		return;   // 정지 상태면 Movement에 입력 전달하지 않음 → 자연 감속
+		return;
 	}
 
 	FVector Forward = Owner->GetActorForward();
@@ -269,19 +269,29 @@ void UHorseLocomotionComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 
 		const FVector Heading = RotateAroundZ(Forward, SteerAngle).Normalized();
 		SteerDir = Heading;   // 다음 프레임 커밋 기준.
-
-		if (bDrawSteeringDebug && World.IsValid())
+		if (GetGait() != EHorseGait::Stop)
 		{
-			DrawDebugLine(World, DebugBase, DebugBase + Heading * 3.0f, FColor::Blue());   // 선택된 heading.
-		}
 
-		// gait → scale([0,1]). Movement 는 MaxSpeed*scale 을 목표속도로 삼는다(yaw 선회율은 Movement 가 제한).
-		Movement->AddInputVector(Heading, GetGaitScaledSpeed());
+			if (bDrawSteeringDebug && World.IsValid())
+			{
+				DrawDebugLine(World, DebugBase, DebugBase + Heading * 3.0f, FColor::Blue());   // 선택된 heading.
+			}
+			// gait → scale([0,1]). Movement 는 MaxSpeed*scale 을 목표속도로 삼는다(yaw 선회율은 Movement 가 제한).
+			Movement->AddInputVector(Heading, GetGaitScaledSpeed());
+		}
+		else
+		{
+			// 제자리 회전
+			// const FVector RotateInput = Heading - Forward * Heading.Dot(Forward);
+			const FVector RotateInput = Heading;
+			Movement->AddInputVector(RotateInput, 0.01f);
+		}
 	}
 	// 모든 slot 이 하드 제외면(막다른 벽) 급브레이크
 	else
 	{
 		Movement->Brake();
+		Gait = EHorseGait::Stop;
 		if (bDrawSteeringDebug && World.IsValid())
 		{
 			DrawDebugSphere(World, DebugBase, 0.4f, 12, FColor::Red());
