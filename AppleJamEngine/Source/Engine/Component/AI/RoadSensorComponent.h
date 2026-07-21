@@ -3,9 +3,11 @@
 #include "Component/SceneComponent.h"
 #include "Component/AI/BlackboardComponent.h"
 #include "Component/AI/RoadGraphComponent.h"
+#include "AI/HorseBlackboardKeys.h"
 
 #include "Source/Engine/Component/AI/RoadSensorComponent.generated.h"
 
+// NOTE: RoadSensorComponent는 actor 진행방향 앞에 배치되어 사용됨을 전제로 함
 UCLASS()
 class URoadSensorComponent : public USceneComponent
 {
@@ -22,9 +24,14 @@ protected:
 	void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction& ThisTickFunction) override;
 
 private:
+	// ─── 블랙보드용 Key ───
 	UPROPERTY(Edit, Save, Category = "AI|Sensor")
-	FName BlackboardKey;
+	FName RoadDirBlackboardKey = HorseBBKeys::RoadDir; // (FVector)검출된 목표를 향한 방향 (World space, Actor pivot 기준)
+
+	UPROPERTY(Edit, Save, Category = "AI|Sensor")
+	FName DistBlackboardKey = HorseBBKeys::RoadDist; // (float)도로까지의 거리. 멀면 도로추종 중단
 	
+	// ─── 런타임 캐시 ───
 	TWeakObjectPtr<UWorld> World;	// Debug draw용
 	TWeakObjectPtr<UBlackboardComponent> BlackboardComp;
 	TWeakObjectPtr<URoadGraphComponent> RoadGraphComp;

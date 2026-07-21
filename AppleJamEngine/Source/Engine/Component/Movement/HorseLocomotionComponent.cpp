@@ -92,7 +92,7 @@ void UHorseLocomotionComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 	// 우선순위는 가중치로 표현: User(최상) > Road > Inertia. 
 	// 장애물이 HardBlockDistance 보다 가까우면 아래 slot hard refuse로 위 우선순위 무시함
 	FVector UserDir(0.0f, 0.0f, 0.0f);
-	float   UserMag = 0.0f;
+	float   UserInputMag = 0.0f;
 	FVector RoadDir(0.0f, 0.0f, 0.0f);
 	bool    bRoad   = false;
 	if (BB)
@@ -100,12 +100,12 @@ void UHorseLocomotionComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 		FVector Temp;
 		if (BB->TryGetVector(HorseBBKeys::UserMoveDir, Temp) && !Temp.IsNearlyZero())
 		{
-			UserMag = std::clamp(Temp.Length(), 0.0f, 1.0f);
+			UserInputMag = std::clamp(Temp.Length(), 0.0f, 1.0f);
 			Temp.Z = 0.0f;
 			if (!Temp.IsNearlyZero()) 
 				UserDir = Temp.Normalized();
 			else                   
-				UserMag = 0.0f;
+				UserInputMag = 0.0f;
 		}
 		if (BB->TryGetVector(HorseBBKeys::RoadDir, Temp) && !Temp.IsNearlyZero())
 		{
@@ -211,13 +211,25 @@ void UHorseLocomotionComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 		if (std::abs(HorseBBKeys::ObsFanAngles[i]) < std::abs(HorseBBKeys::ObsFanAngles[CenterIdx])) { CenterIdx = i; }
 	}
 
+	// 도로에서 멀리 떨어져 있으면 도로 추종 서서히 끔. RoadDist 미기록 시 INF → 가중치 0
+	float RoadDistAtten = 0.0f;
+	float RoadDistVal   = FLT_MAX;
+	if (BB && BB->TryGetFloat(HorseBBKeys::RoadDist, RoadDistVal))
+	{
+		const float Span = std::max(1.e-3f, RoadFarDistance - RoadNearDistance);
+		RoadDistAtten = std::clamp((RoadFarDistance - RoadDistVal) / Span, 0.0f, 1.0f);
+	}
+
+	// 유저가 조향 중이면 도로 추종 약화
+	const float EffRoadWeight = RoadWeight * (1.0f - RoadUserYield * UserInputMag) * RoadDistAtten;
+
 	float Score[N];
 	int   BestIdx = -1;
 	for (int i = 0; i < N; ++i)
 	{
 		float Interest = InertiaWeight * std::max(0.0f, SlotDir[i].Dot(Forward));
-		if (UserMag > 0.0f) { Interest += UserWeight * UserMag * std::max(0.0f, SlotDir[i].Dot(UserDir)); }
-		if (bRoad)          { Interest += RoadWeight * std::max(0.0f, SlotDir[i].Dot(RoadDir)); }
+		if (UserInputMag > 0.0f) { Interest += UserWeight * UserInputMag * std::max(0.0f, SlotDir[i].Dot(UserDir)); }
+		if (bRoad)          { Interest += EffRoadWeight * std::max(0.0f, SlotDir[i].Dot(RoadDir)); }
 
 		// 정면 slot 은 spread 오염분을 ForwardLaneGuard 비율만큼 걷어내 raw danger 로 되돌린다.
 		float EffDanger = SpreadDanger[i];
@@ -422,4 +434,7 @@ void UHorseLocomotionComponent::Serialize(FArchive& Ar)
 	Ar << bSmoothSteering;
 	Ar << SteerRateLimit;
 	Ar << ForwardLaneGuard;
+	Ar << RoadUserYield;
+	Ar << RoadNearDistance;
+	Ar << RoadFarDistance;
 }

@@ -62,9 +62,10 @@ protected:
 	TWeakObjectPtr<UBlackboardComponent> BlackboardComp = nullptr;
 	TWeakObjectPtr<UWorld> World = nullptr;		// 디버깅 시각화에 필요
 
-	// ── context-steering arbiter 튜닝 ──
-	// 회피는 binary veto 가 아니라 graded danger(2단계): SafeDistance~HardBlockDistance 구간은
-	// danger 0→1 선형 램프(soft penalty), HardBlockDistance 이하는 danger=1 이며 해당 slot 을 하드 제외.
+	// ── context-steering 튜닝 : 장애물 회피 관련 ────────────────────────────────────────────────────────
+	// 회피는 2단계로 구분: 
+	// SafeDistance~HardBlockDistance 구간은 danger 수치 0 ~ 1 선형 증가 (soft penalty)
+	// HardBlockDistance 이하는 danger=1 → 해당 slot 을 반드시 제외 (hard penalty)
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Safe Distance", Min=0.0f, Max=20.0f, Speed=0.05f)
 	float SafeDistance = 2.0f;    // m — clearance 가 이 값부터 danger 가 붙기 시작(램프 상단).
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Hard Block Distance", Min=0.0f, Max=20.0f, Speed=0.05f)
@@ -75,22 +76,34 @@ protected:
 	float DangerSpread = 0.5f;    // 이웃 slot 으로 번지는 danger 비율(0=번짐 없음). danger field 를 공간적으로 매끄럽게 해 판단 떨림 완화.
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Forward Lane Guard", Min=0.0f, Max=1.0f, Speed=0.02f)
 	float ForwardLaneGuard = 1.0f;   // 정면 slot 에서 걷어낼 spread 오염 비율(1=완전 제거, 0=off). 통로 탈출 시 과민 조향(lurch) 억제.
+	
+	// ── context-steering 튜닝 : 유저 입력 관련 ──────────────────────────────────────────────────────────
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="User Weight", Min=0.0f, Max=10.0f, Speed=0.05f)
 	float UserWeight = 2.0f;      // 유저 입력 방향 interest 가중(최상위 — 우회 좌/우 tie-break).
+
+	// ── context-steering 튜닝 : 도로 관련 ───────────────────────────────────────────────────────────────
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Road Weight", Min=0.0f, Max=10.0f, Speed=0.05f)
 	float RoadWeight = 1.0f;      // 도로 방향 interest 가중.
+	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Road User Yield", Min=0.0f, Max=1.0f, Speed=0.02f)
+	float RoadUserYield = 1.0f;   // 유저 입력 강도에 비례해 도로 추종을 약화하는 비율(1=최대 입력에서 도로 방향 무시)
+	// 도로에서 멀어질수록 추종 약화, 블랙보드에 RoadDist 없으면 RoadDist == INF으로 간주.
+	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Road Near Distance", Min=0.0f, Max=50.0f, Speed=0.05f)
+	float RoadNearDistance = 3.0f;
+	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Road Far Distance", Min=0.0f, Max=50.0f, Speed=0.05f)
+	float RoadFarDistance = 14.0f;
+
+	// ── context-steering 튜닝 : 조향 떨림 방지 관련 ─────────────────────────────────────────────────────
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Inertia Weight", Min=0.0f, Max=10.0f, Speed=0.05f)
 	float InertiaWeight = 0.5f;   // 현재 진행(forward) 유지 관성 가중(최하위).
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Commit Weight", Min=0.0f, Max=10.0f, Speed=0.05f)
 	float CommitWeight = 0.75f;   // 직전 선택 heading 을 유지하려는 히스테리시스. 좌/우 argmax 핑퐁(떨림) 억제.
-	// danger persistence(fast-attack/slow-release): 회전 중 장애물이 sweep 경계를 들락거려 clearance 가 튈 때,
-	// danger를 천천히 감쇠시켜 조향 떨림을 억제. 
+	// danger persistence(fast-attack/slow-release): 
+	// 회전 중 장애물이 sweep 경계를 들락거려 clearance 가 튈 때, danger를 천천히 감소시켜 조향 떨림을 억제,
 	// danger의 증가는 장애물 회피 반응성 고려해서 즉시 반영되는 상태 유지
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Danger Persistence")
 	bool  bDangerPersistence = true;
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Danger Release Rate", Min=0.0f, Max=20.0f, Speed=0.05f)
 	float DangerReleaseRate = 3.0f;   // danger/sec — danger 가 내려갈 때 초당 감쇠량. 클수록 빨리 잊음(0=영구 유지).
-
 	// 조향각 slew — 목표 heading(상대 조향각)이 튀어도 초당 SteerRateLimit 이하로만 바꿔 Movement 가 쫓는
 	// 레퍼런스를 매끄럽게 한다. 장애물이 sweep 에 "나타나는" 순간의 잔여 떨림을 뭉갠다. 
 	// 낮출수록 반응성↓·스무딩↑
@@ -102,7 +115,7 @@ protected:
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Draw Steering Debug")
 	bool  bDrawSteeringDebug = true;
 
-	// ── gait별 목표 속도(m/s). Stop은 당연히 0 ──
+	// ── gait별 목표 속도(m/s). Stop은 당연히 0 ──────────────────────────────────────────────────────────
 	UPROPERTY(Edit, Save, Category="Locomotion|Gait", DisplayName="Walk Speed", Min=0.0f, Max=50.0f, Speed=0.1f)
 	float WalkSpeed = 1.8f;
 	UPROPERTY(Edit, Save, Category="Locomotion|Gait", DisplayName="Trot Speed", Min=0.0f, Max=50.0f, Speed=0.1f)
@@ -115,7 +128,7 @@ protected:
 	UPROPERTY(Edit, Save, Category="Locomotion|Gait", DisplayName="Gait Up Cooldown", Min=0.0f, Max=5.0f, Speed=0.01f)
 	float GaitUpCooldown = 0.6f; 	// 가속 쿨타임(초 단위)
 
-	// ── 정명의 장애물이 설정된 거리 이하로 다가왔을 때 점프 동작 시작 ──
+	// ── 정면의 장애물이 설정된 거리 이하로 다가왔을 때 점프 동작 시작 ───────────────────────────────────
 	UPROPERTY(Edit, Save, Category = "Locomotion|Jump", DisplayName = "Trot Jump Trigger Dist", Min = 0.0f, Max = 20.0f, Speed = 0.05f)
 	float TrotJumpTriggerDist = 2.5f;
 	UPROPERTY(Edit, Save, Category = "Locomotion|Jump", DisplayName = "Canter Jump Trigger Dist", Min = 0.0f, Max = 20.0f, Speed = 0.05f)
@@ -124,7 +137,7 @@ protected:
 	float GallopJumpTriggerDist = 5.0f;
 
 
-	// ── runtime states ──
+	// ── runtime states ──────────────────────────────────────────────────────────────────────────────────
 	static constexpr int MaxFanSlots = 8;   // PrevDanger 버퍼 상한. cpp 에서 ObsFanCount <= 이 값 검증.
 	EHorseGait Gait     = EHorseGait::Stop;
 	EHorseGait MinGait  = EHorseGait::Stop;
