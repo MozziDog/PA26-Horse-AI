@@ -1,6 +1,8 @@
 ﻿#include "pch.h"
 #include "HorseCharacter.h"
 
+#include "Animation/Graph/AnimGraphManager.h"
+#include "Animation/Graph/AnimGraphInstance.h"
 #include "Component/Camera/CameraComponent.h"
 #include "Component/Camera/SpringArmComponent.h"
 #include "Component/Input/InputComponent.h"
@@ -9,6 +11,7 @@
 #include "Component/AI/BTAgentComponent.h"
 #include "Component/AI/ObstacleFanSensorComponent.h"
 #include "Component/AI/CliffFanSensorComponent.h"
+#include "Component/AI/RoadSensorComponent.h"
 #include "Component/AI/BlackboardComponent.h"
 #include "Component/Primitive/SkeletalMeshComponent.h"
 #include "Component/Shape/BoxComponent.h"
@@ -98,6 +101,20 @@ void AHorseCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 		MeshComponent->SetSkeletalMesh(Asset);
 	}
 
+	// 애니메이션 세팅
+	MeshComponent->SetAnimationMode(EAnimationMode::AnimationCustom);
+	MeshComponent->SetAnimInstanceClass(UAnimGraphInstance::StaticClass());
+	UAnimGraphInstance* AnimGraphInstance = Cast<UAnimGraphInstance>(MeshComponent->GetAnimInstance());
+	if (AnimGraphInstance)
+	{
+		AnimGraphInstance->DefaultSequencePath = "Content/Mesh/Horse/Reexport/Horse_A_Scene.uasset";
+		FString AnimGraphPath = "Content/Mesh/Horse/Reexport/HorseAnimGraph.uasset";
+		UAnimGraphAsset* Asset = FAnimGraphManager::Get().Load(AnimGraphPath);
+		AnimGraphInstance->SetGraphAsset(Asset);
+		AnimGraphInstance->GraphAssetPath = AnimGraphPath;
+		MeshComponent->InitializeAnimation();
+	}
+
 	// ── AI 관련 ──
 	// 플레이어/BT 입력을 받아 매 tick MovementComponent 로 라우팅.
 	LocomotionComponent = AddComponent<UHorseLocomotionComponent>(); 
@@ -106,13 +123,19 @@ void AHorseCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 	if(ObstacleFanSensorComponent)
 	{
 		ObstacleFanSensorComponent->AttachToComponent(CollisionComponent);
-		ObstacleFanSensorComponent->SetRelativeLocation(FVector(1.0f, 0.0f, -0.6f));
+		ObstacleFanSensorComponent->SetRelativeLocation(FVector(1.0f, 0.0f, 0.0f));
 	}
 	CliffFanSensorComponent = AddComponent<UCliffFanSensorComponent>();
 	if(CliffFanSensorComponent)
 	{
 		CliffFanSensorComponent->AttachToComponent(CollisionComponent);
 		CliffFanSensorComponent->SetRelativeLocation(FVector(1.0f, 0.0f, -0.3f));
+	}
+	RoadSensorComponent = AddComponent<URoadSensorComponent>();
+	if (RoadSensorComponent)
+	{
+		RoadSensorComponent->AttachToComponent(CollisionComponent);
+		RoadSensorComponent->SetRelativeLocation(FVector(10.0f, 0.0f, 0.0f));
 	}
 	BTAgentComponent = AddComponent<UBTAgentComponent>();
 	if (BTAgentComponent)

@@ -23,7 +23,7 @@ void RegisterGameActorPlacements()
 			AHorseCharacter* Actor = World->SpawnActor<AHorseCharacter>();
 			if (Actor)
 			{
-				Actor->InitDefaultComponents("Content/Mesh/HorseWalk/Horse_temp(with walk anim)_SkeletalMesh.uasset");
+				Actor->InitDefaultComponents("Content/Mesh/Horse/Reexport/MalbersHorse_noArmour_noLow_SkeletalMesh.uasset");
 				Actor->SetActorLocation(Location);
 			}
 			return Actor;

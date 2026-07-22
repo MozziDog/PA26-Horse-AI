@@ -11,6 +11,7 @@ class UHorseLocomotionComponent;
 class UBTAgentComponent;
 class UObstacleFanSensorComponent;
 class UCliffFanSensorComponent;
+class URoadSensorComponent;
 class UBlackboardComponent;
 class USpringArmComponent;
 class UCameraComponent;
@@ -50,6 +51,7 @@ protected:
 	TWeakObjectPtr<UBlackboardComponent> BlackboardComponent = nullptr;
 	TWeakObjectPtr<UObstacleFanSensorComponent> ObstacleFanSensorComponent = nullptr;
 	TWeakObjectPtr<UCliffFanSensorComponent> CliffFanSensorComponent = nullptr;
+	TWeakObjectPtr<URoadSensorComponent> RoadSensorComponent = nullptr;
 	TWeakObjectPtr<USpringArmComponent> SpringArmComponent = nullptr;
 	TWeakObjectPtr<UCameraComponent> CameraComponent = nullptr;
 

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "Animation/AnimInstance.h"
 #include "Animation/Graph/AnimGraphTypes.h"
@@ -67,7 +67,7 @@ public:
 	// Editor PropertyWidget 의 자산 콤보로 노출 (AssetType meta). NativeInitialize 에서 LoadAnimation.
 	// "None" / empty / 로드 실패 시 SequenceRef=nullptr — SequencePlayer 가 ref pose 유지.
 	UPROPERTY(Edit, Save, Category="AnimGraph", DisplayName="Default Sequence", AssetType="UAnimSequence")
-	FSoftObjectPtr DefaultSequencePath = "Content/Data/hirasawa-yui/IdleWithSkin_mixamo_com.uasset";
+	FSoftObjectPtr DefaultSequencePath = nullptr;
 
 	// 디스크의 UAnimGraphAsset 패키지. 비어있으면 NativeInitialize 가 transient 자산을 생성 +
 	// InitializeDefault 호출 (기존 데모 흐름 유지). path 가 있으면 FAnimGraphManager 로 로드 후
