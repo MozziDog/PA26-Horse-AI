@@ -1,6 +1,6 @@
-﻿#pragma once
+#pragma once
 
-#include "PawnMovementComponent.h"
+#include "Component/Movement/PawnMovementComponent.h"
 #include "Object/Ptr/WeakObjectPtr.h"
 
 struct FHitResult;
@@ -23,7 +23,7 @@ class UAnimGraphInstance;
 //
 // yaw 회전은 root motion으로 처리: 애니메이션이 없는 각도의 회전은 자연스레 차단됨
 
-#include "Source/Engine/Component/Movement/HorseMovementComponent.generated.h"
+#include "Source/Game/Horse/HorseMovementComponent.generated.h"
 
 UENUM()
 enum class EHorseMoveMode : uint8

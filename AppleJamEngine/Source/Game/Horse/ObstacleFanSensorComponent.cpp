@@ -1,7 +1,7 @@
 ﻿#include "pch.h"
 #include "ObstacleFanSensorComponent.h"
 
-#include "AI/HorseBlackboardKeys.h"
+#include "Game/Horse/HorseConstants.h"
 #include "Debug/DrawDebugHelpers.h"
 #include "GameFramework/AActor.h"
 #include "GameFramework/World.h"

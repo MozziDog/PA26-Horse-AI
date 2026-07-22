@@ -1,9 +1,9 @@
-﻿#pragma once
+#pragma once
 
 #include "Component/SceneComponent.h"
 #include "Component/AI/BlackboardComponent.h"
 
-#include "Source/Engine/Component/AI/ObstacleFanSensorComponent.generated.h"
+#include "Source/Game/Horse/ObstacleFanSensorComponent.generated.h"
 
 // 1)
 // 전방 부채꼴 sphere sweep 으로 장애물 회피용 clearance map 을 Blackboard 에 기록(HorseBBKeys::ObsClear)

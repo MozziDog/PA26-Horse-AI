@@ -1,9 +1,9 @@
-﻿#pragma once
+#pragma once
 
 #include "Component/SceneComponent.h"
 #include "Component/AI/BlackboardComponent.h"
 
-#include "Source/Engine/Component/AI/CliffFanSensorComponent.generated.h"
+#include "Source/Game/Horse/CliffFanSensorComponent.generated.h"
 
 class UHorseLocomotionComponent;
 

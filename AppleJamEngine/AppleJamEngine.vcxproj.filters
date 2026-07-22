@@ -1217,10 +1217,10 @@
     <ClCompile Include="Source\Engine\Component\AI\BlackboardComponent.cpp">
       <Filter>Source\Engine\Component\AI</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Engine\Component\AI\CliffFanSensorComponent.cpp">
+    <ClCompile Include="Source\Game\Horse\CliffFanSensorComponent.cpp">
       <Filter>Source\Engine\Component\AI</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Engine\Component\AI\ObstacleFanSensorComponent.cpp">
+    <ClCompile Include="Source\Game\Horse\ObstacleFanSensorComponent.cpp">
       <Filter>Source\Engine\Component\AI</Filter>
     </ClCompile>
     <ClCompile Include="Source\Engine\Component\AI\RaycastSensorComponent.cpp">
@@ -1295,10 +1295,10 @@
     <ClCompile Include="Source\Engine\Component\Movement\FloatingPawnMovementComponent.cpp">
       <Filter>Source\Engine\Component\Movement</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Engine\Component\Movement\HorseLocomotionComponent.cpp">
+    <ClCompile Include="Source\Game\Horse\HorseLocomotionComponent.cpp">
       <Filter>Source\Engine\Component\Movement</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Engine\Component\Movement\HorseMovementComponent.cpp">
+    <ClCompile Include="Source\Game\Horse\HorseMovementComponent.cpp">
       <Filter>Source\Engine\Component\Movement</Filter>
     </ClCompile>
     <ClCompile Include="Source\Engine\Component\Movement\MovementComponent.cpp">
@@ -1532,7 +1532,7 @@
     <ClCompile Include="Source\Engine\GameFramework\Pawn\Character.cpp">
       <Filter>Source\Engine\GameFramework\Pawn</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Engine\GameFramework\Pawn\HorseCharacter.cpp">
+    <ClCompile Include="Source\Game\Horse\HorseCharacter.cpp">
       <Filter>Source\Engine\GameFramework\Pawn</Filter>
     </ClCompile>
     <ClCompile Include="Source\Engine\GameFramework\Pawn\LuaCharacter.cpp">
@@ -2262,7 +2262,7 @@
     <ClCompile Include="Intermediate\Generated\Reflection.generated.cpp">
       <Filter>Intermediate\Generated</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Engine\Animation\Notify\AnimNotify_HorseJump.cpp" />
+    <ClCompile Include="Source\Game\Horse\AnimNotify_HorseJump.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Source\Editor\EditorEngine.h">
@@ -2475,7 +2475,7 @@
     <ClInclude Include="Source\Engine\AI\Blackboard.h">
       <Filter>Source\Engine\AI</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Engine\AI\HorseBlackboardKeys.h">
+    <ClInclude Include="Source\Game\Horse\HorseConstants.h">
       <Filter>Source\Engine\AI</Filter>
     </ClInclude>
     <ClInclude Include="Source\Engine\AI\BT\BTBehaviorRegistry.h">
@@ -2712,10 +2712,10 @@
     <ClInclude Include="Source\Engine\Component\AI\BlackboardComponent.h">
       <Filter>Source\Engine\Component\AI</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Engine\Component\AI\CliffFanSensorComponent.h">
+    <ClInclude Include="Source\Game\Horse\CliffFanSensorComponent.h">
       <Filter>Source\Engine\Component\AI</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Engine\Component\AI\ObstacleFanSensorComponent.h">
+    <ClInclude Include="Source\Game\Horse\ObstacleFanSensorComponent.h">
       <Filter>Source\Engine\Component\AI</Filter>
     </ClInclude>
     <ClInclude Include="Source\Engine\Component\AI\RaycastSensorComponent.h">
@@ -2790,10 +2790,10 @@
     <ClInclude Include="Source\Engine\Component\Movement\FloatingPawnMovementComponent.h">
       <Filter>Source\Engine\Component\Movement</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Engine\Component\Movement\HorseLocomotionComponent.h">
+    <ClInclude Include="Source\Game\Horse\HorseLocomotionComponent.h">
       <Filter>Source\Engine\Component\Movement</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Engine\Component\Movement\HorseMovementComponent.h">
+    <ClInclude Include="Source\Game\Horse\HorseMovementComponent.h">
       <Filter>Source\Engine\Component\Movement</Filter>
     </ClInclude>
     <ClInclude Include="Source\Engine\Component\Movement\MovementComponent.h">
@@ -3066,7 +3066,7 @@
     <ClInclude Include="Source\Engine\GameFramework\Pawn\Character.h">
       <Filter>Source\Engine\GameFramework\Pawn</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Engine\GameFramework\Pawn\HorseCharacter.h">
+    <ClInclude Include="Source\Game\Horse\HorseCharacter.h">
       <Filter>Source\Engine\GameFramework\Pawn</Filter>
     </ClInclude>
     <ClInclude Include="Source\Engine\GameFramework\Pawn\LuaCharacter.h">
@@ -6387,7 +6387,7 @@
     <ClInclude Include="ThirdParty\sol2\include\sol\utility\to_string.hpp">
       <Filter>ThirdParty\sol2\include\sol\utility</Filter>
     </ClInclude>
-    <ClInclude Include="Source\Engine\Animation\Notify\AnimNotify_HorseJump.h" />
+    <ClInclude Include="Source\Game\Horse\AnimNotify_HorseJump.h" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="AppleJamEngine.rc" />

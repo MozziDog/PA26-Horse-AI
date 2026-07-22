@@ -5,7 +5,7 @@
 
 // 모션의 특정 시점에 점프를 트리거하는 instant notify.
 
-#include "Source/Engine/Animation/Notify/AnimNotify_HorseJump.generated.h"
+#include "Source/Game/Horse/AnimNotify_HorseJump.generated.h"
 
 UCLASS()
 class UAnimNotify_HorseJump : public UAnimNotify

@@ -1,6 +1,6 @@
 ﻿#include "AnimNotify_HorseJump.h"
 
-#include "Component/Movement/HorseMovementComponent.h"
+#include "HorseMovementComponent.h"
 #include "Component/Primitive/SkeletalMeshComponent.h"
 #include "GameFramework/AActor.h"
 

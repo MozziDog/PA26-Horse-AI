@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "Component/ActorComponent.h"
 
@@ -9,7 +9,7 @@ class UBlackboardComponent;
 // 책임 둘: (1) 조향 방향 산출(지금은 플레이어 steering, 후속 phase 에서 도로추종·장애물회피),
 //          (2) 보법(gait) 상태머신 소유 — Stop→Walk→Trot→Canter→Gallop 를 한 단계씩 전환.
 // Movement는 gait 단계 대신 여기서 채워넣은 InputVector만 보고 이동 속도와 선회반경 계산
-#include "Source/Engine/Component/Movement/HorseLocomotionComponent.generated.h"
+#include "Source/Game/Horse/HorseLocomotionComponent.generated.h"
 
 UENUM()
 enum class EHorseGait : uint8

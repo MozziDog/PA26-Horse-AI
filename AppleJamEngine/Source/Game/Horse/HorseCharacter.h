@@ -1,8 +1,8 @@
-﻿#pragma once
+#pragma once
 #include "GameFramework/Pawn/Pawn.h"
 #include "Object/Ptr/WeakObjectPtr.h"
 
-#include "Source/Engine/GameFramework/Pawn/HorseCharacter.generated.h"
+#include "Source/Game/Horse/HorseCharacter.generated.h"
 
 class USkeletalMeshComponent;
 class UBoxComponent;

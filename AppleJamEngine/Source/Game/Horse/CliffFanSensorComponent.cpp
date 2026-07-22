@@ -1,8 +1,8 @@
 ﻿#include "pch.h"
 #include "CliffFanSensorComponent.h"
 
-#include "AI/HorseBlackboardKeys.h"
-#include "Component/Movement/HorseLocomotionComponent.h"
+#include "Game/Horse/HorseConstants.h"
+#include "HorseLocomotionComponent.h"
 #include "Debug/DrawDebugHelpers.h"
 #include "GameFramework/AActor.h"
 #include "GameFramework/World.h"

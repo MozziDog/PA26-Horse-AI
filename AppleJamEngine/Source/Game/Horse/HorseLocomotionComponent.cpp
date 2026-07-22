@@ -1,7 +1,7 @@
 ﻿#include "HorseLocomotionComponent.h"
 
 #include "HorseMovementComponent.h"
-#include "AI/HorseBlackboardKeys.h"
+#include "Game/Horse/HorseConstants.h"
 #include "Component/AI/BlackboardComponent.h"
 #include "Core/TickFunction.h"
 #include "Debug/DrawDebugHelpers.h"

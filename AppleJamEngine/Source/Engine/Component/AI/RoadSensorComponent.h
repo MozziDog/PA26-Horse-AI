@@ -3,7 +3,7 @@
 #include "Component/SceneComponent.h"
 #include "Component/AI/BlackboardComponent.h"
 #include "Component/AI/RoadGraphComponent.h"
-#include "AI/HorseBlackboardKeys.h"
+#include "Game/Horse/HorseConstants.h"
 
 #include "Source/Engine/Component/AI/RoadSensorComponent.generated.h"
 

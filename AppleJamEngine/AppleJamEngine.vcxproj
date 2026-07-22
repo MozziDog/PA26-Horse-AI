@@ -245,7 +245,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClCompile Include="Source\Editor\Viewport\Asset\MeshEditorViewportClient.cpp" />
     <ClCompile Include="Source\Editor\Viewport\Asset\StaticMeshEditorViewportClient.cpp" />
     <ClCompile Include="Source\Editor\Viewport\Level\FLevelViewportLayout.cpp" />
-    <ClCompile Include="Source\Engine\Animation\Notify\AnimNotify_HorseJump.cpp" />
+    <ClCompile Include="Source\Game\Horse\AnimNotify_HorseJump.cpp" />
     <ClCompile Include="Source\Engine\pch.cpp">
       <PrecompiledHeader>Create</PrecompiledHeader>
     </ClCompile>
@@ -316,8 +316,8 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClCompile Include="Source\Engine\Component\Action\ActionVisualEffectComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\AI\BTAgentComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\AI\BlackboardComponent.cpp" />
-    <ClCompile Include="Source\Engine\Component\AI\CliffFanSensorComponent.cpp" />
-    <ClCompile Include="Source\Engine\Component\AI\ObstacleFanSensorComponent.cpp" />
+    <ClCompile Include="Source\Game\Horse\CliffFanSensorComponent.cpp" />
+    <ClCompile Include="Source\Game\Horse\ObstacleFanSensorComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\AI\RaycastSensorComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\AI\RoadGraphComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\AI\RoadSensorComponent.cpp" />
@@ -342,8 +342,8 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClCompile Include="Source\Engine\Component\Light\SpotLightComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\Movement\CharacterMovementComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\Movement\FloatingPawnMovementComponent.cpp" />
-    <ClCompile Include="Source\Engine\Component\Movement\HorseLocomotionComponent.cpp" />
-    <ClCompile Include="Source\Engine\Component\Movement\HorseMovementComponent.cpp" />
+    <ClCompile Include="Source\Game\Horse\HorseLocomotionComponent.cpp" />
+    <ClCompile Include="Source\Game\Horse\HorseMovementComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\Movement\MovementComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\Movement\PawnMovementComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\Movement\PendulumMovementComponent.cpp" />
@@ -421,7 +421,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClCompile Include="Source\Engine\GameFramework\Light\SpotLightActor.cpp" />
     <ClCompile Include="Source\Engine\GameFramework\Pawn\BossCharacter.cpp" />
     <ClCompile Include="Source\Engine\GameFramework\Pawn\Character.cpp" />
-    <ClCompile Include="Source\Engine\GameFramework\Pawn\HorseCharacter.cpp" />
+    <ClCompile Include="Source\Game\Horse\HorseCharacter.cpp" />
     <ClCompile Include="Source\Engine\GameFramework\Pawn\LuaCharacter.cpp" />
     <ClCompile Include="Source\Engine\GameFramework\Pawn\Pawn.cpp" />
     <ClCompile Include="Source\Engine\GameFramework\Pawn\WheeledVehiclePawn.cpp" />
@@ -774,10 +774,10 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClInclude Include="Source\Editor\Viewport\Asset\StaticMeshEditorViewportClient.h" />
     <ClInclude Include="Source\Editor\Viewport\Level\FLevelViewportLayout.h" />
     <ClInclude Include="Source\Editor\Viewport\Level\LevelEditorViewportClient.h" />
-    <ClInclude Include="Source\Engine\Animation\Notify\AnimNotify_HorseJump.h" />
+    <ClInclude Include="Source\Game\Horse\AnimNotify_HorseJump.h" />
     <ClInclude Include="Source\Engine\pch.h" />
     <ClInclude Include="Source\Engine\AI\Blackboard.h" />
-    <ClInclude Include="Source\Engine\AI\HorseBlackboardKeys.h" />
+    <ClInclude Include="Source\Game\Horse\HorseConstants.h" />
     <ClInclude Include="Source\Engine\AI\BT\BTBehaviorRegistry.h" />
     <ClInclude Include="Source\Engine\AI\BT\BTLuaBuilder.h" />
     <ClInclude Include="Source\Engine\AI\BT\BehaviorTree.h" />
@@ -856,8 +856,8 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClInclude Include="Source\Engine\Component\Action\ActionVisualEffectComponent.h" />
     <ClInclude Include="Source\Engine\Component\AI\BTAgentComponent.h" />
     <ClInclude Include="Source\Engine\Component\AI\BlackboardComponent.h" />
-    <ClInclude Include="Source\Engine\Component\AI\CliffFanSensorComponent.h" />
-    <ClInclude Include="Source\Engine\Component\AI\ObstacleFanSensorComponent.h" />
+    <ClInclude Include="Source\Game\Horse\CliffFanSensorComponent.h" />
+    <ClInclude Include="Source\Game\Horse\ObstacleFanSensorComponent.h" />
     <ClInclude Include="Source\Engine\Component\AI\RaycastSensorComponent.h" />
     <ClInclude Include="Source\Engine\Component\AI\RoadGraphComponent.h" />
     <ClInclude Include="Source\Engine\Component\AI\RoadSensorComponent.h" />
@@ -882,8 +882,8 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClInclude Include="Source\Engine\Component\Light\SpotLightComponent.h" />
     <ClInclude Include="Source\Engine\Component\Movement\CharacterMovementComponent.h" />
     <ClInclude Include="Source\Engine\Component\Movement\FloatingPawnMovementComponent.h" />
-    <ClInclude Include="Source\Engine\Component\Movement\HorseLocomotionComponent.h" />
-    <ClInclude Include="Source\Engine\Component\Movement\HorseMovementComponent.h" />
+    <ClInclude Include="Source\Game\Horse\HorseLocomotionComponent.h" />
+    <ClInclude Include="Source\Game\Horse\HorseMovementComponent.h" />
     <ClInclude Include="Source\Engine\Component\Movement\MovementComponent.h" />
     <ClInclude Include="Source\Engine\Component\Movement\PawnMovementComponent.h" />
     <ClInclude Include="Source\Engine\Component\Movement\PendulumMovementComponent.h" />
@@ -974,7 +974,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClInclude Include="Source\Engine\GameFramework\Light\SpotLightActor.h" />
     <ClInclude Include="Source\Engine\GameFramework\Pawn\BossCharacter.h" />
     <ClInclude Include="Source\Engine\GameFramework\Pawn\Character.h" />
-    <ClInclude Include="Source\Engine\GameFramework\Pawn\HorseCharacter.h" />
+    <ClInclude Include="Source\Game\Horse\HorseCharacter.h" />
     <ClInclude Include="Source\Engine\GameFramework\Pawn\LuaCharacter.h" />
     <ClInclude Include="Source\Engine\GameFramework\Pawn\Pawn.h" />
     <ClInclude Include="Source\Engine\GameFramework\Pawn\WheeledVehiclePawn.h" />

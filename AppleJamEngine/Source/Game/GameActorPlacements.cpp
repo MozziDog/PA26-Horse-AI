@@ -4,7 +4,7 @@
 #include "Engine/Runtime/EngineInitHooks.h"
 
 #include "GameFramework/World.h"
-#include "GameFrameWork/Pawn/HorseCharacter.h"
+#include "Game/Horse/HorseCharacter.h"
 
 // ============================================================
 // 게임-특화 액터를 Editor 의 "Place Actor" 메뉴에 등록 — 현재는 비어 있음.
