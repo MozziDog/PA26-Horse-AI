@@ -53,7 +53,7 @@ void UHorseMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType
 		return;
 	}
 
-	// ── 1) 입력 → 목표 속도 스칼라 + 조향각 ──
+	// ── 입력 → 목표 속도 스칼라 + 조향각 ──
 	FVector Desired;
 	ConsumeInputVector(Desired);
 	Desired.Z = 0.0f;   // 조향/전진은 XY 평면만.
@@ -62,6 +62,21 @@ void UHorseMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType
 	if (bBrakeRequested || MoveMode == EHorseMoveMode::Sliding)
 	{
 		TargetSpeed = 0.0f;   // 급정지·미끄러짐 중엔 전진 의사 0.
+	}
+
+	// ── Rearing 게이팅 ──
+	// Brake() 는 막힌 동안 매 frame 재호출되므로 bBrake rising edge에만 1회 pulse
+	const bool bBrakeRising = bBrakeRequested && !bWasBraking;
+	bRearingRequested = bBrakeRising
+		&& MoveMode == EHorseMoveMode::Grounded
+		&& NormalizedSpeed >= RearMinSpeed;
+	if (bRearingRequested)
+	{
+		// Skidding 상태 진입
+		// 미끄러지는 처음 속도는 기존 진행하던 속도 그대로 사용
+		SkidVelocity = FVector(Velocity.X, Velocity.Y, 0.0f);
+		bSkidding = true;
+		UE_LOG("[HorseMovement] Rearing requested");
 	}
 
 	// 조향
@@ -90,7 +105,7 @@ void UHorseMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType
 	}
 	NormalizedSpeed = TargetSpeed;
 
-	// ── 2) root motion 소비(yaw 즉시 적용) + 모드별 위치 처리 ──
+	// ── root motion 소비(yaw 즉시 적용) + 모드별 위치 처리 ──
 	FVector WorldDelta(0.0f, 0.0f, 0.0f);
 	ConsumeRootMotion(WorldDelta);
 
@@ -107,9 +122,12 @@ void UHorseMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType
 		TickFalling(DeltaTime);   // 이륙 시점 수평 관성 + 중력. root motion XY 는 공중에서 무시.
 	}
 
-	// ── 3) AnimGraph 변수 push ──
+	// ── AnimGraph 변수 push ──
 	PushAnimGraphVariables();
-	bBrakeRequested = false;   // frame 소비 후 클리어(다음 frame Locomotion 이 재요청).
+
+	// 다음 frame 에지/속도 판정용 상태 갱신 후 brake 소비.
+	bWasBraking         = bBrakeRequested;
+	bBrakeRequested     = false;   // frame 소비 후 클리어(다음 frame Locomotion 이 재요청).
 }
 
 void UHorseMovementComponent::ConsumeRootMotion(FVector& OutWorldDelta)
@@ -164,9 +182,35 @@ void UHorseMovementComponent::TickGrounded(float DeltaTime, const FVector& World
 
 	Velocity.Z = 0.0f;
 
+	// 움직임 입력이 있으면 skid 강제 중지
+	const float MinMovementThreshold = 0.2f;
+	if (bSkidding && NormalizedSpeed > MinMovementThreshold)
+	{
+		bSkidding    = false;
+		SkidVelocity = FVector(0.0f, 0.0f, 0.0f);
+	}
+
+	// Rearing 등, skid 상황에는 root motion 대신 관성으로 이동
+	// SkidStopSpeed 보다 느려지면 운동마찰력→정지마찰력, 미끄러짐 중지.
+	FVector MoveXY;
+	if (bSkidding)
+	{
+		SkidVelocity *= std::clamp(1.0f - SkidFriction * DeltaTime, 0.0f, 1.0f);
+		if (SkidVelocity.Length() < SkidStopSpeed)
+		{
+			SkidVelocity = FVector(0.0f, 0.0f, 0.0f);
+			bSkidding    = false;
+		}
+		MoveXY = FVector(SkidVelocity.X, SkidVelocity.Y, 0.0f) * DeltaTime;
+	}
+	else
+	{
+		MoveXY = FVector(WorldDelta.X, WorldDelta.Y, 0.0f);
+	}
+
 	FVector Loc = Updated->GetWorldLocation();
 	// 몸통 box sweep 으로 벽/급경사면 관통·비비기 차단(램프는 통과).
-	const FVector DeltaXY = ResolveTorsoCollision(Loc, FVector(WorldDelta.X, WorldDelta.Y, 0.0f));
+	const FVector DeltaXY = ResolveTorsoCollision(Loc, MoveXY);
 	Loc.X += DeltaXY.X;
 	Loc.Y += DeltaXY.Y;
 	// NOTE: Root motion Z는 버림. 
@@ -191,6 +235,7 @@ void UHorseMovementComponent::TickGrounded(float DeltaTime, const FVector& World
 			{
 				MoveMode       = EHorseMoveMode::Sliding;
 				bJumpRequested = false;   // wind-up 중 미끄러짐 진입 → 점프 요청 취소.
+				bSkidding      = false;   // 경사 미끄러짐이 관성을 대체.
 			}
 			return;
 		}
@@ -202,6 +247,7 @@ void UHorseMovementComponent::TickGrounded(float DeltaTime, const FVector& World
 	MoveMode       = EHorseMoveMode::Falling;
 	AirTime        = 0.0f;      // walk-off 낙하: bJumpActive 는 false 유지(점프 애니 아님).
 	bJumpRequested = false;     // wind-up 중 발밑 지면이 사라짐 → 점프 요청 취소.
+	bSkidding      = false;     // skid 관성은 Velocity 로 넘겨져 ballistic 으로 이어진다.
 }
 
 void UHorseMovementComponent::TickFalling(float DeltaTime)
@@ -311,6 +357,7 @@ void UHorseMovementComponent::OnJumpNotify()
 void UHorseMovementComponent::PerformJump()
 {
 	bWantJump      = false;
+	bSkidding      = false;                       // 이륙 — skid 관성은 Velocity 로 이미 반영됨.
 	bJumpRequested = false;                       // bJump anim pulse 종료 — 클립은 이미 진입, auto-exit 로 1회만 재생.
 	Velocity.Z     = JumpSpeed;                   // 상향 임펄스. 없으면 즉시 착지 판정되어 지면을 못 벗어난다.
 	MoveMode       = EHorseMoveMode::Falling;      // 점프 즉시 Falling 전환.
@@ -399,6 +446,9 @@ void UHorseMovementComponent::PushAnimGraphVariables()
 	// 끝나 자동 exit 된 직후 진입 전환(bJump==true)이 다시 걸려 무한 재진입한다. takeoff(PerformJump)
 	// 에서 bJumpRequested 가 꺼지므로 bJump 은 클립 도중 false 로 떨어지고 클립은 1회만 재생된다.
 	Graph->SetGraphVariableBool(FName("bJump"),            bJumpRequested);
+	// bRearing 은 급정지 진입 에지에서만 1 frame true 인 pulse — bJump 과 동일한 이유로 계속 물고 있으면
+	// Rearing 클립 auto-exit 직후 재진입해 무한 반복된다. TickComponent 가 다음 frame 즉시 false 로 내린다.
+	Graph->SetGraphVariableBool(FName("bRearing"),         bRearingRequested);
 }
 
 FVector UHorseMovementComponent::GetGravity() const
@@ -522,6 +572,9 @@ void UHorseMovementComponent::Serialize(FArchive& Ar)
 	Ar << bTorsoCollision;
 	Ar << TorsoSkin;
 	Ar << JumpSpeed;
+	Ar << RearMinSpeed;
+	Ar << SkidFriction;
+	Ar << SkidStopSpeed;
 	Ar << YawAlignTime;
 	Ar << MaxTurnRate;
 }

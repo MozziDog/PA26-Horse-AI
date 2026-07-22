@@ -18,7 +18,8 @@ class UAnimGraphInstance;
 //							YawAlignTime에 걸쳐서 AI가 계산한 '가고 싶은 방향'에 도달할 수 있도록 함
 //   float InclineAngle     [-1, +1] 내리막길/오르막길 각도 ( 현재 placeholder )
 //   bool  bBrake           급정지는 Canter 이상에서만 사용
-//   bool  bJump            
+//   bool  bJump
+//   bool  bRearing         전방 진행 불가로 급정지하는 순간 1회 pulse (뒷발서기+울음). 진입 에지에서만 true.
 //   float AirTime          second 단위 공중에 머문 시간 (JumpUp→Falling 이행 판단용)
 //
 // yaw 회전은 root motion으로 처리: 애니메이션이 없는 각도의 회전은 자연스레 차단됨
@@ -99,6 +100,12 @@ public:
 	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Jump Speed", Min=0.0f, Max=30.0f, Speed=0.1f)
 	float JumpSpeed = 5.8f;            // m/s — 점프 시 초기 상향 속도. h≈v²/2g (5.8m/s → 약 1.7m)
 
+	UPROPERTY(Edit, Save, Category="HorseMovement|Rearing", DisplayName="Rear Min Speed", Min=0.0f, Max=1.0f, Speed=0.01f)
+	float RearMinSpeed = 0.25f;        // 급정지 Rearing 발동 최소 정규화 속도. 이 미만으로 느리게 접근해 멈추면 뒷발서기 생략.
+	UPROPERTY(Edit, Save, Category="HorseMovement|Rearing", DisplayName="Skid Friction", Min=0.0f, Max=20.0f, Speed=0.05f)
+	float SkidFriction = 3.0f;         // 1/s — 뒷발서기 진입 시 관성 미끄러짐 감쇠율. 총 skid 거리 ≈ v0/SkidFriction.
+	UPROPERTY(Edit, Save, Category="HorseMovement|Rearing", DisplayName="Skid Stop Speed", Min=0.0f, Max=5.0f, Speed=0.01f)
+	float SkidStopSpeed = 0.3f;        // m/s — skid 관성이 이 속도 밑으로 떨어지면 미끄러짐 종료.
 
 	UPROPERTY(Edit, Save, Category="HorseMovement|Steering", DisplayName="Yaw Align Time", Min=0.05f, Max=5.0f, Speed=0.01f)
 	float YawAlignTime = 0.4f;         // 초 — 진행 방향을 heading으로 수렴시키는 시간, 작을수록 민첩
@@ -144,15 +151,19 @@ protected:
 
 	// ── AnimGraph 로 내보낼 상태 ──
 	float NormalizedSpeed = 0.0f;   // 이징된 현재 속도 스칼라([0,1])
-	UPROPERTY(Edit, ReadOnly, Category = "Debug")	// 디버그 
 	float TurnRate        = 0.0f;   // 이번 프레임에서의 초당 선회각
 	float InclineAngle    = 0.0f;   // 이징된 경사([-1,1])
 	float AirTime         = 0.0f;   // 공중 체류 시간(초)
-	UPROPERTY(Edit, ReadOnly, Category="Debug")	// 디버그
 	bool  bJumpActive     = false;  // 점프로 [이륙~착지] 동안 true. 비자발적 낙하와 구분 & 착지 리셋용
 	bool  bJumpRequested  = false;  // 점프 애니메이션 요청. 'bJump' AnimInstance parameter와 동기화됨
 	bool  bWantJump       = false;  // NotifyJumpTakeoff()에서 플래그 설정, TickGrounded()에서 소비, 점프.
 	bool  bBrakeRequested = false;  // 이 frame Brake() 호출됨(tick 끝에서 소비 후 클리어)
+	bool  bWasBraking     = false;  // 직전 frame brake 상태 — 급정지 진입 에지(rising) 검출용
+	bool  bRearingRequested = false;  // 급정지 진입 에지에서만 1 frame true. 'bRearing' AnimGraph pulse
+
+	// 뒷발서기 등으로 root motion 이 끊길 때 이어받는 관성 skid. rearing 에지에서 켜지고 마찰로 감쇠.
+	FVector SkidVelocity = FVector(0.0f, 0.0f, 0.0f);
+	bool    bSkidding    = false;
 
 	TWeakObjectPtr<USkeletalMeshComponent> Mesh = nullptr;
 };
