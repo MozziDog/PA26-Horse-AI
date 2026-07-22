@@ -194,8 +194,10 @@ void UHorseLocomotionComponent::UpdateContextSteering(FBlackboard& BB, const AAc
 	BuildDangerField(BB, Forward, DeltaTime, Field);
 	ScoreSlots(Forward, Influence, Field);
 
-	// 뚫린 방향이 있다면
-	if (Field.BestIdx >= 0 && !Field.bHardBlk[Field.BestIdx])
+	// 진행가능한 방향의 슬롯이 있으면 그쪽으로 조향
+	// 진행할 수 없는 방향은 -FLT_MAX 로 배제
+	// NOTE: 유저 입력에 따라 BestIdx 방향이 낭떠러지일 수 있음. 그 경우 ApplySteering에서 '정지' 수행.
+	if (Field.BestIdx >= 0 && Field.Score[Field.BestIdx] > -FLT_MAX)
 	{
 		ApplySteering(Forward, Field, DeltaTime);
 	}
@@ -237,12 +239,14 @@ void UHorseLocomotionComponent::BuildDangerField(FBlackboard& BB, const FVector&
 		bool bGround;
 		if (BB.TryGetBool(HorseBBKeys::ObsGround[i], bGround) && !bGround)
 		{
+			// NOTE: 유저가 그 방향으로 직접 밀어 접근하려는 슬롯은 ScoreSlots()에서 danger 수치를 걷어낸다.
+			//       그 경우에도 bCliff는 남으니 절벽앞 정지를 판단할 수 있음.
 			Field.Danger[i] = 1.0f;
-			Field.bHardBlk[i] = true;
+			Field.bCliff[i]  = true;
 		}
 	}
 
-	// 1b) danger persistence(fast-attack/slow-release) — 올릴 땐 즉시(max), 내릴 땐 초당 ReleaseRate 로만
+	// 2) danger persistence(fast-attack/slow-release) — 올릴 땐 즉시(max), 내릴 땐 초당 ReleaseRate 로만
 	//     감쇠. 회전 중 장애물이 sweep 경계를 들락거려 danger 가 튀는 걸 흡수(조향 떨림 억제). 반응 지연은
 	//     내려갈 때만 생기므로 회피 반응은 늦어지지 않는다. 토글 off 면 이전 값을 관측치로 리셋만 한다.
 	for (int i = 0; i < N; ++i)
@@ -259,6 +263,18 @@ void UHorseLocomotionComponent::BuildDangerField(FBlackboard& BB, const FVector&
 void UHorseLocomotionComponent::ScoreSlots(const FVector& Forward, const FHorseSteeringInfluence& Influence, FSteerContext& Field) const
 {
 	constexpr int N = HorseBBKeys::ObsFanCount;
+
+	// 유저가 낭떠러지 쪽으로 '직접' 미는 방향 슬롯은 danger 를 걷어낸다 → 강제로 낭떠러지 방향으로 모는 것 허용
+	// 유저 입력 방향이랑 일치하지 않는 낭떠러지는 danger를 유지해 회피 성향 유지
+	bool bUserIntoCliff[HORSE_MAX_FAN_SLOTS] = {};
+	const float CliffOverrideAlignDot = 0.9f;
+	for (int i = 0; i < N; i++)
+	{
+		bUserIntoCliff[i] = Field.bCliff[i]
+							&& Influence.UserMag >= CliffOverrideMinInput
+							&& Field.SlotDir[i].Dot(Influence.UserDir) >= CliffOverrideAlignDot;
+		if (bUserIntoCliff[i]) { Field.Danger[i] = 0.0f; }
+	}
 
 	// 이웃으로 danger 확산 → 장애물에 걸렸을 때 조금 더 넓게 회피
 	float SpreadDanger[HORSE_MAX_FAN_SLOTS] = {};
@@ -296,8 +312,12 @@ void UHorseLocomotionComponent::ScoreSlots(const FVector& Forward, const FHorseS
 		// 장애물 근처에서는 조향각 떨림을 억제하는 용도로 켜지고 열린 공간에서는 선회 조향 유지하지 않고 직진으로 수렴하게
 		const float SteeringInertia = CommitWeight * std::max(0.0f, Field.SlotDir[i].Dot(SteerDir)) * DangerActivation;
 
+		// 낭떠러지 방향 슬롯은 유저가 그 방향으로 직접 밀 때만 후보로 허용
+		// 그 외엔 장애물 Hard-block 과 동일하게 후보에서 제외 → 선회 회피 성향 유지
+		const bool bBlocked = Field.bHardBlk[i] || (Field.bCliff[i] && !bUserIntoCliff[i]);
+
 		// 최종 스코어 계산 & 후보 갱신
-		Field.Score[i] = Field.bHardBlk[i] ? -FLT_MAX : (Interest - DangerWeight * EffDanger + SteeringInertia);
+		Field.Score[i] = bBlocked ? -FLT_MAX : (Interest - DangerWeight * EffDanger + SteeringInertia);
 		if (Field.BestIdx < 0 || Field.Score[i] > Field.Score[Field.BestIdx])
 		{
 			Field.BestIdx = i;
@@ -308,7 +328,7 @@ void UHorseLocomotionComponent::ScoreSlots(const FVector& Forward, const FHorseS
 		{
 			// 초록(열림)→빨강(위험) 그라데이션으로 danger 표시
 			const uint8  R   = static_cast<uint8>(std::clamp(SpreadDanger[i], 0.0f, 1.0f) * 255.0f);
-			const FColor Col = Field.bHardBlk[i] ? FColor::Red() : FColor(R, static_cast<uint8>(255 - R), 0, 255);
+			const FColor Col = (Field.bHardBlk[i] || Field.bCliff[i]) ? FColor::Red() : FColor(R, static_cast<uint8>(255 - R), 0, 255);
 			DrawDebugLine(World, DebugDrawPivot, DebugDrawPivot + Field.SlotDir[i] * (1.0f + std::max(0.0f, Field.Score[i])), Col);
 		}
 	}
@@ -322,7 +342,9 @@ void UHorseLocomotionComponent::ApplySteering(const FVector& Forward, const FSte
 	// sub-slot 포물선 보간
 	// 최고점 slot 과 양옆 score로 조향각을 구해 조향각이 이산적일 때의 어색함 + snap 경계에서의 떨림 방지
 	float TargetAngle = HorseBBKeys::ObsFanAngles[BestIdx];
-	if (BestIdx > 0 && BestIdx < N - 1 && !Field.bHardBlk[BestIdx - 1] && !Field.bHardBlk[BestIdx + 1])
+	if (BestIdx > 0 && BestIdx < N - 1
+		&& !Field.bHardBlk[BestIdx - 1] && !Field.bHardBlk[BestIdx + 1]
+		&& !Field.bCliff[BestIdx - 1]   && !Field.bCliff[BestIdx + 1])   // 낭떠러지 이웃으로 heading 이 휘지 않게
 	{
 		const float sL = Field.Score[BestIdx - 1];
 		const float sC = Field.Score[BestIdx];
@@ -349,13 +371,25 @@ void UHorseLocomotionComponent::ApplySteering(const FVector& Forward, const FSte
 
 	const FVector Heading = RotateAroundZ(Forward, SteerAngle).Normalized();
 	SteerDir = Heading;   // 다음 프레임 커밋 기준
+
+	if (bDrawSteeringDebug && World.IsValid())
+	{
+		const FVector DebugDrawPivot = Owner->GetActorLocation() + FVector::UpVector * 0.3f;
+		DrawDebugLine(World, DebugDrawPivot, DebugDrawPivot + Heading * 3.0f, FColor::Blue());   // 선택된 heading.
+	}
+
+	// 유저가 낭떠러지 쪽으로 밀어 그 슬롯이 강제로 선택된 경우 (급)브레이크
+	if (Field.bCliff[BestIdx])
+	{
+		Movement->Brake();
+		Gait = EHorseGait::Stop;
+		Movement->AddInputVector(Heading, 1.0f);   // 정지 시에 갑자기 yaw 바뀌는 것 방지
+		UE_LOG("[HorseLocomotion] Stop before cliff. Heading: (%f, %f)", Heading.X, Heading.Y);
+		return;
+	}
+
 	if (GetGait() != EHorseGait::Stop)
 	{
-		if (bDrawSteeringDebug && World.IsValid())
-		{
-			const FVector DebugDrawPivot = Owner->GetActorLocation() + FVector::UpVector * 0.3f;
-			DrawDebugLine(World, DebugDrawPivot, DebugDrawPivot + Heading * 3.0f, FColor::Blue());   // 선택된 heading.
-		}
 		// gait → scale([0,1]). Movement 는 MaxSpeed*scale 을 목표속도로 삼는다(yaw 선회율은 Movement 가 제한)
 		Movement->AddInputVector(Heading, GetGaitScaledSpeed());
 	}
@@ -498,4 +532,5 @@ void UHorseLocomotionComponent::Serialize(FArchive& Ar)
 	Ar << RoadUserYield;
 	Ar << RoadNearDistance;
 	Ar << RoadFarDistance;
+	Ar << CliffOverrideMinInput;
 }

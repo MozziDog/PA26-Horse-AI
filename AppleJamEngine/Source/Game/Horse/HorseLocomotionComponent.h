@@ -30,7 +30,8 @@ struct FSteerContext
 {
 	FVector SlotDir[HORSE_MAX_FAN_SLOTS];           // slot 별 world direction
 	float   Danger[HORSE_MAX_FAN_SLOTS] = {};       // slot 별 danger 수치
-	bool    bHardBlk[HORSE_MAX_FAN_SLOTS] = {};     // hard block - 아예 후보로 선택 불가능한 경우
+	bool    bHardBlk[HORSE_MAX_FAN_SLOTS] = {};     // hard block - 아예 후보로 선택 불가능한 경우(벽)
+	bool    bCliff[HORSE_MAX_FAN_SLOTS] = {};       // 낭떠러지(지면 없음) slot. 무입력이면 hard-block 취급(선회 회피), 유저가 밀면 개방 후 가장자리 정지.
 	float   Score[HORSE_MAX_FAN_SLOTS] = {};        // slot 별 최종 스코어
 	int     CenterIdx = 0;                     // 정면 slot 인덱스
 	int     BestIdx = -1;                      // 최고점 slot (0보다 작으면 미결정)
@@ -112,6 +113,9 @@ protected:
 	// ── context-steering 튜닝 : 유저 입력 관련 ──────────────────────────────────────────────────────────
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="User Weight", Min=0.0f, Max=10.0f, Speed=0.05f)
 	float UserWeight = 2.0f;      // 유저 입력 방향 interest 가중(최상위 — 우회 좌/우 tie-break).
+	// 낭떠러지 slot 개방 조건 — 유저가 그 방향으로 밀 때만 열어(→ 가장자리 정지), 그 외엔 hard-block 처럼 회피.
+	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Cliff Override Input", Min=0.0f, Max=1.0f, Speed=0.02f)
+	float CliffOverrideMinInput = 0.3f;   // 이 이상의 유저 입력 강도에서만 낭떠러지 slot 개방.
 
 	// ── context-steering 튜닝 : 도로 관련 ───────────────────────────────────────────────────────────────
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Road Weight", Min=0.0f, Max=10.0f, Speed=0.05f)
