@@ -8,6 +8,7 @@
 #include "Component/Movement/HorseLocomotionComponent.h"
 #include "Component/AI/BTAgentComponent.h"
 #include "Component/AI/ObstacleFanSensorComponent.h"
+#include "Component/AI/CliffFanSensorComponent.h"
 #include "Component/AI/BlackboardComponent.h"
 #include "Component/Primitive/SkeletalMeshComponent.h"
 #include "Component/Shape/BoxComponent.h"
@@ -106,6 +107,12 @@ void AHorseCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 	{
 		ObstacleFanSensorComponent->AttachToComponent(CollisionComponent);
 		ObstacleFanSensorComponent->SetRelativeLocation(FVector(1.0f, 0.0f, -0.6f));
+	}
+	CliffFanSensorComponent = AddComponent<UCliffFanSensorComponent>();
+	if(CliffFanSensorComponent)
+	{
+		CliffFanSensorComponent->AttachToComponent(CollisionComponent);
+		CliffFanSensorComponent->SetRelativeLocation(FVector(1.0f, 0.0f, -0.3f));
 	}
 	BTAgentComponent = AddComponent<UBTAgentComponent>();
 	if (BTAgentComponent)

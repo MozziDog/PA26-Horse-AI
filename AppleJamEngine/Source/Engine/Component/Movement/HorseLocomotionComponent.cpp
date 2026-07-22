@@ -156,6 +156,16 @@ void UHorseLocomotionComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 	constexpr int N = HorseBBKeys::ObsFanCount;
 	static_assert(N <= MaxFanSlots, "PrevDanger 버퍼(MaxFanSlots)보다 fan slot 이 많음");
 
+	// 정면 방향 슬롯 인덱스 구하기
+	int CenterIdx = 0;
+	for (int i = 1; i < N; ++i)
+	{
+		if (std::abs(HorseBBKeys::ObsFanAngles[i]) < std::abs(HorseBBKeys::ObsFanAngles[CenterIdx]))
+		{
+			CenterIdx = i;
+		}
+	}
+
 	// 1) slot 별 danger(2단계). clear>=Safe → 0, Hard~Safe → 0..1 램프, clear<=Hard → 1(하드 제외).
 	//    hard-block(bHardBlk)은 안전 제외라 항상 즉응. soft danger 는 아래에서 slow-release 로 감쇠.
 	float   Danger[N]  = {};
@@ -164,14 +174,29 @@ void UHorseLocomotionComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 	const float RampSpan = std::max(1.e-3f, SafeDistance - HardBlockDistance);
 	for (int i = 0; i < N; ++i)
 	{
+		// 장애물 유무에 의한 danger
 		SlotDir[i] = RotateAroundZ(Forward, HorseBBKeys::ObsFanAngles[i]);
 
 		float Clear = SafeDistance;   // 값을 못 읽으면 열린 것으로 간주.
-		if (BB) { BB->TryGetFloat(HorseBBKeys::ObsClear[i], Clear); }
+		if (BB) 
+		{ 
+			BB->TryGetFloat(HorseBBKeys::ObsClear[i], Clear); 
+		}
 
 		if      (Clear <= HardBlockDistance) { Danger[i] = 1.0f; bHardBlk[i] = true; }
 		else if (Clear <  SafeDistance)      { Danger[i] = (SafeDistance - Clear) / RampSpan; }
 		else                                 { Danger[i] = 0.0f; }
+	}
+
+	for (int i = 0; i < N; ++i)
+	{
+		// 낭떠러지 유무에 의한 danger
+		bool bGround;
+		if (BB && BB->TryGetBool(HorseBBKeys::ObsGround[i], bGround) && !bGround)
+		{
+			Danger[i] = 1.0f;
+			bHardBlk[i] = true;
+		}
 	}
 
 	// 1b) danger persistence(fast-attack/slow-release) — 올릴 땐 즉시(max), 내릴 땐 초당 ReleaseRate 로만
@@ -202,15 +227,6 @@ void UHorseLocomotionComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 	float DangerActivation = 0.0f;
 	for (int i = 0; i < N; ++i) { DangerActivation = std::max(DangerActivation, SpreadDanger[i]); }
 
-	// forward-lane guard: 정면(현재 heading, 0°) slot 은 옆 slot spread 로 페널티받지 않고 자기 lane 의 raw
-	// danger 만 본다. 정면 sweep 이 BodyRadius 폭까지 뚫려 있으면 직진은 실제로 안전하므로, 통로 탈출 시 남은
-	// 벽의 spread 가 직진을 눌러 열린 쪽으로 홱 꺾이는 현상을 없앤다. ForwardLaneGuard=0 이면 기존 동작.
-	int CenterIdx = 0;
-	for (int i = 1; i < N; ++i)
-	{
-		if (std::abs(HorseBBKeys::ObsFanAngles[i]) < std::abs(HorseBBKeys::ObsFanAngles[CenterIdx])) { CenterIdx = i; }
-	}
-
 	// 도로에서 멀리 떨어져 있으면 도로 추종 서서히 끔. RoadDist 미기록 시 INF → 가중치 0
 	float RoadDistAtten = 0.0f;
 	float RoadDistVal   = FLT_MAX;
@@ -231,18 +247,27 @@ void UHorseLocomotionComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 		if (UserInputMag > 0.0f) { Interest += UserWeight * UserInputMag * std::max(0.0f, SlotDir[i].Dot(UserDir)); }
 		if (bRoad)          { Interest += EffRoadWeight * std::max(0.0f, SlotDir[i].Dot(RoadDir)); }
 
-		// 정면 slot 은 spread 오염분을 ForwardLaneGuard 비율만큼 걷어내 raw danger 로 되돌린다.
 		float EffDanger = SpreadDanger[i];
-		if (i == CenterIdx) { EffDanger -= (SpreadDanger[i] - Danger[i]) * ForwardLaneGuard; }
+		// 정면 방향일 경우
+		if (i == CenterIdx) 
+		{ 
+			// spread 오염분을 ForwardLaneGuard 비율만큼 걷어내 raw danger 로 되돌린다.
+			// 정면 slot은 danger spread 영향 줄여서 주행에 방해되지 않는 장애물에 과도하게 영향받지 않도록 함. 
+			EffDanger -= (SpreadDanger[i] - Danger[i]) * ForwardLaneGuard; 
+		}
 
+		// 최종 스코어 계산 & 후보 갱신
 		const float Commit = CommitWeight * DangerActivation * std::max(0.0f, SlotDir[i].Dot(SteerDir));
 		Score[i] = bHardBlk[i] ? -FLT_MAX : (Interest - DangerWeight * EffDanger + Commit);
-
-		if (BestIdx < 0 || Score[i] > Score[BestIdx]) { BestIdx = i; }
-
+		if (BestIdx < 0 || Score[i] > Score[BestIdx]) 
+		{
+			BestIdx = i; 
+		}
+		
+		// Debug Draw
 		if (bDrawSteeringDebug && World.IsValid())
 		{
-			// 초록(열림)→빨강(위험) 그라데이션으로 danger 를 표시.
+			// 초록(열림)→빨강(위험) 그라데이션으로 danger 표시
 			const uint8  R   = static_cast<uint8>(std::clamp(SpreadDanger[i], 0.0f, 1.0f) * 255.0f);
 			const FColor Col = bHardBlk[i] ? FColor::Red() : FColor(R, static_cast<uint8>(255 - R), 0, 255);
 			DrawDebugLine(World, DebugBase, DebugBase + SlotDir[i] * (1.0f + std::max(0.0f, Score[i])), Col);
@@ -299,7 +324,8 @@ void UHorseLocomotionComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 			Movement->AddInputVector(RotateInput, 0.01f);
 		}
 	}
-	// 모든 slot 이 하드 제외면(막다른 벽) 급브레이크
+	// 진행가능한 slot이 하나도 없으면(=막다른 벽) 급브레이크
+	// TODO: 진행가능한 slot이 하나도 없어도 제자리 회전은 되게 하기
 	else
 	{
 		Movement->Brake();

@@ -316,6 +316,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClCompile Include="Source\Engine\Component\Action\ActionVisualEffectComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\AI\BTAgentComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\AI\BlackboardComponent.cpp" />
+    <ClCompile Include="Source\Engine\Component\AI\CliffFanSensorComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\AI\ObstacleFanSensorComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\AI\RaycastSensorComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\AI\RoadGraphComponent.cpp" />
@@ -855,6 +856,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClInclude Include="Source\Engine\Component\Action\ActionVisualEffectComponent.h" />
     <ClInclude Include="Source\Engine\Component\AI\BTAgentComponent.h" />
     <ClInclude Include="Source\Engine\Component\AI\BlackboardComponent.h" />
+    <ClInclude Include="Source\Engine\Component\AI\CliffFanSensorComponent.h" />
     <ClInclude Include="Source\Engine\Component\AI\ObstacleFanSensorComponent.h" />
     <ClInclude Include="Source\Engine\Component\AI\RaycastSensorComponent.h" />
     <ClInclude Include="Source\Engine\Component\AI\RoadGraphComponent.h" />
