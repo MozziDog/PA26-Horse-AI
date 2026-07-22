@@ -1,9 +1,11 @@
-#pragma once
+﻿#pragma once
 
 #include "Component/ActorComponent.h"
 
 class UHorseMovementComponent;
 class UBlackboardComponent;
+class FBlackboard;
+class AActor;
 
 // 말 이동 제어 계층 — BT(모드 결정)와 Movement(actuation) 사이의 중간 계층.
 // 책임 둘: (1) 조향 방향 산출(지금은 플레이어 steering, 후속 phase 에서 도로추종·장애물회피),
@@ -19,6 +21,29 @@ enum class EHorseGait : uint8
 	Trot,     // 속보
 	Canter,   // 구보
 	Gallop,   // 습보(최고속)
+};
+
+constexpr int HORSE_MAX_FAN_SLOTS = 8;   // slot 병렬 버퍼 상한. cpp 에서 ObsFanCount <= 이 값 검증.
+
+// context-steering 작업 버퍼 — slot 병렬 배열을 한 덩어리로 묶어 하위 단계 간 전달.
+struct FSteerContext
+{
+	FVector SlotDir[HORSE_MAX_FAN_SLOTS];           // slot 별 world direction
+	float   Danger[HORSE_MAX_FAN_SLOTS] = {};       // slot 별 danger 수치
+	bool    bHardBlk[HORSE_MAX_FAN_SLOTS] = {};     // hard block - 아예 후보로 선택 불가능한 경우
+	float   Score[HORSE_MAX_FAN_SLOTS] = {};        // slot 별 최종 스코어
+	int     CenterIdx = 0;                     // 정면 slot 인덱스
+	int     BestIdx = -1;                      // 최고점 slot (0보다 작으면 미결정)
+};
+
+// 조향 arbitration 입력 — GatherSteeringInfluences 가 blackboard 에서 수집한 소스.
+struct FHorseSteeringInfluence
+{
+	FVector UserDir = FVector(0.0f, 0.0f, 0.0f);	// 유저 입력 방향 (수평, 정규화)
+	float   UserMag = 0.0f;							// 유저 입력 강도 [0,1]
+	FVector RoadDir = FVector(0.0f, 0.0f, 0.0f);	// 도로 방향(수평, 정규화)
+	bool    bRoad = false;                      // 유효한 도로 방향 존재 여부
+	float   RoadWeightEff = 0.0f;               // 거리 감쇠 및 유저 입력 시의 yield 반영한 도로추종 가중치
 };
 
 UCLASS()
@@ -54,13 +79,20 @@ public:
 
 protected:
 	float GetGaitScaledSpeed() const; // 목표속도 / Movement MaxSpeed 를 [0,1] 로
-	void UpdateGait();
+	void UpdateGait(float DeltaTime); // BT에서 요청한 DesiredGait를 쿨타임 등 고려 후 실제 Gait에 반영
 	void  ClampGaitToEnvelope();
+	bool GetPlanarForward(const AActor& Owner, FVector& OutForward) const;   // 수평 forward, degenerate 면 false
+	FHorseSteeringInfluence GatherSteeringInfluences(FBlackboard& BB) const; // UserInput/Road 등 입력 수집
+	void UpdateJumpGate(FBlackboard& BB);
+	void UpdateContextSteering(FBlackboard& BB, const AActor& Owner, const FVector& Forward, const FHorseSteeringInfluence& Influence, float DeltaTime);
+	// UpdateContextSteering 하위 루틴
+	void BuildDangerField(FBlackboard& BB, const FVector& Forward, float DeltaTime, FSteerContext& Field);   // 슬롯 별 danger/hard-block 산출
+	void ScoreSlots(const FVector& Forward, const FHorseSteeringInfluence& Influence, FSteerContext& Field) const;   // 슬롯 별 최종 스코어 계산
+	void ApplySteering(const FVector& Forward, const FSteerContext& Field, float DeltaTime);				// 보간까지 거친 후 Movement에 전달
 
 	TWeakObjectPtr<UHorseMovementComponent> Movement = nullptr;
-	// BT가 Blackboard 에 쓴 DesiredGait 등을 읽고 움직임에 반영
 	TWeakObjectPtr<UBlackboardComponent> BlackboardComp = nullptr;
-	TWeakObjectPtr<UWorld> World = nullptr;		// 디버깅 시각화에 필요
+	TWeakObjectPtr<UWorld> World = nullptr;		// 디버깅 시각화용
 
 	// ── context-steering 튜닝 : 장애물 회피 관련 ────────────────────────────────────────────────────────
 	// 회피는 2단계로 구분: 
@@ -138,13 +170,12 @@ protected:
 
 
 	// ── runtime states ──────────────────────────────────────────────────────────────────────────────────
-	static constexpr int MaxFanSlots = 8;   // PrevDanger 버퍼 상한. cpp 에서 ObsFanCount <= 이 값 검증.
 	EHorseGait Gait     = EHorseGait::Stop;
 	EHorseGait MinGait  = EHorseGait::Stop;
 	EHorseGait MaxGait  = EHorseGait::Gallop;
 	float      GaitUpTimer   = 0.0f;   // >0 이면 up-shift 대기 중.
 	FVector    SteerDir      = FVector(0.0f, 0.0f, 0.0f);   // 직전 프레임에 선택한 회피 heading(커밋 히스테리시스용). 0=미초기화.
-	float      PrevDanger[MaxFanSlots] = {};   // slot 별 직전 프레임 danger(slow-release 감쇠용).
+	float      PrevDanger[HORSE_MAX_FAN_SLOTS] = {};   // slot 별 직전 프레임 danger(slow-release 감쇠용).
 	float      SteerAngle    = 0.0f;   // 현재 조향각(forward 기준 deg). 목표각으로 slew 되는 상태값.
 	bool       bJumpPerformed = false;   // 이번 점프 요청에 실제로 점프했는지 여부 (무한 점프 방지)
 };
