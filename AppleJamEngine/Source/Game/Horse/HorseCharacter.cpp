@@ -10,8 +10,10 @@
 #include "Component/AI/RoadSensorComponent.h"
 #include "Component/AI/BlackboardComponent.h"
 #include "Component/Primitive/SkeletalMeshComponent.h"
-#include "Component/Shape/BoxComponent.h"
+#include "Component/SceneComponent.h"
+#include "Component/Shape/CapsuleComponent.h"
 #include "Core/Types/CollisionTypes.h"
+#include "Math/Quat.h"
 #include "AI/Blackboard.h"
 #include "HorseMovementComponent.h"
 #include "HorseLocomotionComponent.h"
@@ -78,20 +80,27 @@ namespace
 
 void AHorseCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 {
-	// 몸통 collider 를 root 로: Movement 의 sweep(관통/비비기 차단)·에디터 시각화·향후 물리의 단일 바디.
-	// (직립 capsule 이 아닌 quadruped 전제라 torso box 형상 사용.) Pawn 채널, 지금은 query 전용.
-	CollisionComponent = AddComponent<UBoxComponent>();
-	SetRootComponent(CollisionComponent);
-	CollisionComponent->SetBoxExtent(FVector(0.8f, 0.3f, 0.3f));   // half-extents(전방X/측방Y/상하Z)
+	// Root: Empty SceneComponent
+	// Root motion이 골반을 pivot으로 삼 것 고려, 콜라이더와 메시에 offset 주기 위해 empty root 사용
+	RootSceneComponent = AddComponent<USceneComponent>();
+	SetRootComponent(RootSceneComponent);
+
+	// 몸통 콜라이더
+	CollisionComponent = AddComponent<UCapsuleComponent>();
+	CollisionComponent->AttachToComponent(RootSceneComponent);
+	CollisionComponent->SetRelativeLocation(FVector(0.5f, 0.0f, 0.0f));
+	// 앞쪽으로 눕힘. 쿼터니언-오일러각 변환 문제로 (0, 90, 0) 대신 (90, 0, 90) 사용
+	CollisionComponent->SetRelativeRotation(FQuat::FromRotator(FRotator(0.0, 90.0, 90.0)));
+	CollisionComponent->SetCapsuleSize(0.3f, 0.8f);
 	CollisionComponent->SetCollisionObjectType(ECollisionChannel::Pawn);
 	CollisionComponent->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 
 	// 이동 담당
 	MovementComponent = AddComponent<UHorseMovementComponent>();
 
-	// SkeletalMesh 는 box 자식으로, 발바닥이 지면에 닿도록 StandHeight 만큼 아래로 offset.
+	// SkeletalMesh. 발바닥이 지면에 닿도록 StandHeight 만큼 아래로 offset 부여
 	MeshComponent = AddComponent<USkeletalMeshComponent>();
-	MeshComponent->AttachToComponent(CollisionComponent);
+	MeshComponent->AttachToComponent(RootSceneComponent);
 	MeshComponent->SetRelativeLocation(FVector(0.0f, 0.0f, -MovementComponent->GetStandHeight()));
 
 	ID3D11Device* Device = GEngine->GetRenderer().GetFD3DDevice().GetDevice();
@@ -119,23 +128,24 @@ void AHorseCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 	// 플레이어/BT 입력을 받아 매 tick MovementComponent 로 라우팅.
 	LocomotionComponent = AddComponent<UHorseLocomotionComponent>(); 
 	BlackboardComponent = AddComponent<UBlackboardComponent>();
+	// 골반쪽에 pivot이 형성되는 점을 고려, 센서류에 +0.5씩 추가 x offset 부여
 	ObstacleFanSensorComponent = AddComponent<UObstacleFanSensorComponent>();
 	if(ObstacleFanSensorComponent)
 	{
-		ObstacleFanSensorComponent->AttachToComponent(CollisionComponent);
-		ObstacleFanSensorComponent->SetRelativeLocation(FVector(1.0f, 0.0f, 0.0f));
+		ObstacleFanSensorComponent->AttachToComponent(RootSceneComponent);
+		ObstacleFanSensorComponent->SetRelativeLocation(FVector(1.5f, 0.0f, 0.0f));
 	}
 	CliffFanSensorComponent = AddComponent<UCliffFanSensorComponent>();
 	if(CliffFanSensorComponent)
 	{
-		CliffFanSensorComponent->AttachToComponent(CollisionComponent);
-		CliffFanSensorComponent->SetRelativeLocation(FVector(1.0f, 0.0f, -0.3f));
+		CliffFanSensorComponent->AttachToComponent(RootSceneComponent);
+		CliffFanSensorComponent->SetRelativeLocation(FVector(1.5f, 0.0f, -0.3f));
 	}
 	RoadSensorComponent = AddComponent<URoadSensorComponent>();
 	if (RoadSensorComponent)
 	{
-		RoadSensorComponent->AttachToComponent(CollisionComponent);
-		RoadSensorComponent->SetRelativeLocation(FVector(10.0f, 0.0f, 0.0f));
+		RoadSensorComponent->AttachToComponent(RootSceneComponent);
+		RoadSensorComponent->SetRelativeLocation(FVector(10.5f, 0.0f, 0.0f));
 	}
 	BTAgentComponent = AddComponent<UBTAgentComponent>();
 	if (BTAgentComponent)
@@ -144,7 +154,7 @@ void AHorseCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 	}
 
 	SpringArmComponent = AddComponent<USpringArmComponent>();
-	SpringArmComponent->AttachToComponent(CollisionComponent);   // root(box) 기준으로 카메라 추종
+	SpringArmComponent->AttachToComponent(RootSceneComponent);   // root 기준으로 카메라 추종
 	SpringArmComponent->TargetArmLength = 7.0f;
 	SpringArmComponent->SocketOffset = FVector(0.0f, 0.0f, 2.5f);
 	SpringArmComponent->bEnableCameraLag = true;
@@ -259,7 +269,8 @@ void AHorseCharacter::SetupInputComponent()
 
 void AHorseCharacter::RebindComponents()
 {
-	CollisionComponent = GetComponentByClass<UBoxComponent>();
+	RootSceneComponent = GetRootComponent();
+	CollisionComponent = GetComponentByClass<UCapsuleComponent>();
 	MeshComponent = GetComponentByClass<USkeletalMeshComponent>();
 	MovementComponent = GetComponentByClass<UHorseMovementComponent>();
 	LocomotionComponent = GetComponentByClass<UHorseLocomotionComponent>();

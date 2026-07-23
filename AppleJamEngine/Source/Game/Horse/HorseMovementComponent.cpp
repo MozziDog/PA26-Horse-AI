@@ -3,7 +3,7 @@
 #include "Animation/AnimInstance.h"
 #include "Animation/Graph/AnimGraphInstance.h"
 #include "Component/SceneComponent.h"
-#include "Component/Shape/BoxComponent.h"
+#include "Component/Shape/CapsuleComponent.h"
 #include "Component/Primitive/SkeletalMeshComponent.h"
 #include "Core/TickFunction.h"
 #include "Core/Types/CollisionTypes.h"
@@ -19,6 +19,22 @@
 
 #include <algorithm>
 #include <cmath>
+
+namespace
+{
+	// 코너 등에서 한 번 밀어내도 다른 벽에 다시 걸릴 수 있어 몇 회 재시도한다. 
+	// 프레임 드랍 방지를 위해 최대 반복 횟수 제한, 완전 해소는 보장하지 않음 (약간의 겹침 허용)
+	constexpr int MaxDenetrationIter = 4;
+	// 겹침 방지용 미세 sweep 거리 (World sweep 은 MaxDist<=0 이면 실패하므로 0 이 아니어야 함)
+	constexpr float DepenetrationSweepDist = 0.01f;
+	// depenetration push 여유 공간(m)
+	// 너무 크면 부드럽게 밀리지 않고 튕겨나옴이 짧은 시간동안 반복 → 떨림 생길 수 있음
+	constexpr float DepenetrationMargin = 0.005f;
+	// 이 정도 겹침은 허용 (떨림 억제 목적)
+	constexpr float DepenetraionAllow = 0.005f;
+	// 전진 판단 sweep에 사용할 '앞부분'(전체 forward 반길이 대비)비율. 엉덩이가 벽에 약간 닿았다고 전진 불가 판단 방지
+	constexpr float TorsoFrontRatio = 0.6f;
+}
 
 UHorseMovementComponent::UHorseMovementComponent()
 {
@@ -37,7 +53,8 @@ void UHorseMovementComponent::BeginPlay()
 	Super::BeginPlay();
 	if (AActor* Owner = GetOwner())
 	{
-		Mesh = Owner->GetComponentByClass<USkeletalMeshComponent>();
+		Mesh      = Owner->GetComponentByClass<USkeletalMeshComponent>();
+		Collision = Owner->GetComponentByClass<UCapsuleComponent>(); // 매번 sweep할 때마다 가져오지 않고 BeginPlay에서 캐싱
 	}
 }
 
@@ -209,16 +226,22 @@ void UHorseMovementComponent::TickGrounded(float DeltaTime, const FVector& World
 	}
 
 	FVector Loc = Updated->GetWorldLocation();
-	// 몸통 box sweep 으로 벽/급경사면 관통·비비기 차단(램프는 통과).
-	const FVector DeltaXY = ResolveTorsoCollision(Loc, MoveXY);
+	// 전진 판단 — 앞부분 몸통 sweep 으로 벽 관통 차단
+	const FVector DeltaXY = ResolveTorsoMove(Loc, MoveXY);
 	Loc.X += DeltaXY.X;
 	Loc.Y += DeltaXY.Y;
-	// NOTE: Root motion Z는 버림. 
+	// NOTE: Root motion Z는 버림.
 	// 걷는 중의 Bobbing 등은 루트 모션이 아닌 애니메이션으로 처리하고 점프는 PerformJump()에서 직접 처리
 
 	// 수평 속도 리포팅/관성 — root motion 이 만든 실제 이동에서 역산(이륙 시 momentum 으로 넘어감).
 	Velocity.X = DeltaXY.X / DeltaTime;
 	Velocity.Y = DeltaXY.Y / DeltaTime;
+
+	// 겹침 해소 — 제자리 회전이나 지형 자체의 움직임 등으로 몸통이 벽에 파고들면 MTD(최소이동거리)로 해소
+	// Velocity 에는 반영 X: 벽 밀기는 locomotion 속도가 아니므로 anim/rearing 을 오염시키면 안 됨.
+	const FVector Push = DepenetrateTorso(Loc);
+	Loc.X += Push.X;
+	Loc.Y += Push.Y;
 
 	// 지면 raycast 는 몸통 box 중심(root)에서 아래로. snap 시 root=지면+StandHeight(발이 지면 접점).
 	FHitResult Ground;
@@ -494,7 +517,7 @@ FVector UHorseMovementComponent::GroundNormal(const FHitResult& Hit) const
 	return N.Normalized();
 }
 
-FVector UHorseMovementComponent::ResolveTorsoCollision(const FVector& FromLoc, const FVector& DeltaXY)
+FVector UHorseMovementComponent::ResolveTorsoMove(const FVector& FromLoc, const FVector& DeltaXY)
 {
 	if (!bTorsoCollision || DeltaXY.IsNearlyZero())
 	{
@@ -503,22 +526,34 @@ FVector UHorseMovementComponent::ResolveTorsoCollision(const FVector& FromLoc, c
 	AActor* Owner = GetOwner();
 	UWorld* World = Owner ? Owner->GetWorld() : nullptr;
 	USceneComponent* Updated = GetUpdatedComponent();
-	UBoxComponent* BoxRoot = Cast<UBoxComponent>(Updated);
-	if (!World || !BoxRoot)
+	UCapsuleComponent* Capsule = Collision.Get();
+	if (!World || !Updated || !Capsule)
 	{
-		return DeltaXY;   // root 가 몸통 box 가 아니면 몸통 충돌 skip.
+		return DeltaXY;   // 콜라이더 없으면 몸통 충돌 skip.
 	}
 
-	// root(=몸통 box 중심)에서 facing 정렬 box 를 sweep. 형상은 root box 에서 읽어 단일 소스 유지.
-	const FVector         Center = FromLoc;
-	const FQuat           Rot    = Updated->GetWorldRotation().ToQuaternion();
-	const FCollisionShape Box    = FCollisionShape::MakeBox(BoxRoot->GetScaledBoxExtent());
+	// Sweep 판정에는 캡슐 콜라이더의 World space 값을 그대로 사용
+	// NOTE: actor yaw 는 ConsumeRootMotion 에서 이미 반영된 상태
+	const FQuat   RootRot        = Updated->GetWorldRotation().ToQuaternion();
+	const float   Radius         = Capsule->GetScaledCapsuleRadius();
+	const float   HalfLen        = Capsule->GetScaledCapsuleHalfHeight();
+	const FVector ColliderCenter = Capsule->GetWorldLocation();
+	const FQuat   ColliderRot	 = Capsule->GetWorldRotation().ToQuaternion();
+
+	// 엉덩이 부분이 전진 판단에 영향 주지 않도록 Torso의 앞부분만 전진 판단에 사용
+	FVector Forward = Updated->GetForwardVector();
+	Forward.Z = 0.0f;
+	Forward = Forward.IsNearlyZero() ? FVector(1.0f, 0.0f, 0.0f) : Forward.Normalized();
+
+	const float           FrontHalf = std::max(Radius, HalfLen * TorsoFrontRatio);
+	const FCollisionShape Shape     = FCollisionShape::MakeCapsule(Radius, FrontHalf);
+	const FVector         Center    = ColliderCenter + Forward * (HalfLen - FrontHalf);
 
 	FHitResult Hit;
-	if (!World->PhysicsSweepByObjectTypes(Center, Center + DeltaXY, Rot, Box, Hit,
+	if (!World->PhysicsSweepByObjectTypes(Center, Center + DeltaXY, ColliderRot, Shape, Hit,
 			ObjectTypeBit(ECollisionChannel::WorldStatic), Owner))
 	{
-		return DeltaXY;   // 막힘 없음.
+		return DeltaXY;   // 막힘 없음
 	}
 
 	// walkable 면(램프 등)은 무시 — 지면 스냅이 처리. 급경사/벽만 차단.
@@ -542,6 +577,72 @@ FVector UHorseMovementComponent::ResolveTorsoCollision(const FVector& FromLoc, c
 		Velocity = Velocity - WallN * Velocity.Dot(WallN);
 	}
 	return Result;
+}
+
+FVector UHorseMovementComponent::DepenetrateTorso(const FVector& FromLoc)
+{
+	FVector Accum(0.0f, 0.0f, 0.0f);
+	if (!bTorsoCollision)
+	{
+		return Accum;
+	}
+	AActor* Owner = GetOwner();
+	UWorld* World = Owner ? Owner->GetWorld() : nullptr;
+	USceneComponent* Updated = GetUpdatedComponent();
+	UCapsuleComponent* Capsule = Collision.Get();
+	if (!World || !Updated || !Capsule)
+	{
+		return Accum;   // 콜라이더 없으면 skip.
+	}
+
+	// 겹침 판정은 CapsuleComponent의 수치를 그대로 사용 — 에디터 시각화와 동일한 소스 유지
+	const FQuat   RootRot = Updated->GetWorldRotation().ToQuaternion();
+	const float   Radius  = Capsule->GetScaledCapsuleRadius();
+	const float   HalfLen = Capsule->GetScaledCapsuleHalfHeight();
+	const FQuat   Rot     = Capsule->GetWorldRotation().ToQuaternion();
+	const FCollisionShape Shape = FCollisionShape::MakeCapsule(Radius, HalfLen);
+
+	// solve 반복 계산
+	FVector Center = Capsule->GetWorldLocation();
+	for (int Iter = 0; Iter < MaxDenetrationIter; ++Iter)
+	{
+		FHitResult Hit;
+		// 미세 거리 sweep - (거의) 제자리에서 겹침 판정 수행
+		const FVector ProbeEnd = Center + FVector(DepenetrationSweepDist, 0.0f, 0.0f);
+		if (!World->PhysicsSweepByObjectTypes(Center, ProbeEnd, Rot, Shape, Hit,
+				ObjectTypeBit(ECollisionChannel::WorldStatic), Owner))
+		{
+			break;   // 근처에 아무것도 없음 → 해소할 필요 X
+		}
+		if (!Hit.bStartPenetrating || Hit.PenetrationDepth <= DepenetraionAllow)
+		{
+			break;   // sweep 시작 시점에 안겹침 또는 allow 수치보다 얕음 → 해소로 판정
+		}
+
+		// 만에 하나 부딪힌 게 등반 가능한 오르막길이었을 경우, 밀어내지 않고 그대로 이동
+		const FVector N = GroundNormal(Hit);
+		if (N.Z >= WalkableSlopeZ)
+		{
+			break;
+		}
+		// 수평 성분만 밀어낸다. 밀어낼 거 없으면 완전 해소된 것으로 보고 반복 종료
+		FVector PushN(N.X, N.Y, 0.0f);
+		if (PushN.IsNearlyZero())
+		{
+			break;
+		}
+		PushN = PushN.Normalized();
+
+		// 침투 깊이 + margin 만큼 밀어내기
+		// margin은 최소로 둬야 떨림 생기지 않음!
+		const FVector Step = PushN * (Hit.PenetrationDepth + DepenetrationMargin);
+		Center += Step;
+		Accum  += Step;
+	}
+
+	// Z는 지면 스냅 혹은 낙하 판정에서 계산할거니 수평 성분만 반환
+	Accum.Z = 0.0f;
+	return Accum;
 }
 
 float UHorseMovementComponent::GetForwardSpeed() const

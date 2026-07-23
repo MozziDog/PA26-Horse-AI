@@ -175,9 +175,9 @@ void UHorseLocomotionComponent::UpdateContextSteering(FBlackboard& BB, const AAc
 	static_assert(HorseBBKeys::ObsFanCount <= HORSE_MAX_FAN_SLOTS, "PrevDanger 버퍼(MaxFanSlots)보다 fan slot 이 많음");
 	constexpr int N = HorseBBKeys::ObsFanCount;
 
-	if (SteerDir.IsNearlyZero()) 
-	{ 
-		SteerDir = Forward; 
+	if (SteerDir.IsNearlyZero())
+	{
+		SteerDir = Forward;
 	}
 
 	FSteerContext Field;
@@ -194,27 +194,29 @@ void UHorseLocomotionComponent::UpdateContextSteering(FBlackboard& BB, const AAc
 	BuildDangerField(BB, Forward, DeltaTime, Field);
 	ScoreSlots(Forward, Influence, Field);
 
-	// 진행가능한 방향의 슬롯이 있으면 그쪽으로 조향
-	// 진행할 수 없는 방향은 -FLT_MAX 로 배제
-	// NOTE: 유저 입력에 따라 BestIdx 방향이 낭떠러지일 수 있음. 그 경우 ApplySteering에서 '정지' 수행.
-	if (Field.BestIdx >= 0 && Field.Score[Field.BestIdx] > -FLT_MAX)
+	if (GetGait() == EHorseGait::Stop && Influence.UserMag > 0.0f)
 	{
-		ApplySteering(Forward, Field, DeltaTime);
+		// 원하는 방향으로 아주 작은 입력 = 제자리 회전
+		Movement->AddInputVector(Influence.UserDir, 0.01f);
 	}
-	// 진행가능한 slot이 하나도 없으면(=막다른 벽/낭떠러지 앞) 전진 차단 + 급브레이크.
-	// 단, 유저가 조향 중이면 제자리 회전만은 허용 (구석 탈출용)
 	else
 	{
-		Movement->Brake();   // 전진 목표속도 0 + 급정지/rearing 트리거
-		if (!bJumpPerformed) // 점프 도중에는 급브레이크하지 않음
+		// 진행가능한 방향의 슬롯이 있으면 그쪽으로 조향
+		// 진행할 수 없는 방향은 -FLT_MAX 로 배제
+		// NOTE: 유저 입력에 따라 BestIdx 방향이 낭떠러지일 수 있음. 그 경우 ApplySteering에서 '정지' 수행.
+		if (Field.BestIdx >= 0 && Field.Score[Field.BestIdx] > -FLT_MAX)
 		{
-			Gait = EHorseGait::Stop;
+			ApplySteering(Forward, Field, DeltaTime);
 		}
-
-		// 원하는 방향으로 아주 작은 입력 = 제자리 회전
-		if (Influence.UserMag > 0.0f)
+		// 진행가능한 slot이 하나도 없으면(=막다른 벽/낭떠러지 앞) 전진 차단 + 급브레이크.
+		// 단, 유저가 조향 중이면 제자리 회전만은 허용 (구석 탈출용)
+		else
 		{
-			Movement->AddInputVector(Influence.UserDir, 0.01f);
+			Movement->Brake();   // 전진 목표속도 0 + 급정지/rearing 트리거
+			if (!bJumpPerformed) // 점프 도중에는 급브레이크하지 않음
+			{
+				Gait = EHorseGait::Stop;
+			}
 		}
 	}
 }

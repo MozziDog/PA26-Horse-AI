@@ -1,11 +1,12 @@
-#pragma once
+﻿#pragma once
 #include "GameFramework/Pawn/Pawn.h"
 #include "Object/Ptr/WeakObjectPtr.h"
 
 #include "Source/Game/Horse/HorseCharacter.generated.h"
 
 class USkeletalMeshComponent;
-class UBoxComponent;
+class USceneComponent;
+class UCapsuleComponent;
 class UHorseMovementComponent;
 class UHorseLocomotionComponent;
 class UBTAgentComponent;
@@ -43,7 +44,8 @@ protected:
 	float GetCameraBaseYaw() const;
 
 protected:
-	TWeakObjectPtr<UBoxComponent> CollisionComponent = nullptr;
+	TWeakObjectPtr<USceneComponent> RootSceneComponent = nullptr;
+	TWeakObjectPtr<UCapsuleComponent> CollisionComponent = nullptr;
 	TWeakObjectPtr<USkeletalMeshComponent> MeshComponent = nullptr;
 	TWeakObjectPtr<UHorseMovementComponent> MovementComponent = nullptr;
 	TWeakObjectPtr<UHorseLocomotionComponent> LocomotionComponent = nullptr;

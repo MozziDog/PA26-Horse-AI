@@ -5,6 +5,7 @@
 
 struct FHitResult;
 class USkeletalMeshComponent;
+class UCapsuleComponent;
 class UAnimGraphInstance;
 
 // 말 전용 이동 — root motion 구동. 수평 전진/선회는 애니메이션 root motion 이 만든다(발 미끄러짐 방지)
@@ -135,8 +136,12 @@ protected:
 	// TickGrounded 가 접지 frame 에서만 호출한다(CharacterMovementComponent 의 launch 패턴).
 	void PerformJump();
 
-	// FromLoc 에서 DeltaXY 만큼 몸통 box 를 sweep. 벽/급경사면에 막히면 히트 지점(skin 여유)까지로 줄인다.
-	FVector ResolveTorsoCollision(const FVector& FromLoc, const FVector& DeltaXY);
+	// 이동하려는 방향에 장애물이 있는지 판단, 있다면 장애물에 겹치지 않을 만큼만 이동
+	FVector ResolveTorsoMove(const FVector& FromLoc, const FVector& DeltaXY);
+
+	// 제자리 회전 등, 몸통이 장애물과 겹치는 상황 발생했을 때 수평방향으로 밀어내어 겹침 해소
+	// solve 횟수는 최대 MaxDenetrationIter까지만, 그 후에도 겹쳐있다면 겹쳐진대로 방치 (완전 분리 보장 X)
+	FVector DepenetrateTorso(const FVector& FromLoc);
 
 	// 현재 지면 경사를 [-1,+1] InclineAngle 로. 부호: 오르막 +, 내리막 -. 크기: walkable 한계 대비.
 	float ComputeInclineAngle(const FHitResult& Ground) const;
@@ -166,4 +171,6 @@ protected:
 	bool    bSkidding    = false;
 
 	TWeakObjectPtr<USkeletalMeshComponent> Mesh = nullptr;
+	// 몸통 콜라이더. Root component와는 별개
+	TWeakObjectPtr<UCapsuleComponent> Collision = nullptr;
 };
