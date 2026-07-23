@@ -201,14 +201,20 @@ void UHorseLocomotionComponent::UpdateContextSteering(FBlackboard& BB, const AAc
 	{
 		ApplySteering(Forward, Field, DeltaTime);
 	}
-	// 진행가능한 slot이 하나도 없으면(=막다른 벽) 급브레이크
-	// TODO: 진행가능한 slot이 하나도 없어도 제자리 회전은 되게 하기
+	// 진행가능한 slot이 하나도 없으면(=막다른 벽/낭떠러지 앞) 전진 차단 + 급브레이크.
+	// 단, 유저가 조향 중이면 제자리 회전만은 허용 (구석 탈출용)
 	else
 	{
-		Movement->Brake();
+		Movement->Brake();   // 전진 목표속도 0 + 급정지/rearing 트리거
 		if (!bJumpPerformed) // 점프 도중에는 급브레이크하지 않음
 		{
 			Gait = EHorseGait::Stop;
+		}
+
+		// 원하는 방향으로 아주 작은 입력 = 제자리 회전
+		if (Influence.UserMag > 0.0f)
+		{
+			Movement->AddInputVector(Influence.UserDir, 0.01f);
 		}
 	}
 }
