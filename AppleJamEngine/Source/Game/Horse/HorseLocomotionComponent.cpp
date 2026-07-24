@@ -80,6 +80,19 @@ void UHorseLocomotionComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 		return;
 	}
 
+	// 평행이동 모드면 Context Steering/점프 판단 등을 전부 건너뛰고 입력을 직접 Movement로 넘김
+	UpdateStrafeMode();
+	if (bStrafeMode)
+	{
+		Gait = EHorseGait::Stop;   // 평행이동 중 gait 개념 미적용
+		Movement->SetStrafeInput(true, StrafeLongitudinal, StrafeLateral);
+		return;
+	}
+	else
+	{
+		Movement->SetStrafeInput(false, 0.0f, 0.0f);
+	}
+
 	UpdateGait(DeltaTime);                                                  // BT 요청 + 쿨타임 반영
 	const FHorseSteeringInfluence Influence = GatherSteeringInfluences(*BB);     // UserInput/Road 소스
 	UpdateJumpGate(*BB);                                                    // 정면 장애물 점프 게이트
@@ -409,6 +422,44 @@ void UHorseLocomotionComponent::ApplySteering(const FVector& Forward, const FSte
 	}
 }
 
+void UHorseLocomotionComponent::SetStrafeMode(bool bInValue)
+{
+	bGazeHeld = bInValue;
+}
+
+void UHorseLocomotionComponent::SetStrafeVerticalInput(float InValue)
+{
+	StrafeLongitudinal = std::clamp(InValue, -1.0f, 1.0f);
+}
+
+void UHorseLocomotionComponent::SetStrafeHorizontalInput(float InValue)
+{
+	StrafeLateral = std::clamp(InValue, -1.0f, 1.0f);
+}
+
+void UHorseLocomotionComponent::UpdateStrafeMode()
+{
+	if (!bStrafeMode)
+	{
+		// '전방 주시' 홀드 + 정지 상태(Gait::Stop & 속도 임계 이하) → Strafe 모드 진입
+		// 접지 상태가 아니면(공중/미끄러짐) 진입하지 않는다.
+		if (!bGazeHeld || Gait != EHorseGait::Stop || !Movement)
+		{
+			return;
+		}
+		// NOTE: 수직 방향 성분 필터링하지 않고 속도 계산함. 점프/낙하 시에도 횡이동 가능하게 하려면 수정할 것.
+		const float Speed = Movement->GetVelocity().Length();
+		if (Speed <= StrafeEnterMaxSpeed && !Movement->IsFalling() && !Movement->IsSliding())
+		{
+			bStrafeMode = true;
+		}
+	}
+	else if (!bGazeHeld)	// 홀드 해제 시 Strafe 모드 종료
+	{
+		bStrafeMode = false;
+	}
+}
+
 void UHorseLocomotionComponent::UpdateGait(float DeltaTime)
 {
 	// 가속 쿨타임 타이머 처리
@@ -442,6 +493,10 @@ void UHorseLocomotionComponent::UpdateGait(float DeltaTime)
 
 void UHorseLocomotionComponent::RequestGiddyup()
 {
+	if (bStrafeMode)
+	{
+		return;   // 평행이동 중엔 가속(gait up) 무시.
+	}
 	if (GaitUpTimer > 0.0f || Gait >= MaxGait)
 	{
 		return;
@@ -456,6 +511,7 @@ void UHorseLocomotionComponent::RequestGiddyup()
 
 void UHorseLocomotionComponent::RequestSlowDown()
 {
+	// NOTE: Strafe 모드는 정지 상태에서만 진입 가능하므로 Strafe 모드 중의 감속/정지 명령은 자연스럽게 무시됨
 	if (Gait <= MinGait)
 	{
 		return;
@@ -541,4 +597,5 @@ void UHorseLocomotionComponent::Serialize(FArchive& Ar)
 	Ar << RoadNearDistance;
 	Ar << RoadFarDistance;
 	Ar << CliffOverrideMinInput;
+	Ar << StrafeEnterMaxSpeed;
 }

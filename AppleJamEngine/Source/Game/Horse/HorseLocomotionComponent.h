@@ -73,6 +73,17 @@ public:
 	UFUNCTION(Callable, Category="Locomotion|Gait")
 	void SetGaitEnvelope(EHorseGait InMin, EHorseGait InMax);
 
+	// 평행이동(strafe) 플레이어 입력 라우팅 — HorseCharacter에서 매 frame 호출.
+	// 평행이동 모드 시에는 유저 입력을 blackboard를 통해 간접으로 받지 않고 직접 받음
+	UFUNCTION(Callable, Category="Locomotion|Strafe")
+	void SetStrafeMode(bool bInValue);
+	UFUNCTION(Callable, Category = "Locomotion|Strafe")
+	void SetStrafeVerticalInput(float InValue);
+	UFUNCTION(Callable, Category="Locomotion|Strafe")
+	void SetStrafeHorizontalInput(float InValue);
+	UFUNCTION(Pure, Category="Locomotion|Strafe")
+	bool IsStrafing() const { return bStrafeMode; }
+
 	UFUNCTION(Pure, Category="Locomotion|Gait")
 	EHorseGait GetGait() const { return Gait; }
 	UFUNCTION(Pure, Category="Locomotion|Gait")
@@ -80,6 +91,7 @@ public:
 
 protected:
 	float GetGaitScaledSpeed() const; // 목표속도 / Movement MaxSpeed 를 [0,1] 로
+	void UpdateStrafeMode();          // 평행이동 진입(정지 상태 한정)/이탈 전이 판정
 	void UpdateGait(float DeltaTime); // BT에서 요청한 DesiredGait를 쿨타임 등 고려 후 실제 Gait에 반영
 	void  ClampGaitToEnvelope();
 	bool GetPlanarForward(const AActor& Owner, FVector& OutForward) const;   // 수평 forward, degenerate 면 false
@@ -164,6 +176,10 @@ protected:
 	UPROPERTY(Edit, Save, Category="Locomotion|Gait", DisplayName="Gait Up Cooldown", Min=0.0f, Max=5.0f, Speed=0.01f)
 	float GaitUpCooldown = 0.6f; 	// 가속 쿨타임(초 단위)
 
+	// ── 평행이동(strafe) ────────────────────────────────────────────────────────────────────────────────
+	UPROPERTY(Edit, Save, Category="Locomotion|Strafe", DisplayName="Strafe Enter Max Speed", Min=0.0f, Max=5.0f, Speed=0.01f)
+	float StrafeEnterMaxSpeed = 0.2f;   // m/s — Strafe 모드 진입을 위한 '거의 멈춤' 기준 속도
+
 	// ── 정면의 장애물이 설정된 거리 이하로 다가왔을 때 점프 동작 시작 ───────────────────────────────────
 	UPROPERTY(Edit, Save, Category = "Locomotion|Jump", DisplayName = "Trot Jump Trigger Dist", Min = 0.0f, Max = 20.0f, Speed = 0.05f)
 	float TrotJumpTriggerDist = 2.5f;
@@ -182,4 +198,10 @@ protected:
 	float      PrevDanger[HORSE_MAX_FAN_SLOTS] = {};   // slot 별 직전 프레임 danger(slow-release 감쇠용).
 	float      SteerAngle    = 0.0f;   // 현재 조향각(forward 기준 deg). 목표각으로 slew 되는 상태값.
 	bool       bJumpPerformed = false;   // 이번 점프 요청에 실제로 점프했는지 여부 (무한 점프 방지)
+
+	// ── 평행이동(strafe) 상태 — SetStrafeMode 가 입력, UpdateStrafeMode 가 모드 전이 ──
+	bool  bStrafeMode        = false;  // 현재 평행이동 모드 여부.
+	bool  bGazeHeld          = false;  // '전방 주시' 키 홀드 여부(플레이어 입력).
+	float StrafeLongitudinal = 0.0f;   // 종방향 입력([-1,1], +전진).
+	float StrafeLateral      = 0.0f;   // 횡방향 입력([-1,1], +우측).
 };

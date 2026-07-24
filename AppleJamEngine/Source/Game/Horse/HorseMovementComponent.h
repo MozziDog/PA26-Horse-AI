@@ -13,8 +13,10 @@ class UAnimGraphInstance;
 // 소비해 root(box) transform 에 적용하며, (3) 지면 스냅·몸통 충돌·낙하·점프 같은 physical 처리를 맡는다.
 //
 // AnimGraph 변수 (HorseAnimGraph):
-//   float NormalizedSpeed  [0, 1] 최대 속도 대비 현재 속력
-//   float SteeringAngle    초당 회전각 (deg/s, ±MaxTurnRate). 
+//   float NormalizedSpeed  [0, 1] 최대 속도 대비 현재 속력. 단, 평행이동 중엔 종방향 입력[-1,1]로 재사용(+전진).
+//   bool  bStrafeMode      평행이동(전방 주시 홀드) 모드. true 면 strafe blend space 로 전환.
+//   float LateralSpeed     [-1, 1] 평행이동 횡방향(+우측). 평행이동 아닐 땐 0.
+//   float SteeringAngle    초당 회전각 (deg/s, ±MaxTurnRate).
 //							Forward와 Desired 간의 오차를 YawAlignTime으로 나눠서 계산,
 //							YawAlignTime에 걸쳐서 AI가 계산한 '가고 싶은 방향'에 도달할 수 있도록 함
 //   float InclineAngle     [-1, +1] 내리막길/오르막길 각도 ( 현재 placeholder )
@@ -78,6 +80,10 @@ public:
 	// Locomotion 이 막다른 벽 등에서 매 frame 호출한다(무입력만으로도 자연 감속은 됨).
 	UFUNCTION(Callable, Category="HorseMovement")
 	void	Brake();
+	// 평행이동(strafe) 입력 — Locomotion 이 매 frame 설정. bEnabled 면 선회 없이 종/횡 root motion 으로만
+	// 이동하고 anim 은 strafe blend space 를 재생한다. Longitudinal(+전진)/Lateral(+우측) 모두 [-1,1].
+	UFUNCTION(Callable, Category="HorseMovement")
+	void	SetStrafeInput(bool bEnabled, float Longitudinal, float Lateral);
 
 	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Max Speed", Min=0.0f, Max=50.0f, Speed=0.1f)
 	float MaxSpeed = 20.0f;             // m/s — NormalizedSpeed 정규화 기준(gallop 최고 속도)
@@ -155,7 +161,8 @@ protected:
 	EHorseMoveMode MoveMode = EHorseMoveMode::Falling;     // 시작 시 지면 잡아야 해서 Falling
 
 	// ── AnimGraph 로 내보낼 상태 ──
-	float NormalizedSpeed = 0.0f;   // 이징된 현재 속도 스칼라([0,1])
+	float NormalizedSpeed = 0.0f;   // 이징된 현재 속도 스칼라([0,1]). 평행이동 중엔 종방향 입력[-1,1].
+	float LateralSpeed    = 0.0f;   // 평행이동 횡방향([-1,1], +우측). 평행이동 아닐 땐 0.
 	float TurnRate        = 0.0f;   // 이번 프레임에서의 초당 선회각
 	float InclineAngle    = 0.0f;   // 이징된 경사([-1,1])
 	float AirTime         = 0.0f;   // 공중 체류 시간(초)
@@ -169,6 +176,11 @@ protected:
 	// 뒷발서기 등으로 root motion 이 끊길 때 이어받는 관성 skid. rearing 에지에서 켜지고 마찰로 감쇠.
 	FVector SkidVelocity = FVector(0.0f, 0.0f, 0.0f);
 	bool    bSkidding    = false;
+
+	// ── 평행이동(strafe) 입력 — SetStrafeInput 이 매 frame 설정 ──
+	bool  bStrafeMode        = false;
+	float StrafeLongitudinal = 0.0f;   // 종방향 입력([-1,1], +전진)
+	float StrafeLateral      = 0.0f;   // 횡방향 입력([-1,1], +우측)
 
 	TWeakObjectPtr<USkeletalMeshComponent> Mesh = nullptr;
 	// 몸통 콜라이더. Root component와는 별개

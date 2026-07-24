@@ -72,55 +72,69 @@ void UHorseMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType
 
 	// ── 입력 → 목표 속도 스칼라 + 조향각 ──
 	FVector Desired;
-	ConsumeInputVector(Desired);
+	ConsumeInputVector(Desired);   // strafe 여부와 무관하게 pending 입력은 소비해 둔다.
 	Desired.Z = 0.0f;   // 조향/전진은 XY 평면만.
 
-	float TargetSpeed = std::clamp(Desired.Length(), 0.0f, 1.0f);
-	if (bBrakeRequested || MoveMode == EHorseMoveMode::Sliding)
+	if (bStrafeMode)
 	{
-		TargetSpeed = 0.0f;   // 급정지·미끄러짐 중엔 전진 의사 0.
-	}
-
-	// ── Rearing 게이팅 ──
-	// Brake() 는 막힌 동안 매 frame 재호출되므로 bBrake rising edge에만 1회 pulse
-	const bool bBrakeRising = bBrakeRequested && !bWasBraking;
-	bRearingRequested = bBrakeRising
-		&& MoveMode == EHorseMoveMode::Grounded
-		&& NormalizedSpeed >= RearMinSpeed;
-	if (bRearingRequested)
-	{
-		// Skidding 상태 진입
-		// 미끄러지는 처음 속도는 기존 진행하던 속도 그대로 사용
-		SkidVelocity = FVector(Velocity.X, Velocity.Y, 0.0f);
-		bSkidding = true;
-		UE_LOG("[HorseMovement] Rearing requested");
-	}
-
-	// 조향
-	// 목표 진행방향을 yaw rate(deg/s)으로 변환 (anim blend space에 맞추기)
-	if (!Desired.IsNearlyZero())
-	{
-		FVector Forward = Updated->GetForwardVector();
-		Forward.Z = 0.0f;
-		FVector Heading = Desired;
-		Heading.Z = 0.0f;
-		if (!Forward.IsNearlyZero() && !Heading.IsNearlyZero())
-		{
-			Forward = Forward.Normalized();
-			Heading = Heading.Normalized();
-			const float Dot   = std::clamp(Forward.X * Heading.X + Forward.Y * Heading.Y, -1.0f, 1.0f);
-			// 한 변(Forwad)의 길이가 1인 마름모의 넓이 == sin(theta) == Heading의, Forward와 수직인 성분
-			const float Cross = Forward.X * Heading.Y - Forward.Y * Heading.X;
-			const float HeadingError = std::atan2(Cross, Dot) * RAD_TO_DEG;
-			const float AlignTime    = std::max(YawAlignTime, 1.e-3f);
-			TurnRate = std::clamp(HeadingError / AlignTime, -MaxTurnRate, MaxTurnRate);
-		}
+		// 평행이동(strafe): 선회 없이 종/횡 root motion 으로만 이동. gait/brake/rearing 미적용.
+		// 실제 이동은 아래 ConsumeRootMotion 이 strafe 클립 root motion 을 소비해 만든다.
+		TurnRate          = 0.0f;
+		NormalizedSpeed   = StrafeLongitudinal;   // 종방향(+ 전진), [-1,1]
+		LateralSpeed      = StrafeLateral;        // 횡방향(+ 우측), [-1,1]
+		bRearingRequested = false;
 	}
 	else
 	{
-		TurnRate = 0.0f;
+		LateralSpeed = 0.0f;
+
+		float TargetSpeed = std::clamp(Desired.Length(), 0.0f, 1.0f);
+		if (bBrakeRequested || MoveMode == EHorseMoveMode::Sliding)
+		{
+			TargetSpeed = 0.0f;   // 급정지·미끄러짐 중엔 전진 의사 0.
+		}
+
+		// ── Rearing 게이팅 ──
+		// Brake() 는 막힌 동안 매 frame 재호출되므로 bBrake rising edge에만 1회 pulse
+		const bool bBrakeRising = bBrakeRequested && !bWasBraking;
+		bRearingRequested = bBrakeRising
+			&& MoveMode == EHorseMoveMode::Grounded
+			&& NormalizedSpeed >= RearMinSpeed;
+		if (bRearingRequested)
+		{
+			// Skidding 상태 진입
+			// 미끄러지는 처음 속도는 기존 진행하던 속도 그대로 사용
+			SkidVelocity = FVector(Velocity.X, Velocity.Y, 0.0f);
+			bSkidding = true;
+			UE_LOG("[HorseMovement] Rearing requested");
+		}
+
+		// 조향
+		// 목표 진행방향을 yaw rate(deg/s)으로 변환 (anim blend space에 맞추기)
+		if (!Desired.IsNearlyZero())
+		{
+			FVector Forward = Updated->GetForwardVector();
+			Forward.Z = 0.0f;
+			FVector Heading = Desired;
+			Heading.Z = 0.0f;
+			if (!Forward.IsNearlyZero() && !Heading.IsNearlyZero())
+			{
+				Forward = Forward.Normalized();
+				Heading = Heading.Normalized();
+				const float Dot   = std::clamp(Forward.X * Heading.X + Forward.Y * Heading.Y, -1.0f, 1.0f);
+				// 한 변(Forwad)의 길이가 1인 마름모의 넓이 == sin(theta) == Heading의, Forward와 수직인 성분
+				const float Cross = Forward.X * Heading.Y - Forward.Y * Heading.X;
+				const float HeadingError = std::atan2(Cross, Dot) * RAD_TO_DEG;
+				const float AlignTime    = std::max(YawAlignTime, 1.e-3f);
+				TurnRate = std::clamp(HeadingError / AlignTime, -MaxTurnRate, MaxTurnRate);
+			}
+		}
+		else
+		{
+			TurnRate = 0.0f;
+		}
+		NormalizedSpeed = TargetSpeed;
 	}
-	NormalizedSpeed = TargetSpeed;
 
 	// ── root motion 소비(yaw 즉시 적용) + 모드별 위치 처리 ──
 	FVector WorldDelta(0.0f, 0.0f, 0.0f);
@@ -402,6 +416,14 @@ void UHorseMovementComponent::Brake()
 	bBrakeRequested = true;
 }
 
+void UHorseMovementComponent::SetStrafeInput(bool bEnabled, float Longitudinal, float Lateral)
+{
+	// Locomotion 이 매 frame 호출. 실제 소비는 TickComponent 내부에서.
+	bStrafeMode        = bEnabled;
+	StrafeLongitudinal = std::clamp(Longitudinal, -1.0f, 1.0f);
+	StrafeLateral      = std::clamp(Lateral, -1.0f, 1.0f);
+}
+
 float UHorseMovementComponent::ComputeInclineAngle(const FHitResult& Ground) const
 {
 	// 잠정 구현 — 지면 노멀만 본다. 부호(오르막/내리막)는 forward 와 downhill 방향의 관계로 판정.
@@ -460,6 +482,8 @@ void UHorseMovementComponent::PushAnimGraphVariables()
 	}
 	const bool bGrounded = (MoveMode != EHorseMoveMode::Falling);
 	Graph->SetGraphVariableFloat(FName("NormalizedSpeed"), NormalizedSpeed);
+	Graph->SetGraphVariableBool(FName("bStrafeMode"),      bStrafeMode);
+	Graph->SetGraphVariableFloat(FName("LateralSpeed"),    LateralSpeed);
 	Graph->SetGraphVariableFloat(FName("TurnRate"),   TurnRate);
 	Graph->SetGraphVariableFloat(FName("InclineAngle"),    bGrounded ? InclineAngle : 0.0f);
 	Graph->SetGraphVariableFloat(FName("AirTime"),         AirTime);

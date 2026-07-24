@@ -210,6 +210,8 @@ void AHorseCharacter::SetupInputComponent()
 			}
 		}
 		BlackboardComponent->GetBlackboard().SetVector(HorseBBKeys::UserMoveDir, Move);
+		// 평행이동 모드 시의 입력 전달 (선회와 횡이동이 같은 입력 공유)
+		LocomotionComponent->SetStrafeHorizontalInput(std::clamp(LastSteeringInput, -1.0f, 1.0f));
 	});
 
 	// 보법(gait) 변속: W=한 단계 가속(쿨타임 있음), S=한 단계 감속, X=정지.
@@ -231,6 +233,27 @@ void AHorseCharacter::SetupInputComponent()
 	InputComponent->BindAction("HorseStop", EInputEvent::Pressed, [this]()
 	{
 		if (LocomotionComponent) LocomotionComponent->RequestStop();
+	});
+
+	// 전방 주시(gaze) — 홀드하는 동안 평행이동 모드. 키보드 LShift / 게임패드 LT(야숨의 ZL과 동일)
+	// LT가 아날로그 트리거라 버튼 홀드 여부는 임계값으로 판정
+	InputComponent->AddAxisMapping("HorseGaze", "LeftShift", 1.0f);
+	InputComponent->AddGamepadAxisMapping("HorseGaze", EInputAxisSourceType::GamepadLeftTrigger, 1.0f);
+	InputComponent->BindAxis("HorseGaze", [this](float Value)
+	{
+		bGazeInput = Value > GamepadTriggerHoldThreshold;
+		LocomotionComponent->SetStrafeMode(bGazeInput);
+	});
+
+	// 종방향 축 — 평행이동 시 전/후진(+전진). W=+1 / S=-1 / 게임패드 좌스틱 Y(위=전진).
+	// NOTE: 키보드 조작에서 W/S 키는 보법 변속 '버튼'과 겹침. 평행이동 중 보법(gait)조작은 Locomotion에서 필터링함
+	InputComponent->AddAxisMapping("HorseStrafeForward", "W", 1.0f);
+	InputComponent->AddAxisMapping("HorseStrafeForward", "S", -1.0f);
+	InputComponent->AddGamepadAxisMapping("HorseStrafeForward", EInputAxisSourceType::GamepadLeftStickY, 1.0f);
+	InputComponent->BindAxis("HorseStrafeForward", [this](float Value)
+	{
+		LastForwardInput = Value;
+		LocomotionComponent->SetStrafeVerticalInput(std::clamp(LastForwardInput, -1.0f, 1.0f));
 	});
 
 	if (bAutoInputCamera)
@@ -288,6 +311,8 @@ void AHorseCharacter::BeginPlay()
 	CameraTimeSinceLookInput = CameraReturnDelay;
 	bCameraLookInputThisFrame = false;
 	LastSteeringInput = 0.0f;
+	bGazeInput = false;
+	LastForwardInput = 0.0f;
 	UpdateCameraControlRotation();
 
 	Super::BeginPlay();
