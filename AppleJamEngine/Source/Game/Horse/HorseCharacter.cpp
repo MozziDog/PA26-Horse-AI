@@ -93,7 +93,8 @@ void AHorseCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 	CollisionComponent->SetRelativeRotation(FQuat::FromRotator(FRotator(0.0, 90.0, 90.0)));
 	CollisionComponent->SetCapsuleSize(0.3f, 0.8f);
 	CollisionComponent->SetCollisionObjectType(ECollisionChannel::Pawn);
-	CollisionComponent->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	CollisionComponent->SetKinematic(true);
+	CollisionComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 
 	// 이동 담당
 	MovementComponent = AddComponent<UHorseMovementComponent>();
