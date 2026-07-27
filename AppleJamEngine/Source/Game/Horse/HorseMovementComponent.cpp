@@ -258,17 +258,24 @@ void UHorseMovementComponent::TickGrounded(float DeltaTime, const FVector& World
 	Loc.Y += Push.Y;
 
 	// 지면 raycast 는 몸통 box 중심(root)에서 아래로. snap 시 root=지면+StandHeight(발이 지면 접점).
-	FHitResult Ground;
-	if (!bJumpActive && TraceGround(Loc, Ground))
+	FHitResult GroundHit;
+	if (!bJumpActive && TraceGround(Loc, GroundHit))
 	{
-		const float TargetZ = Ground.WorldHitLocation.Z + StandHeight;
+		float TargetZ = Loc.Z;
+		// TraceGround가 유효한 지면을 리턴했을 때.
+		// 만약 GroundHit.Distance가 저 값보다 작다면 아마도 엉덩이가 벽에 끼인 상태
+		if (GroundHit.Distance > StandHeight * 0.5f)
+		{
+			TargetZ = GroundHit.WorldHitLocation.Z + StandHeight;
+		}
+
 		if (Loc.Z - TargetZ <= GroundSnapMaxStep)
 		{
 			Loc.Z = TargetZ;
 			Updated->SetWorldLocation(Loc);
-			InclineAngle = ComputeInclineAngle(Ground);
+			InclineAngle = ComputeInclineAngle(GroundHit);
 			// 경사가 급하면 보행 불가 → 미끄러짐 진입(다음 tick 부터 TickSliding).
-			if (GroundNormal(Ground).Z < WalkableSlopeZ)
+			if (GroundNormal(GroundHit).Z < WalkableSlopeZ)
 			{
 				MoveMode       = EHorseMoveMode::Sliding;
 				bJumpRequested = false;   // wind-up 중 미끄러짐 진입 → 점프 요청 취소.
