@@ -33,6 +33,55 @@ namespace
         return Result;
     }
 
+    FVector GetReferenceGlobalScale(const FSkeletalMesh* MeshAsset, int32 BoneIndex)
+    {
+        if (!MeshAsset || BoneIndex < 0 || BoneIndex >= static_cast<int32>(MeshAsset->Bones.size()))
+        {
+            return FVector::OneVector;
+        }
+
+        return FTransform(MeshAsset->Bones[BoneIndex].GetReferenceGlobalPose()).Scale;
+    }
+
+    // Skeleton local poses are composed as Global[i] = Local[i] * Global[parent], so their
+    // translation lives in the parent's cumulative-scaled frame. The world transforms tracked
+    // here are deliberately scale-free, so the offset has to be scaled up before composing.
+    // Without this, every bone under a non-unit-scale ancestor lands at the wrong offset —
+    // which is most of the skeleton on rigs carrying an FBX unit-conversion scale.
+    FVector ScaleSkeletonLocalTranslation(const FVector& LocalTranslation, const FVector& ParentReferenceGlobalScale)
+    {
+        return FVector(
+            LocalTranslation.X * ParentReferenceGlobalScale.X,
+            LocalTranslation.Y * ParentReferenceGlobalScale.Y,
+            LocalTranslation.Z * ParentReferenceGlobalScale.Z);
+    }
+
+    FTransform ComposeSkeletonLocalOntoWorld(
+        const FTransform& ParentWorld,
+        const FTransform& BoneLocal,
+        const FVector& ParentReferenceGlobalScale)
+    {
+        FTransform Result = BoneLocal;
+        Result.Location = ParentWorld.Location + ParentWorld.Rotation.RotateVector(
+            ScaleSkeletonLocalTranslation(BoneLocal.Location, ParentReferenceGlobalScale));
+        Result.Rotation = ParentWorld.Rotation * BoneLocal.Rotation;
+        Result.Scale = FVector::OneVector;
+        return Result;
+    }
+
+    FTransform ComputeParentWorldFromSkeletonLocal(
+        const FTransform& ChildWorld,
+        const FTransform& ChildLocal,
+        const FVector& ParentReferenceGlobalScale)
+    {
+        FTransform Result;
+        Result.Rotation = ChildWorld.Rotation * ChildLocal.Rotation.Inverse();
+        Result.Location = ChildWorld.Location - Result.Rotation.RotateVector(
+            ScaleSkeletonLocalTranslation(ChildLocal.Location, ParentReferenceGlobalScale));
+        Result.Scale = FVector::OneVector;
+        return Result;
+    }
+
     FTransform GetComponentWorldTransform(const USkeletalMeshComponent* Component)
     {
         FTransform Result;
@@ -861,9 +910,10 @@ bool FPhysicsAssetInstance::PullPhysicsPose(
                ParentBoneIndex < static_cast<int32>(OutBoneWorldTransforms.size()) &&
                AppliedBodyBoneMask[ParentBoneIndex] == 0)
         {
-            FTransform ParentWorld = ComputeParentWorldTransformFromChild(
+            FTransform ParentWorld = ComputeParentWorldFromSkeletonLocal(
                 OutBoneWorldTransforms[ChildBoneIndex],
-                CurrentBoneLocalTransforms[ChildBoneIndex]);
+                CurrentBoneLocalTransforms[ChildBoneIndex],
+                GetReferenceGlobalScale(MeshAsset, ParentBoneIndex));
 
             // Reconstruct uncovered ancestors from the simulated ragdoll-root body so the
             // skeleton root follows ragdoll movement without applying a coarse world-space
@@ -893,9 +943,10 @@ bool FPhysicsAssetInstance::PullPhysicsPose(
             continue;
         }
 
-        OutBoneWorldTransforms[BoneIndex] = ComposePhysicsTransforms(
+        OutBoneWorldTransforms[BoneIndex] = ComposeSkeletonLocalOntoWorld(
             OutBoneWorldTransforms[ParentIndex],
-            CurrentBoneLocalTransforms[BoneIndex]);
+            CurrentBoneLocalTransforms[BoneIndex],
+            GetReferenceGlobalScale(MeshAsset, ParentIndex));
     }
 
     return true;
@@ -936,6 +987,57 @@ FTransform FPhysicsAssetInstance::GetBodyWorldTransformByBoneName(const FName& B
             ? Snapshot->FindRagdollBone(Owner->GetUUID(), BoneName)
             : nullptr;
     return BodySnapshot ? BodySnapshot->CurrentTransform : FTransform();
+}
+
+bool FPhysicsAssetInstance::GetSimulatedBodyWorldTransforms(
+    TArray<FTransform>& OutBodyWorldTransforms,
+    TArray<uint8>& OutBodyWorldTransformValid) const
+{
+    OutBodyWorldTransforms.clear();
+    OutBodyWorldTransformValid.clear();
+
+    const USkeletalMeshComponent* Owner   = GetOwnerComponent();
+    const UPhysicsAsset*          Asset   = GetAsset();
+    const IPhysicsRuntime*        Runtime = GetPhysicsRuntime(Owner);
+    if (!Owner || !Asset || !Runtime)
+    {
+        return false;
+    }
+
+    // One snapshot acquisition for the whole asset — per-body lookups would otherwise
+    // re-acquire and could straddle two different physics steps.
+    std::shared_ptr<const FPhysicsWorldSnapshot> Snapshot = Runtime->AcquireLatestSnapshotRef();
+    if (!Snapshot)
+    {
+        return false;
+    }
+
+    const TArray<FPhysicsAssetBodySetup>& BodySetups = Asset->GetBodySetups();
+    OutBodyWorldTransforms.resize(BodySetups.size());
+    OutBodyWorldTransformValid.resize(BodySetups.size(), 0);
+
+    const uint32 ComponentId = Owner->GetUUID();
+    int32 FoundBodyCount = 0;
+    for (int32 BodyIndex = 0; BodyIndex < static_cast<int32>(BodySetups.size()); ++BodyIndex)
+    {
+        if (BodyIndex >= static_cast<int32>(BodiesByBone.size()) || !BodiesByBone[BodyIndex].IsValid())
+        {
+            continue;
+        }
+
+        const FPhysicsBodySnapshot* BodySnapshot =
+            Snapshot->FindRagdollBone(ComponentId, BodySetups[BodyIndex].BoneName);
+        if (!BodySnapshot)
+        {
+            continue;
+        }
+
+        OutBodyWorldTransforms[BodyIndex]      = BodySnapshot->CurrentTransform;
+        OutBodyWorldTransformValid[BodyIndex]  = 1;
+        ++FoundBodyCount;
+    }
+
+    return FoundBodyCount > 0;
 }
 
 bool FPhysicsAssetInstance::FindNearestBodyToWorldLocation(

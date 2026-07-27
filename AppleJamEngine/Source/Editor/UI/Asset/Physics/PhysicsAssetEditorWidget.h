@@ -124,6 +124,12 @@ private:
         USkeletalMeshComponent* PreviewComponent,
         UWorld* PreviewWorld,
         const FPhysicsAssetPreviewPoseCache* PoseCache = nullptr);
+    // Draws bodies straight from the physics snapshot next to the pose-derived shapes.
+    // A gap between the two means the pose readback disagrees with the simulation.
+    void RenderSimulatedBodyDebug(
+        UPhysicsAsset* PhysicsAsset,
+        USkeletalMeshComponent* PreviewComponent,
+        UWorld* PreviewWorld);
     void RenderConstraintDebug(
         UPhysicsAsset* PhysicsAsset,
         USkeletalMeshComponent* PreviewComponent,
@@ -160,6 +166,10 @@ private:
     void AddDefaultConstraint(UPhysicsAsset* PhysicsAsset);
     void AddDefaultConstraintForBones(UPhysicsAsset* PhysicsAsset, const FName& ParentBoneName, const FName& ChildBoneName);
     void AddConstraintToSelectedParentBody(UPhysicsAsset* PhysicsAsset);
+    // Aligns one constraint frame onto the other in world space at the current preview pose.
+    // Angular limits are measured from the relative rotation of the two frames, so leaving
+    // them misaligned offsets the zero point and makes the joint fight its own rest pose.
+    bool SnapConstraintFrames(UPhysicsAsset* PhysicsAsset, int32 ConstraintIndex, bool bSnapChildToParent);
     void RunValidation(UPhysicsAsset* PhysicsAsset);
     void MarkPhysicsAssetDirty();
     bool StartEditorSimulation(UPhysicsAsset* PhysicsAsset, UWorld* PreviewWorld, USkeletalMeshComponent* PreviewComponent);
@@ -191,6 +201,7 @@ private:
     bool bShowPreviewBodies = true;
     bool bShowPreviewConstraints = true;
     bool bShowPreviewBodySkeleton = false;
+    bool bShowSimulatedBodies = true;
     bool bShowConstraintLimitAngles = true;
     bool bShowConstraintLimitSurfaces = true;
     bool bShowOnlySelectedConstraintLimitAngles = false;

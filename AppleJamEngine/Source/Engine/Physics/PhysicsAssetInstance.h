@@ -57,6 +57,12 @@ public:
     const TArray<FPhysicsConstraintHandle>& GetConstraints() const { return Constraints; }
     FPhysicsBodyHandle GetBodyHandleByBoneName(const FName& BoneName) const;
     FTransform GetBodyWorldTransformByBoneName(const FName& BoneName) const;
+    // Reads simulated body transforms straight from the physics snapshot, indexed by
+    // PhysicsAsset body-setup order. Tools compare this against the pose-derived preview
+    // to tell a real body collapse apart from a broken pose readback.
+    bool GetSimulatedBodyWorldTransforms(
+        TArray<FTransform>& OutBodyWorldTransforms,
+        TArray<uint8>& OutBodyWorldTransformValid) const;
     bool FindNearestBodyToWorldLocation(
         const FVector& WorldLocation,
         FName& OutBoneName,

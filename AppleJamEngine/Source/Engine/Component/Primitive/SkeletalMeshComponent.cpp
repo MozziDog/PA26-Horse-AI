@@ -701,6 +701,39 @@ namespace
         // arbitrary scale into BoneEditLocalMatrices and make some meshes shrink.
         return FTransform(MeshAsset->Bones[BoneIndex].GetReferenceLocalPose()).Scale;
     }
+
+    // Cumulative reference scale down to this bone.
+    FVector GetReferenceGlobalScale(const FSkeletalMesh* MeshAsset, int32 BoneIndex)
+    {
+        if (!MeshAsset || BoneIndex < 0 || BoneIndex >= static_cast<int32>(MeshAsset->Bones.size()))
+        {
+            return FVector::OneVector;
+        }
+
+        return FTransform(MeshAsset->Bones[BoneIndex].GetReferenceGlobalPose()).Scale;
+    }
+
+    // BuildBoneEditGlobalMatrices recomposes as Global[i] = Local[i] * Global[parent], so the
+    // parent's cumulative scale multiplies the child's local translation. Local matrices
+    // rebuilt from scale-free physics world transforms must pre-divide by that scale, or the
+    // offset is applied twice and the whole chain collapses toward the root.
+    // Only the translation is touched: folding scale into the matrices instead would shear
+    // the rotation apart on rigs whose per-bone scale is non-uniform.
+    FVector RemoveParentReferenceScaleFromLocalTranslation(
+        const FVector& LocalTranslation,
+        const FVector& ParentReferenceGlobalScale)
+    {
+        return FVector(
+            std::fabs(ParentReferenceGlobalScale.X) > PoseSyncDecomposeTolerance
+                ? LocalTranslation.X / ParentReferenceGlobalScale.X
+                : LocalTranslation.X,
+            std::fabs(ParentReferenceGlobalScale.Y) > PoseSyncDecomposeTolerance
+                ? LocalTranslation.Y / ParentReferenceGlobalScale.Y
+                : LocalTranslation.Y,
+            std::fabs(ParentReferenceGlobalScale.Z) > PoseSyncDecomposeTolerance
+                ? LocalTranslation.Z / ParentReferenceGlobalScale.Z
+                : LocalTranslation.Z);
+    }
 }
 
 USkeletalMeshComponent::~USkeletalMeshComponent()
@@ -2132,9 +2165,18 @@ bool USkeletalMeshComponent::ApplyPhysicsAssetPose()
         const FMatrix LocalMatrix = (ParentIndex >= 0)
             ? ComponentSpaceGlobalMatrices[BoneIndex] * GetAffineInverseForPoseSync(ParentMatrixForLocal)
             : ComponentSpaceGlobalMatrices[BoneIndex];
-        const FTransform PhysicsLocalPose = DecomposePoseMatrixPreservingScale(
+        FTransform PhysicsLocalPose = DecomposePoseMatrixPreservingScale(
             LocalMatrix,
             GetReferenceLocalScale(MeshAsset, BoneIndex));
+
+        // AnimationComponentSpaceMatrices already carry the skeleton's cumulative scale, so
+        // that branch needs no correction. The physics matrices are scale-free and do.
+        if (ParentIndex >= 0 && !bParentOutsidePartialScope)
+        {
+            PhysicsLocalPose.Location = RemoveParentReferenceScaleFromLocalTranslation(
+                PhysicsLocalPose.Location,
+                GetReferenceGlobalScale(MeshAsset, ParentIndex));
+        }
 
         float BoneBlendWeight = EffectiveBlendWeight;
         if (bRestrictPhysicsToPartialMask)

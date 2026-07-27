@@ -598,8 +598,10 @@ bool UPhysicsAssetPreviewComponent::LineTraceComponent(const FRay& Ray, FHitResu
 			const FVector SwingCenter = ParentFrameWorld.Location + AxisX * Radius;
 			const float Swing1Radians = MotionLimitDegreesForPreview(Limits.Swing1, Limits.Swing1LimitDegrees) * FMath::DegToRad;
 			const float Swing2Radians = MotionLimitDegreesForPreview(Limits.Swing2, Limits.Swing2LimitDegrees) * FMath::DegToRad;
-			const float DiskRadiusY = (std::max)(Radius * sinf(Swing1Radians), Radius * 0.025f);
-			const float DiskRadiusZ = (std::max)(Radius * sinf(Swing2Radians), Radius * 0.025f);
+			// Swing1 rotates about Y and tilts the twist axis toward Z; Swing2 rotates about Z
+			// and tilts it toward Y. Must match the drawn surface or picking misses the shape.
+			const float DiskRadiusY = (std::max)(Radius * sinf(Swing2Radians), Radius * 0.025f);
+			const float DiskRadiusZ = (std::max)(Radius * sinf(Swing1Radians), Radius * 0.025f);
 
 			if (Limits.Swing1 == EConstraintMotion::Locked && Limits.Swing2 == EConstraintMotion::Locked)
 			{
@@ -1032,8 +1034,10 @@ void UPhysicsAssetPreviewComponent::AppendSwingLimitSurface(
 	const FVector AxisZ = Rotation.RotateVector(FVector(0.0f, 0.0f, 1.0f));
 
 	const FVector DiskCenter = Center + AxisX * Radius;
-	const float DiskRadiusY = (std::max)(Radius * sinf(Swing1Radians), Radius * 0.025f);
-	const float DiskRadiusZ = (std::max)(Radius * sinf(Swing2Radians), Radius * 0.025f);
+	// Swing1 rotates about Y, which tilts the twist axis toward Z; Swing2 rotates about Z
+	// and tilts it toward Y. Each disk extent therefore comes from the other swing.
+	const float DiskRadiusY = (std::max)(Radius * sinf(Swing2Radians), Radius * 0.025f);
+	const float DiskRadiusZ = (std::max)(Radius * sinf(Swing1Radians), Radius * 0.025f);
 
 	TArray<uint32> RimIndices;
 	RimIndices.reserve(ConstraintLimitCircleSegments + 1);

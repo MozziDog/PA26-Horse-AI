@@ -58,6 +58,16 @@ namespace
         return Result;
     }
 
+    FTransform MakeLocalTransformFromWorld(const FTransform& BaseWorld, const FTransform& World)
+    {
+        const FQuat BaseInverse = BaseWorld.Rotation.GetNormalized().Inverse();
+        FTransform Local;
+        Local.Location = BaseInverse.RotateVector(World.Location - BaseWorld.Location);
+        Local.Rotation = (BaseInverse * World.Rotation.GetNormalized()).GetNormalized();
+        Local.Scale = FVector::OneVector;
+        return Local;
+    }
+
     FColor ConstraintLimitSwingRed(uint32 Alpha)
     {
         return FColor(0xc5, 0x00, 0x00, Alpha);
@@ -229,8 +239,10 @@ namespace
         const float Swing2Radians = Swing2Degrees * FMath::DegToRad;
 
         const FVector DiskCenter = Center + AxisX * Radius;
-        const float DiskRadiusY = (std::max)(Radius * sinf(Swing1Radians), Radius * 0.025f);
-        const float DiskRadiusZ = (std::max)(Radius * sinf(Swing2Radians), Radius * 0.025f);
+        // Swing1 rotates about Y, which tilts the twist axis toward Z; Swing2 rotates about Z
+        // and tilts it toward Y. Each disk extent therefore comes from the other swing.
+        const float DiskRadiusY = (std::max)(Radius * sinf(Swing2Radians), Radius * 0.025f);
+        const float DiskRadiusZ = (std::max)(Radius * sinf(Swing1Radians), Radius * 0.025f);
 
         if (Limits.Swing1 == EConstraintMotion::Locked && Limits.Swing2 == EConstraintMotion::Locked)
         {
@@ -1675,6 +1687,7 @@ void FPhysicsAssetEditorWidget::RenderToolbar(UPhysicsAsset* PhysicsAsset)
     ImGui::SameLine();
     RenderRegenerateBodiesControls(PhysicsAsset);
     ImGui::SameLine();
+
     if (ImGui::Button("Export JSON", ImVec2(110.0f, 0.0f)))
     {
         FString ExportPath;
@@ -3028,6 +3041,57 @@ void FPhysicsAssetEditorWidget::RenderConstraintDetails(UPhysicsAsset* PhysicsAs
     }
 
     ImGui::Separator();
+
+    // Angular limits are measured from the relative rotation of the two frames, so any
+    // misalignment at rest offsets the zero point and the joint fights its own pose.
+    FTransform ParentFrameWorld;
+    FTransform ChildFrameWorld;
+    if (PreviewSkeletalMeshComponent &&
+        FPhysicsAssetPreviewUtils::ComputePreviewConstraintWorldFrames(
+            PreviewSkeletalMeshComponent,
+            PhysicsAsset,
+            SelectedConstraintIndex,
+            ParentFrameWorld,
+            ChildFrameWorld))
+    {
+        const float FrameLocationGap = FVector::Distance(ParentFrameWorld.Location, ChildFrameWorld.Location);
+        const FQuat RelativeRotation =
+            (ParentFrameWorld.Rotation.GetNormalized().Inverse() * ChildFrameWorld.Rotation.GetNormalized()).GetNormalized();
+        const float RelativeAngleDegrees = 2.0f *
+            std::acos((std::min)(1.0f, std::fabs(RelativeRotation.W))) * 180.0f / 3.14159265358979323846f;
+
+        const bool bFramesAligned = FrameLocationGap <= 1.0e-3f && RelativeAngleDegrees <= 0.5f;
+        ImGui::TextColored(
+            bFramesAligned ? ImVec4(0.45f, 0.9f, 0.45f, 1.0f) : ImVec4(1.0f, 0.55f, 0.35f, 1.0f),
+            "Frame misalignment: %.4f m, %.2f deg",
+            FrameLocationGap,
+            RelativeAngleDegrees);
+        if (!bFramesAligned)
+        {
+            ImGui::TextDisabled("Twist/Swing limits are measured from this offset, not from the rest pose.");
+        }
+    }
+
+    if (ImGui::Button("Snap Child Frame To Parent", ImVec2(220.0f, 0.0f)))
+    {
+        SnapConstraintFrames(PhysicsAsset, SelectedConstraintIndex, true);
+    }
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("Move the child frame onto the parent frame at the current preview pose.\n"
+                          "Keeps the parent frame's axes, so the twist/swing axes you authored survive.");
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Snap Parent To Child", ImVec2(180.0f, 0.0f)))
+    {
+        SnapConstraintFrames(PhysicsAsset, SelectedConstraintIndex, false);
+    }
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip("Same, but keeps the child frame's axes instead.");
+    }
+
+    ImGui::Separator();
     bChanged |= EditTransform("Parent Local Frame", Constraint.ParentLocalFrame);
     bChanged |= EditTransform("Child Local Frame", Constraint.ChildLocalFrame);
 
@@ -3047,7 +3111,8 @@ void FPhysicsAssetEditorWidget::RenderConstraintDetails(UPhysicsAsset* PhysicsAs
         bChanged |= ImGui::DragFloat("Twist Max", &Constraint.Limits.TwistLimitMaxDegrees, 0.1f);
         bChanged |= DragMinFloat("Swing 1 Limit", Constraint.Limits.Swing1LimitDegrees, 0.1f, 0.0f);
         bChanged |= DragMinFloat("Swing 2 Limit", Constraint.Limits.Swing2LimitDegrees, 0.1f, 0.0f);
-        ImGui::TextDisabled("Viewport limit debug: Twist rotates around frame X. Swing 1/2 are drawn on the frame Y/Z planes.");
+        ImGui::TextDisabled("Twist rotates about frame X. Swing 1 rotates about Y (tilts the axis toward Z),");
+        ImGui::TextDisabled("Swing 2 rotates about Z (tilts it toward Y). The limit ellipse reflects that.");
         ImGui::TreePop();
     }
 
@@ -3283,6 +3348,59 @@ void FPhysicsAssetEditorWidget::AddConstraintToSelectedParentBody(UPhysicsAsset*
     const FName ParentBoneName(RefSkeleton.Bones[ParentBodyBoneIndex].Name);
     AddDefaultConstraintForBones(PhysicsAsset, ParentBoneName, ChildBoneName);
     SelectedTreeBoneIndex = BoneIndex;
+}
+
+bool FPhysicsAssetEditorWidget::SnapConstraintFrames(
+    UPhysicsAsset* PhysicsAsset,
+    int32 ConstraintIndex,
+    bool bSnapChildToParent)
+{
+    if (!PhysicsAsset || !PreviewSkeletalMeshComponent ||
+        !FPhysicsAssetPreviewUtils::IsConstraintSetupIndexValid(PhysicsAsset, ConstraintIndex))
+    {
+        return false;
+    }
+
+    FTransform ParentFrameWorld;
+    FTransform ChildFrameWorld;
+    if (!FPhysicsAssetPreviewUtils::ComputePreviewConstraintWorldFrames(
+            PreviewSkeletalMeshComponent,
+            PhysicsAsset,
+            ConstraintIndex,
+            ParentFrameWorld,
+            ChildFrameWorld))
+    {
+        return false;
+    }
+
+    FPhysicsAssetConstraintSetup& Constraint = PhysicsAsset->GetMutableConstraintSetups()[ConstraintIndex];
+
+    // The frame being kept defines the twist/swing axes, so only the other one moves.
+    const FName MovedFrameBoneName = bSnapChildToParent ? Constraint.ChildBoneName : Constraint.ParentBoneName;
+    FTransform MovedFrameBodyWorld;
+    if (!FPhysicsAssetPreviewUtils::ComputePreviewBodyWorldTransformByBoneName(
+            PreviewSkeletalMeshComponent,
+            PhysicsAsset,
+            MovedFrameBoneName,
+            MovedFrameBodyWorld))
+    {
+        return false;
+    }
+
+    const FTransform TargetFrameWorld = bSnapChildToParent ? ParentFrameWorld : ChildFrameWorld;
+    const FTransform SnappedLocalFrame = MakeLocalTransformFromWorld(MovedFrameBodyWorld, TargetFrameWorld);
+
+    if (bSnapChildToParent)
+    {
+        Constraint.ChildLocalFrame = SnappedLocalFrame;
+    }
+    else
+    {
+        Constraint.ParentLocalFrame = SnappedLocalFrame;
+    }
+
+    MarkPhysicsAssetDirty();
+    return true;
 }
 
 bool FPhysicsAssetEditorWidget::RegenerateBodies(UPhysicsAsset* PhysicsAsset, USkeletalMesh* PreviewMesh)
@@ -3543,6 +3661,11 @@ void FPhysicsAssetEditorWidget::RenderPreviewDebug(
     {
         RenderBodySkeletonDebug(PhysicsAsset, PreviewComponent, PreviewWorld, bHasPoseCache ? &PoseCache : nullptr);
     }
+
+    if (bShowSimulatedBodies && bEditorSimulationActive)
+    {
+        RenderSimulatedBodyDebug(PhysicsAsset, PreviewComponent, PreviewWorld);
+    }
 }
 
 void FPhysicsAssetEditorWidget::RenderPhysicsPreview(
@@ -3608,6 +3731,11 @@ void FPhysicsAssetEditorWidget::RenderPhysicsPreview(
     {
         RenderBodySkeletonDebug(PhysicsAsset, PreviewComponent, PreviewWorld, bHasPoseCache ? &PoseCache : nullptr);
     }
+
+    if (bShowSimulatedBodies && bEditorSimulationActive)
+    {
+        RenderSimulatedBodyDebug(PhysicsAsset, PreviewComponent, PreviewWorld);
+    }
 }
 
 void FPhysicsAssetEditorWidget::RenderViewportDebugOptions(FShowFlags* PreviewShowFlags)
@@ -3629,6 +3757,16 @@ void FPhysicsAssetEditorWidget::RenderViewportDebugOptions(FShowFlags* PreviewSh
     ImGui::Checkbox("Selected Constraint Limits Only", &bShowOnlySelectedConstraintLimitAngles);
     if (!bShowConstraintLimitAngles) ImGui::EndDisabled();
     if (!*bShowConstraints) ImGui::EndDisabled();
+
+    ImGui::Checkbox("Simulated Bodies (raw physics)", &bShowSimulatedBodies);
+    if (ImGui::IsItemHovered())
+    {
+        ImGui::SetTooltip(
+            "Draw bodies straight from the physics snapshot in magenta, plus a yellow line to the\n"
+            "pose-derived shape. The two sets should coincide exactly. A non-zero deviation means\n"
+            "the skeletal pose readback disagrees with what the simulation is actually doing.");
+    }
+
     ImGui::TextDisabled(bEditorSimulationActive
         ? (bEditorSimulationPaused ? "Simulation: paused" : "Simulation: running")
         : "Simulation: stopped");
@@ -4029,6 +4167,98 @@ void FPhysicsAssetEditorWidget::RenderBodyDebug(
     for (int32 BodyIndex = 0; BodyIndex < static_cast<int32>(Bodies.size()); ++BodyIndex)
     {
         DrawBodySetupDebug(PhysicsAsset, PreviewComponent, PreviewWorld, BodyIndex, Bodies[BodyIndex], PoseCache);
+    }
+}
+
+void FPhysicsAssetEditorWidget::RenderSimulatedBodyDebug(
+    UPhysicsAsset* PhysicsAsset,
+    USkeletalMeshComponent* PreviewComponent,
+    UWorld* PreviewWorld)
+{
+    if (!PhysicsAsset || !PreviewComponent || !PreviewWorld)
+    {
+        return;
+    }
+
+    FPhysicsAssetInstance* Instance = PreviewComponent->GetPhysicsAssetInstance();
+    if (!Instance)
+    {
+        return;
+    }
+
+    TArray<FTransform> SimulatedBodyWorldTransforms;
+    TArray<uint8> SimulatedBodyWorldTransformValid;
+    if (!Instance->GetSimulatedBodyWorldTransforms(SimulatedBodyWorldTransforms, SimulatedBodyWorldTransformValid))
+    {
+        return;
+    }
+
+    // Magenta = raw simulation, read straight from the physics snapshot. The cyan/orange
+    // shapes are derived from the skeletal pose instead, so the two sets drifting apart
+    // means the pose readback disagrees with what the simulation is actually doing.
+    const FColor SimulatedShapeColor(255, 70, 235, 150);
+
+    const TArray<FPhysicsAssetBodySetup>& Bodies = PhysicsAsset->GetBodySetups();
+    const int32 BodyCount = (std::min)(
+        static_cast<int32>(Bodies.size()),
+        static_cast<int32>(SimulatedBodyWorldTransforms.size()));
+
+    for (int32 BodyIndex = 0; BodyIndex < BodyCount; ++BodyIndex)
+    {
+        if (BodyIndex >= static_cast<int32>(SimulatedBodyWorldTransformValid.size()) ||
+            !SimulatedBodyWorldTransformValid[BodyIndex])
+        {
+            continue;
+        }
+
+        const FPhysicsAssetBodySetup& BodySetup = Bodies[BodyIndex];
+        const FTransform& SimulatedBodyWorld = SimulatedBodyWorldTransforms[BodyIndex];
+
+        for (const FPhysicsAssetShapeSetup& Shape : BodySetup.Shapes)
+        {
+            const FTransform ShapeWorld = ComposePreviewDebugTransforms(SimulatedBodyWorld, Shape.LocalTransform);
+            switch (Shape.Type)
+            {
+            case EPhysicsAssetShapeType::Box:
+            {
+                FVector HalfExtent = Shape.BoxHalfExtent;
+                HalfExtent.X = (std::max)(HalfExtent.X, 0.001f);
+                HalfExtent.Y = (std::max)(HalfExtent.Y, 0.001f);
+                HalfExtent.Z = (std::max)(HalfExtent.Z, 0.001f);
+                DrawDebugOrientedBox(
+                    PreviewWorld,
+                    ShapeWorld.Location,
+                    HalfExtent,
+                    ShapeWorld.Rotation.GetNormalized(),
+                    SimulatedShapeColor);
+                break;
+            }
+            case EPhysicsAssetShapeType::Sphere:
+                DrawDebugSphere(
+                    PreviewWorld,
+                    ShapeWorld.Location,
+                    (std::max)(Shape.SphereRadius, 0.001f),
+                    24,
+                    SimulatedShapeColor,
+                    0.0f);
+                break;
+            case EPhysicsAssetShapeType::Capsule:
+            {
+                const float Radius = (std::max)(Shape.CapsuleRadius, 0.001f);
+                DrawDebugCapsuleZAxis(
+                    PreviewWorld,
+                    ShapeWorld.Location,
+                    Radius,
+                    (std::max)(Shape.CapsuleHalfHeight, Radius),
+                    ShapeWorld.Rotation.GetNormalized(),
+                    SimulatedShapeColor);
+                break;
+            }
+            default:
+                break;
+            }
+        }
+
     }
 }
 
