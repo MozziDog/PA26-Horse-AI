@@ -1,6 +1,7 @@
 #include "HorseRagdollTestComponent.h"
 
 #include "Animation/AnimationManager.h"
+#include "Animation/AnimInstance.h"
 #include "Animation/Graph/AnimGraphInstance.h"
 #include "Animation/Sequence/AnimSequence.h"
 #include "Component/AI/BTAgentComponent.h"
@@ -210,6 +211,16 @@ void UHorseRagdollTestComponent::BeginRecover()
 		MeshComp->DisableRagdollPhysics();
 		UE_LOG("[HorseRagdollTest] BeginRagdollRecovery 거부됨 — 물리만 내리고 Recover 클립을 재생한다. Actor=%s",
 			GetOwnerNameSafe());
+	}
+
+	// 쓰러지던 frame 에 쌓여 있다가 Movement tick 이 꺼지면서 소비되지 못한 root motion 이 남아 있을
+	// 수 있다. 조종권을 돌려주기 전에 버린다 — 안 그러면 복귀 첫 frame 에 그만큼 튄다.
+	if (UAnimInstance* AnimInstance = MeshComp->GetAnimInstance())
+	{
+		if (AnimInstance->HasPendingRootMotion())
+		{
+			AnimInstance->ConsumeRootMotion();
+		}
 	}
 
 	// 일어서는 클립의 root motion 을 Movement 가 소비해야 하므로 여기서 조종권을 돌려준다.

@@ -110,7 +110,7 @@ public:
 
     // ─────────────────────────────────────────────────────────────
     // Root Motion (UE 의 bEnableRootMotion 과 동등).
-    //   true 면 GetBonePose 에서 RootMotionBoneName 본의 "이동" 성분을 첫 키로 고정하고,
+    //   true 면 GetBonePose 에서 RootMotionBoneName 본의 "이동" 성분을 ref pose(bind) 위치로 고정하고,
     //   대신 ExtractRootMotion 으로 같은 트랙의 delta 를 추출해 AnimInstance 가 owning actor
     //   의 transform 에 반영한다 → 캐릭터가 anim 의 motion 으로 실제로 world 에서 움직임.
     //   어떤 성분이 "이동" 인지는 아래 per-asset 분해 옵션(RootRotationLock /

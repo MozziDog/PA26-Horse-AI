@@ -843,15 +843,20 @@ void UAnimSequence::GetBonePose(FPoseContext& Output, const FAnimExtractContext&
 
         if (!RootMotionLockTrack->PosKeys.empty())
         {
-            // Translation lock — X/Y 는 항상 첫 키로 고정 (이동은 movement 가 delta 로 소비).
+            // Translation lock — X/Y 는 항상 ref pose 위치로 고정 (이동은 movement 가 delta 로 소비).
             // Z 는 클립 선언(bExtractRootMotionZ)에 따라: 이동(점프 상승)이면 잠그고 delta 로
             // 추출, 제자리 bob 이면 pose 에 남긴다 (ExtractRootMotion 이 delta Z 를 0 으로 추출).
-            const FVector& FirstPos = RootMotionLockTrack->PosKeys[0];
-            LockedRoot.Location.X = FirstPos.X;
-            LockedRoot.Location.Y = FirstPos.Y;
+            FVector AnchorPos = FVector(0.0f, 0.0f, 0.0f);
+            if (RootMotionLockBoneIndex < static_cast<int32>(Asset->Bones.size()))
+            {
+                AnchorPos = Asset->Bones[RootMotionLockBoneIndex].GetReferenceLocalPose().GetLocation();
+            }
+
+            LockedRoot.Location.X = AnchorPos.X;
+            LockedRoot.Location.Y = AnchorPos.Y;
             if (bExtractRootMotionZ)
             {
-                LockedRoot.Location.Z = FirstPos.Z;
+                LockedRoot.Location.Z = AnchorPos.Z;
             }
         }
 
