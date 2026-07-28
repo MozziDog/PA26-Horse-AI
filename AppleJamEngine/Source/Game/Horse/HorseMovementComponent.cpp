@@ -34,6 +34,10 @@ namespace
 	constexpr float DepenetraionAllow = 0.005f;
 	// 전진 판단 sweep에 사용할 '앞부분'(전체 forward 반길이 대비)비율. 엉덩이가 벽에 약간 닿았다고 전진 불가 판단 방지
 	constexpr float TorsoFrontRatio = 0.6f;
+	// 지면 판정 시작 높이에 더하는 추가 여유분
+	// 허용 step up 보다 위에서 쏴야 벽이나 높은 단차 등 '오를 수 없는 지형에 막힘'을 낭떠러지로 오판하지 않음
+	// + 빠른 낙하에서 발이 지면을 지나쳐 버리는 tunneling 완화 역할도 겸해 조금 크게 설정
+	constexpr float GroundProbeExtraUpMargin = 0.5f;
 }
 
 UHorseMovementComponent::UHorseMovementComponent()
@@ -264,19 +268,20 @@ void UHorseMovementComponent::TickGrounded(float DeltaTime, const FVector& World
 	Loc.X += Push.X;
 	Loc.Y += Push.Y;
 
-	// 지면 raycast 는 몸통 box 중심(root)에서 아래로. snap 시 root=지면+StandHeight(발이 지면 접점).
+	// 지면 raycast 는 발 높이(actor pivot - StandHeight) 기준 위아래로
 	FHitResult GroundHit;
 	if (!bJumpActive && TraceGround(Loc, GroundHit))
 	{
 		float TargetZ = Loc.Z;
-		// TraceGround가 유효한 지면을 리턴했을 때.
-		// 만약 GroundHit.Distance가 저 값보다 작다면 아마도 엉덩이가 벽에 끼인 상태
-		if (GroundHit.Distance > StandHeight * 0.5f)
+		// 발높이보다 GroundSnapMaxUp 이상 높은 곳은 밟을 지면이 아니라 벽으로 판정
+		// 이 경우 스냅 없이 현재 Z 유지
+		const float Rise = GroundHit.WorldHitLocation.Z - (Loc.Z - StandHeight);
+		if (Rise <= GroundSnapMaxUp)
 		{
 			TargetZ = GroundHit.WorldHitLocation.Z + StandHeight;
 		}
 
-		if (Loc.Z - TargetZ <= GroundSnapMaxStep)
+		if (Loc.Z - TargetZ <= GroundSnapMaxDown)
 		{
 			Loc.Z = TargetZ;
 			Updated->SetWorldLocation(Loc);
@@ -316,6 +321,7 @@ void UHorseMovementComponent::TickFalling(float DeltaTime)
 		return;   // 상승 중엔 착지 체크 skip.
 	}
 
+	// 탐침이 발 평면 위쪽까지 덮으므로(GetGroundProbeUp) 한 frame 에 발이 지면을 지나쳐 버려도 잡힌다.
 	FHitResult Ground;
 	if (TraceGround(Loc, Ground))
 	{
@@ -341,9 +347,9 @@ void UHorseMovementComponent::TickSliding(float DeltaTime)
 
 	FVector Loc = Updated->GetWorldLocation();
 
-	// 지면 조사(급강하 추적 위해 아래로 길게 — StandHeight 아래 발밑에서 SlideGroundProbe 만큼 더).
+	// 지면 조사(급강하 추적 위해 아래로 길게 — 발밑에서 SlideGroundProbe 만큼).
 	FHitResult Ground;
-	if (!TraceGround(Loc, Ground, StandHeight + SlideGroundProbe))
+	if (!TraceGround(Loc, Ground))
 	{
 		MoveMode = EHorseMoveMode::Falling;   // 지면 사라짐 → 낙하.
 		AirTime  = 0.0f;
@@ -362,7 +368,7 @@ void UHorseMovementComponent::TickSliding(float DeltaTime)
 	Loc += Velocity * DeltaTime;
 
 	FHitResult After;
-	if (!TraceGround(Loc, After, StandHeight + SlideGroundProbe))
+	if (!TraceGround(Loc, After))
 	{
 		Updated->SetWorldLocation(Loc);
 		MoveMode = EHorseMoveMode::Falling;   // 가장자리 넘어감 → 낙하.
@@ -419,7 +425,7 @@ void UHorseMovementComponent::PerformJump()
 	// 있다. TickFalling 이 상승 중(Velocity.Z>0) 지면 체크를 건너뛰긴 하지만, 방어적으로 살짝 띄운다.
 	if (USceneComponent* Updated = GetUpdatedComponent())
 	{
-		const float Lift = std::clamp(GroundSnapMaxStep * 0.1f, 0.02f, 0.05f);
+		const float Lift = std::clamp(GroundSnapMaxDown * 0.1f, 0.02f, 0.05f);
 		Updated->SetWorldLocation(Updated->GetWorldLocation() + FVector(0.0f, 0.0f, Lift));
 	}
 }
@@ -521,7 +527,7 @@ FVector UHorseMovementComponent::GetGravity() const
 	return FVector(0.0f, 0.0f, -9.81f);   // world 부재 시 지구 중력 fallback.
 }
 
-bool UHorseMovementComponent::TraceGround(const FVector& From, FHitResult& OutHit, float MaxDist) const
+bool UHorseMovementComponent::TraceGround(const FVector& PivotLoc, FHitResult& OutHit) const
 {
 	AActor* Owner = GetOwner();
 	if (!Owner)
@@ -534,10 +540,14 @@ bool UHorseMovementComponent::TraceGround(const FVector& From, FHitResult& OutHi
 		return false;
 	}
 
-	const FVector Dir(0.0f, 0.0f, -1.0f);
-	const float   Dist = (MaxDist > 0.0f) ? MaxDist : (StandHeight + GroundSnapMaxStep);
+	// 지면 판정의 기준은 발 높이 기준 (actor pivot은 발높이보다 StandHeight만큼 위쪽)
+	const float   ProbeUp = GroundSnapMaxUp + GroundProbeExtraUpMargin;
+	const FVector From(PivotLoc.X, PivotLoc.Y, PivotLoc.Z - StandHeight + ProbeUp);
+	const float   ProbeDown = GroundSnapMaxDown;
+
+	const FVector DownDir(0.0f, 0.0f, -1.0f);
 	// 바닥은 WorldStatic ObjectType 만 후보(다이내믹/폰을 바닥으로 오인하지 않음) — CMC 와 동일.
-	return World->PhysicsRaycastByObjectTypes(From, Dir, Dist, OutHit,
+	return World->PhysicsRaycastByObjectTypes(From, DownDir, ProbeUp + ProbeDown, OutHit,
 		ObjectTypeBit(ECollisionChannel::WorldStatic), Owner);
 }
 
@@ -703,11 +713,11 @@ void UHorseMovementComponent::Serialize(FArchive& Ar)
 {
 	Super::Serialize(Ar);
 	Ar << MaxSpeed;
-	Ar << GroundSnapMaxStep;
+	Ar << GroundSnapMaxDown;
+	Ar << GroundSnapMaxUp;
 	Ar << StandHeight;
 	Ar << WalkableSlopeZ;
 	Ar << SlideFriction;
-	Ar << SlideGroundProbe;
 	Ar << bTorsoCollision;
 	Ar << TorsoSkin;
 	Ar << JumpSpeed;

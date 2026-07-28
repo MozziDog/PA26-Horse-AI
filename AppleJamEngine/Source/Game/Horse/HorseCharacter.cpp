@@ -85,10 +85,14 @@ void AHorseCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 	RootSceneComponent = AddComponent<USceneComponent>();
 	SetRootComponent(RootSceneComponent);
 
+	// 이동 담당
+	MovementComponent = AddComponent<UHorseMovementComponent>();
+	const float StandHeight = MovementComponent->StandHeight;
+
 	// 몸통 콜라이더
 	CollisionComponent = AddComponent<UCapsuleComponent>();
 	CollisionComponent->AttachToComponent(RootSceneComponent);
-	CollisionComponent->SetRelativeLocation(FVector(-0.5f, 0.0f, 0.16f));
+	CollisionComponent->SetRelativeLocation(FVector(0.0f, 0.0f, -StandHeight + 1.2f));
 	// 앞쪽으로 눕힘. 쿼터니언-오일러각 변환 문제로 (0, 90, 0) 대신 (90, 0, 90) 사용
 	CollisionComponent->SetRelativeRotation(FQuat::FromRotator(FRotator(0.0, 90.0, 90.0)));
 	CollisionComponent->SetCapsuleSize(0.3f, 0.8f);
@@ -96,13 +100,10 @@ void AHorseCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 	CollisionComponent->SetKinematic(true);
 	CollisionComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 
-	// 이동 담당
-	MovementComponent = AddComponent<UHorseMovementComponent>();
-
 	// SkeletalMesh. 발바닥이 지면에 닿도록 StandHeight 만큼 아래로 offset 부여
 	MeshComponent = AddComponent<USkeletalMeshComponent>();
 	MeshComponent->AttachToComponent(RootSceneComponent);
-	MeshComponent->SetRelativeLocation(FVector(0.0f, 0.0f, -MovementComponent->GetStandHeight()));
+	MeshComponent->SetRelativeLocation(FVector(-0.5f, 0.0f, -StandHeight));
 
 	ID3D11Device* Device = GEngine->GetRenderer().GetFD3DDevice().GetDevice();
 	if (!SkeletalMeshFileName.empty())
@@ -134,19 +135,19 @@ void AHorseCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 	if(ObstacleFanSensorComponent)
 	{
 		ObstacleFanSensorComponent->AttachToComponent(RootSceneComponent);
-		ObstacleFanSensorComponent->SetRelativeLocation(FVector(1.5f, 0.0f, 0.0f));
+		ObstacleFanSensorComponent->SetRelativeLocation(FVector(1.0f, 0.0f, -StandHeight + 1.2f));
 	}
 	CliffFanSensorComponent = AddComponent<UCliffFanSensorComponent>();
 	if(CliffFanSensorComponent)
 	{
 		CliffFanSensorComponent->AttachToComponent(RootSceneComponent);
-		CliffFanSensorComponent->SetRelativeLocation(FVector(1.5f, 0.0f, -0.3f));
+		CliffFanSensorComponent->SetRelativeLocation(FVector(1.0f, 0.0f, -StandHeight + 1.2f));
 	}
 	RoadSensorComponent = AddComponent<URoadSensorComponent>();
 	if (RoadSensorComponent)
 	{
 		RoadSensorComponent->AttachToComponent(RootSceneComponent);
-		RoadSensorComponent->SetRelativeLocation(FVector(10.5f, 0.0f, 0.0f));
+		RoadSensorComponent->SetRelativeLocation(FVector(10.0f, 0.0f, 0.0f));
 	}
 	BTAgentComponent = AddComponent<UBTAgentComponent>();
 	if (BTAgentComponent)
