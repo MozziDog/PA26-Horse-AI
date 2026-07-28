@@ -187,15 +187,22 @@ void UHorseMovementComponent::ConsumeRootMotion(FVector& OutWorldDelta)
 	const FQuat   Basis = Updated->GetWorldRotation().ToQuaternion().GetNormalized();
 	OutWorldDelta = Basis.RotateVector(Delta.Location);
 
+	const FVector PivotToMesh = MeshComp->GetWorldLocation() - Updated->GetWorldLocation();
+
 	// Rotation — 방어적으로 up(+Z)축 yaw(twist)만 적분해 몸통 box 를 항상 세워 둔다
 	// (YawOnly 클립이면 delta 가 이미 순수 yaw 라 no-op, Full 클립이 섞여도 box 는 안 기움).
-	// actor 가 yaw-only 로 유지되므로 Z-twist 합성은 world/local 곱 순서와 무관(가환).
 	// NOTE: Raycast를 사용한 지면과의 정렬 (Suspension) 추가 시에 animation에 의한 rotation과 처리 순서 연구 필요
 	FQuat Swing, YawTwist;
 	Delta.Rotation.GetNormalized().ToSwingTwist(FVector(0.0f, 0.0f, 1.0f), Swing, YawTwist);
 	if (std::fabs(YawTwist.Z) > 1.e-7f)
 	{
-		Updated->SetWorldRotation((Basis * YawTwist).GetNormalized());
+		const FQuat NewBasis = (Basis * YawTwist).GetNormalized();
+		Updated->SetWorldRotation(NewBasis);
+
+		// 몸통 기울기(pitch/roll) 로직이 추가될 것을 고려해서 단순 yaw 차이로만 계산하지 않고 (NewBasis * Basis⁻¹)로 계산
+		const FQuat WorldRotDelta = (NewBasis * Basis.Inverse()).GetNormalized();
+		// actor pivot과 mesh pivot의 거리 + 회전으로 인해 발생한 호(arc) 형태의 오차 보정
+		OutWorldDelta -= WorldRotDelta.RotateVector(PivotToMesh) - PivotToMesh;
 	}
 }
 

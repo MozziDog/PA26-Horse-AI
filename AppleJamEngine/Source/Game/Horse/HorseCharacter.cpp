@@ -88,7 +88,7 @@ void AHorseCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 	// 몸통 콜라이더
 	CollisionComponent = AddComponent<UCapsuleComponent>();
 	CollisionComponent->AttachToComponent(RootSceneComponent);
-	CollisionComponent->SetRelativeLocation(FVector(0.5f, 0.0f, 0.0f));
+	CollisionComponent->SetRelativeLocation(FVector(-0.5f, 0.0f, 0.16f));
 	// 앞쪽으로 눕힘. 쿼터니언-오일러각 변환 문제로 (0, 90, 0) 대신 (90, 0, 90) 사용
 	CollisionComponent->SetRelativeRotation(FQuat::FromRotator(FRotator(0.0, 90.0, 90.0)));
 	CollisionComponent->SetCapsuleSize(0.3f, 0.8f);

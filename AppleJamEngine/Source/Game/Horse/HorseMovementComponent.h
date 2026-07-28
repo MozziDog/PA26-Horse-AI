@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "Component/Movement/PawnMovementComponent.h"
 #include "Object/Ptr/WeakObjectPtr.h"
@@ -127,11 +127,12 @@ protected:
 	// 지면 노멀(면 노멀 우선, 없으면 shape 노멀, 그래도 없으면 +Z). 항상 정규화.
 	FVector GroundNormal(const FHitResult& Hit) const;
 
-	// mesh AnimInstance 가 이번 frame 누적한 root motion 을 소비해 world 이동(XYZ) + yaw 회전으로
-	// 분해. 이동은 OutWorldDelta 로 반환(모드별 처리는 호출자), yaw 는 여기서 곧바로 root 에 적용.
-	// 회전은 yaw only — 몸통 box 를 세운 채 방향만 돌린다(지면 pitch/roll 정렬은 후속 suspension).
-	// 클립의 pitch/roll(swing)·Z bob 은 per-asset 옵션(UAnimSequence 의 RootRotationLock=YawOnly,
-	// bExtractRootMotionZ=false)으로 pose 쪽에 남는다 — actor 는 기울지 않고 mesh 만 움직인다.
+	// mesh AnimInstance가 이번 frame 누적한 root motion 을 소비해서
+	// 이동은 OutWorldDelta 로 반환(모드별 처리는 호출자), yaw 는 여기서 곧바로 root 에 적용, 
+	// pitch/roll은 버림 (root motion 대신 suspension에 의해 컨트롤됨)
+	// Mesh 의 relative location 을 반영하므로 actor pivot은 임의 위치로 설정 가능
+	// NOTE: 클립의 pitch/roll(swing)·Z bobbing 은 root motion이 아니라 pose로 처리,
+	//       UAnimSequence의 옵션 (RootRotationLock, bExtractRootMotionZ) 참고
 	void ConsumeRootMotion(FVector& OutWorldDelta);
 
 	void TickGrounded(float DeltaTime, const FVector& WorldDelta);
