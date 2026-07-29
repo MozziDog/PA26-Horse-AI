@@ -100,10 +100,6 @@ void UHorseMovementComponent::BeginPlay()
 	LastAppliedTilt   = IdentityQuat;
 	LastAppliedHeight = 0.0f;
 	bTiltApplied      = false;
-	for (int i = 0; i < HorseFootCount; ++i)
-	{
-		FootContacts[i] = FHorseFootContact();
-	}
 	bMeshBaseCached = false;
 	if (USkeletalMeshComponent* MeshComp = Mesh.Get())
 	{
@@ -333,6 +329,19 @@ void UHorseMovementComponent::TickGrounded(float DeltaTime, const FVector& World
 		return;
 	}
 
+	// 앞발이 허공이면(직전 frame 표본) 전방으로 조금씩 밀어 결국 무게중심까지 넘겨 떨어뜨린다.
+	// 조작으로 물러설 여지를 남기려고 root motion 을 덮어쓰지 않고 더하기만 한다 —
+	// 뒤로 걷는 속도가 EdgeSlipSpeed 보다 빠르면 그대로 빠져나올 수 있다.
+	if (bEdgeSlipping && EdgeSlipSpeed > 0.0f)
+	{
+		FVector SlipDir = Updated->GetForwardVector();
+		SlipDir.Z = 0.0f;
+		if (!SlipDir.IsNearlyZero())
+		{
+			MoveXY += SlipDir.Normalized() * (EdgeSlipSpeed * DeltaTime);
+		}
+	}
+
 	FVector Loc = Updated->GetWorldLocation();
 	// 전진 판단 — 앞부분 몸통 sweep 으로 벽 관통 차단
 	const FVector DeltaXY = ResolveTorsoMove(Loc, MoveXY);
@@ -388,13 +397,13 @@ void UHorseMovementComponent::TickGrounded(float DeltaTime, const FVector& World
 			InclineAngle += (TargetIncline - InclineAngle) * DampAlpha(DeltaTime, BodyAlignSpeed);
 
 			UpdateBodyTilt(DeltaTime, Sample, true);
-			// 2차: 기울기를 적용한 실제 발 위치에서 다시 raycast → mesh 높이 보정.
-			SolveBodyHeight(DeltaTime, Loc, true);
 
 			// 보행 불가 경사면 표식만 남긴다. 실제 Sliding 이행은 '다음 이동' frame 에서(위쪽 가드).
 			// 판정 기준은 추정 평면이 아니라 '실제로 밟고 있는 면' 의 노멀 — 단차 앞에서 평면 기울기가
 			// 아무리 커도, 발밑이 평평하면 미끄러지지 않고 그냥 몸만 기울어야 한다.
 			bSteepGround = (Sample.CenterNormal.Z < WalkableSlopeZ);
+			// 같은 규약으로 실족 표식도 남긴다 — 밀기는 다음 frame 이동에 얹힌다.
+			bEdgeSlipping = !Sample.bFrontHit;
 			return;
 		}
 		// 지면이 step 이상 아래 → 낭떠러지.
@@ -403,7 +412,6 @@ void UHorseMovementComponent::TickGrounded(float DeltaTime, const FVector& World
 	// 지면 없음(또는 너무 아래) → 물리 기반 이동. XY 는 진행시키되 Z 는 유지하고 mode 전환.
 	Updated->SetWorldLocation(Loc);
 	UpdateBodyTilt(DeltaTime, Sample, false);
-	SolveBodyHeight(DeltaTime, Loc, false);
 	EnterFalling(false);
 }
 
@@ -419,7 +427,6 @@ void UHorseMovementComponent::TickFalling(float DeltaTime)
 
 	// 공중에서는 몸통을 서서히 수평으로 되돌린다(착지 준비 자세).
 	UpdateBodyTilt(DeltaTime, FHorseGroundSample(), false);
-	SolveBodyHeight(DeltaTime, Loc, false);
 
 	// 고속 강제 낙마 / 끼임 판정 — 접지를 잃은 상태에서만 의미가 있다.
 	EvaluateDismountRules(DeltaTime);
@@ -429,27 +436,43 @@ void UHorseMovementComponent::TickFalling(float DeltaTime)
 		return;   // 상승 중엔 착지 체크 skip.
 	}
 
-	// 탐침이 발 평면 위쪽까지 덮으므로(GroundProbeExtraUpMargin) 한 frame 에 발이 지면을 지나쳐 버려도 잡힌다.
-	FHitResult Ground;
-	if (TraceGround(Loc, Ground))
+	// 착지 판정은 TickGrounded 의 접지 유지 판정과 반드시 같은 기준(SampleGround)이어야 한다.
+	// 중심 ray 하나로 착지를 인정하면 무게중심 sphere 와 모양·위치·탐색범위가 달라서, 둘의 결과가
+	// 엇갈리는 자리에서 Grounded/Falling 이 매 frame 뒤집힌다.
+	// 탐침 범위(ProbeUp/Down)가 발 평면 위아래를 넉넉히 덮으므로 한 frame 에 발이 지면을
+	// 지나쳐 버려도 잡힌다.
+	FHorseGroundSample Sample;
+	const bool bSupported = SampleGround(Loc, Sample);
+	if (bDrawGroundProbes)
 	{
-		const float TargetZ = Ground.WorldHitLocation.Z + StandHeight;
-		if (Loc.Z <= TargetZ)   // 발이 지면에 도달/관통 → 착지.
-		{
-			Loc.Z = TargetZ;
-			Updated->SetWorldLocation(Loc);
-			Velocity.Z  = 0.0f;
-			bJumpActive = false;
-			AirTime     = 0.0f;
-			StuckTime   = 0.0f;
-			bCollapseRequested = false;
-			// 급경사면에 착지하면 곧바로 미끄러짐.
-			MoveMode = (GroundNormal(Ground).Z < WalkableSlopeZ)
-				? EHorseMoveMode::Sliding
-				: EHorseMoveMode::Grounded;
-			bSteepGround = false;   // 착지 판정에서 이미 결론이 났다.
-		}
+		DrawGroundProbeDebug(Loc, Sample);
 	}
+	if (!bSupported || !Sample.bHasSupportZ)
+	{
+		return;
+	}
+
+	const float TargetZ = Sample.SupportZ + StandHeight;
+	if (Loc.Z > TargetZ)
+	{
+		return;   // 아직 지면 위 — 계속 낙하.
+	}
+
+	// 발이 지면에 도달/관통 → 착지.
+	Loc.Z = TargetZ;
+	Updated->SetWorldLocation(Loc);
+	Velocity.Z  = 0.0f;
+	bJumpActive = false;
+	AirTime     = 0.0f;
+	StuckTime   = 0.0f;
+	bCollapseRequested = false;
+	// 급경사면에 착지하면 곧바로 미끄러짐. 기준은 추정 선이 아니라 실제로 밟은 면의 노멀 —
+	// TickGrounded 의 bSteepGround 와 같아야 착지 직후 판정이 엇갈리지 않는다.
+	MoveMode = (Sample.CenterNormal.Z < WalkableSlopeZ)
+		? EHorseMoveMode::Sliding
+		: EHorseMoveMode::Grounded;
+	bSteepGround  = false;   // 착지 판정에서 이미 결론이 났다.
+	bEdgeSlipping = !Sample.bFrontHit;   // 낭떠러지 턱에 착지했으면 곧바로 실족 밀기로 이어진다.
 }
 
 void UHorseMovementComponent::TickSliding(float DeltaTime)
@@ -463,7 +486,6 @@ void UHorseMovementComponent::TickSliding(float DeltaTime)
 	if (!TraceGround(Loc, Ground))
 	{
 		UpdateBodyTilt(DeltaTime, FHorseGroundSample(), false);
-		SolveBodyHeight(DeltaTime, Loc, false);
 		EnterFalling(false);   // 지면 사라짐 → 낙하.
 		return;
 	}
@@ -484,7 +506,6 @@ void UHorseMovementComponent::TickSliding(float DeltaTime)
 	{
 		Updated->SetWorldLocation(Loc);
 		UpdateBodyTilt(DeltaTime, FHorseGroundSample(), false);
-		SolveBodyHeight(DeltaTime, Loc, false);
 		EnterFalling(false);   // 가장자리 넘어감 → 낙하.
 		return;
 	}
@@ -501,7 +522,6 @@ void UHorseMovementComponent::TickSliding(float DeltaTime)
 		SlideSample.LocalUp     = NAfterLocal;
 		SlideSample.LocalTiltUp = ClampTiltUp(NAfterLocal);
 		UpdateBodyTilt(DeltaTime, SlideSample, true);
-		SolveBodyHeight(DeltaTime, Loc, true);
 	}
 
 	// 속도를 지면 접선으로 투영(수직 성분 제거) — 표면을 따라 미끄러지게 유지.
@@ -597,11 +617,12 @@ FVector UHorseMovementComponent::ClampTiltUp(const FVector& LocalUp) const
 		return FVector(0.0f, 0.0f, 1.0f);   // 거의 수직/뒤집힌 면은 몸통 기울기 대상이 아니다.
 	}
 	// 노멀을 기울기(slope) 로 되돌려 각도 한계로 자른 뒤 다시 노멀로.
+	// roll 성분(Y)은 여기서 통째로 버린다 — 몸통은 항상 위를 보고 pitch 로만 지면을 따라간다.
+	// SampleGround 는 애초에 roll 을 만들지 않지만, 지면 노멀을 그대로 넘기는 경로(Sliding)도
+	// 이 함수를 지나므로 여기서 잘라야 모드가 바뀔 때 몸통이 튀지 않는다.
 	const float MaxPitchSlope = std::tan(std::clamp(MaxBodyPitch, 0.0f, 80.0f) * DEG_TO_RAD);
-	const float MaxRollSlope  = std::tan(std::clamp(MaxBodyRoll,  0.0f, 80.0f) * DEG_TO_RAD);
 	const float Pitch = std::clamp(-LocalUp.X / LocalUp.Z, -MaxPitchSlope, MaxPitchSlope);
-	const float Roll  = std::clamp(-LocalUp.Y / LocalUp.Z, -MaxRollSlope,  MaxRollSlope);
-	return FVector(-Pitch, -Roll, 1.0f).Normalized();
+	return FVector(-Pitch, 0.0f, 1.0f).Normalized();
 }
 
 bool UHorseMovementComponent::SampleGround(const FVector& PivotLoc, FHorseGroundSample& OutSample) const
@@ -623,7 +644,7 @@ bool UHorseMovementComponent::SampleGround(const FVector& PivotLoc, FHorseGround
 
 	const float FootZ = PivotLoc.Z - StandHeight;
 
-	// (1) 무게중심 아래 sphere sweep — 접지 판정이자 기울기 평면의 뒤쪽 표본.
+	// (1) 무게중심 아래 sphere sweep — 접지 판정 전담. 기울기는 아래 앞뒤 probe 가 만든다.
 	FHitResult CenterHit;
 	OutSample.bCenterHit = ProbeCenterOfMass(PivotLoc, CenterHit);
 	if (OutSample.bCenterHit)
@@ -632,26 +653,28 @@ bool UHorseMovementComponent::SampleGround(const FVector& PivotLoc, FHorseGround
 		OutSample.CenterNormal = GroundNormal(CenterHit);
 	}
 
-	// (2) 앞다리 2지점 raycast — 기울기 평면의 앞쪽 표본.
-	const FVector FrontMid = PivotLoc + Forward * FrontProbeForward;
-	const FVector LeftXY   = FrontMid - Right * FrontProbeHalfWidth;
-	const FVector RightXY  = FrontMid + Right * FrontProbeHalfWidth;
+	// (2) 앞발/뒷발 중앙 raycast — 몸통 기울기의 앞뒤 표본.
+	// 좌우로 벌려 쏘지 않는 건 의도된 것이다. 말은 좌우 발 간격이 좁아서 좌/우 접점으로 roll 을
+	// 만들면 단차를 비스듬히 내려올 때 한쪽 발이 먼저 떨어지며 몸이 크게 요동친다.
+	// 중앙 1개로 앞뒤만 재고 roll 은 포기한다.
+	const FVector FrontXY = PivotLoc + Forward * FrontProbeForward;
+	const FVector RearXY  = PivotLoc - Forward * RearFootBack;
 
-	FHitResult LeftHit;
-	FHitResult RightHit;
-	OutSample.bFrontLeftHit  = TraceGroundAt(LeftXY,  FootZ, ProbeUp, ProbeDown, LeftHit);
-	OutSample.bFrontRightHit = TraceGroundAt(RightXY, FootZ, ProbeUp, ProbeDown, RightHit);
-	if (OutSample.bFrontLeftHit)
+	FHitResult FrontHit;
+	FHitResult RearHit;
+	OutSample.bFrontHit = TraceGroundAt(FrontXY, FootZ, ProbeUp, ProbeDown, FrontHit);
+	OutSample.bRearHit  = TraceGroundAt(RearXY,  FootZ, ProbeUp, ProbeDown, RearHit);
+	if (OutSample.bFrontHit)
 	{
-		OutSample.FrontLeftPoint = LeftHit.WorldHitLocation;
+		OutSample.FrontPoint = FrontHit.WorldHitLocation;
 	}
-	if (OutSample.bFrontRightHit)
+	if (OutSample.bRearHit)
 	{
-		OutSample.FrontRightPoint = RightHit.WorldHitLocation;
+		OutSample.RearPoint = RearHit.WorldHitLocation;
 	}
 
-	// ── 접점 3개를 지나는 평면 ──
-	// 각 접점을 actor 로컬(전방, 우측, 높이) 로 옮긴 뒤 외적으로 노멀을 구한다.
+	// ── 앞뒤 접점을 잇는 선 ──
+	// 각 접점을 actor 로컬(전방, 우측, 높이) 로 옮긴다.
 	// (probe XY 를 그대로 쓰지 않고 실제 접점 XY 를 쓴다 — sphere 는 접점이 옆으로 밀릴 수 있다)
 	auto ToLocal = [&](const FVector& World)
 	{
@@ -659,61 +682,67 @@ bool UHorseMovementComponent::SampleGround(const FVector& PivotLoc, FHorseGround
 		return FVector(D.Dot(Forward), D.Dot(Right), World.Z - FootZ);
 	};
 
-	const int FrontHits = OutSample.GetFrontHitCount();
-	if (OutSample.bCenterHit && FrontHits == 2)
+	// 기울기는 '가장 앞' 과 '가장 뒤' 접점으로 잰다. 셋 다 있으면 자연히 앞발~뒷발이 뽑히고,
+	// 한쪽이 빠지면 남은 것 중 가장 멀리 떨어진 쌍으로 degrade 된다(단차에 걸친 상황).
+	// 무게중심을 후보에 넣는 건 앞/뒤가 둘 다 비었을 때의 대비책이다 — 기울기 기준은 어디까지나 앞뒤 발.
+	const FVector Candidates[3] = { OutSample.RearPoint, OutSample.CenterPoint, OutSample.FrontPoint };
+	const bool    CandidateHit[3] = { OutSample.bRearHit, OutSample.bCenterHit, OutSample.bFrontHit };
+
+	bool    bHasAnchor = false;
+	FVector Rearmost(0.0f, 0.0f, 0.0f);
+	FVector Frontmost(0.0f, 0.0f, 0.0f);
+	for (int i = 0; i < 3; ++i)
 	{
-		const FVector C  = ToLocal(OutSample.CenterPoint);
-		const FVector L  = ToLocal(OutSample.FrontLeftPoint);
-		const FVector R  = ToLocal(OutSample.FrontRightPoint);
-		FVector N = (L - C).Cross(R - C);
-		if (N.Z < 0.0f)
+		if (!CandidateHit[i])
 		{
-			N = N * -1.0f;
+			continue;
 		}
-		if (!N.IsNearlyZero() && N.Z > 1.e-4f)
+		const FVector L = ToLocal(Candidates[i]);
+		if (!bHasAnchor)
 		{
-			N = N.Normalized();
-			OutSample.PitchSlope = -N.X / N.Z;
-			OutSample.RollSlope  = -N.Y / N.Z;
-			OutSample.LocalUp    = N;
+			Rearmost   = L;
+			Frontmost  = L;
+			bHasAnchor = true;
+			continue;
 		}
+		Rearmost  = (L.X < Rearmost.X)  ? L : Rearmost;
+		Frontmost = (L.X > Frontmost.X) ? L : Frontmost;
 	}
-	else if (OutSample.bCenterHit && FrontHits == 1)
+
+	if (bHasAnchor)
 	{
-		// 앞다리 한쪽만 잡히면 평면이 안 나온다 → 종방향 기울기만 산출하고 roll 은 0.
-		const FVector C = ToLocal(OutSample.CenterPoint);
-		const FVector F = ToLocal(OutSample.bFrontLeftHit ? OutSample.FrontLeftPoint : OutSample.FrontRightPoint);
-		const float   Base = F.X - C.X;
+		const float Base = Frontmost.X - Rearmost.X;
 		if (std::fabs(Base) > 1.e-3f)
 		{
-			OutSample.PitchSlope = (F.Z - C.Z) / Base;
+			OutSample.PitchSlope = (Frontmost.Z - Rearmost.Z) / Base;
+		}
+		else if (OutSample.bCenterHit)
+		{
+			// 표본이 사실상 한 점뿐 — 밟고 있는 면 노멀로 근사.
+			const FVector N = LocalizeGroundNormal(OutSample.CenterNormal);
+			OutSample.PitchSlope = (N.Z > 1.e-3f) ? (-N.X / N.Z) : 0.0f;
 		}
 		OutSample.LocalUp = FVector(-OutSample.PitchSlope, 0.0f, 1.0f).Normalized();
-	}
-	else if (OutSample.bCenterHit)
-	{
-		// 앞다리 표본이 없으면 밟고 있는 면 노멀로 근사.
-		OutSample.LocalUp    = LocalizeGroundNormal(OutSample.CenterNormal);
-		OutSample.PitchSlope = (OutSample.LocalUp.Z > 1.e-3f) ? (-OutSample.LocalUp.X / OutSample.LocalUp.Z) : 0.0f;
-		OutSample.RollSlope  = (OutSample.LocalUp.Z > 1.e-3f) ? (-OutSample.LocalUp.Y / OutSample.LocalUp.Z) : 0.0f;
 	}
 	OutSample.LocalTiltUp = ClampTiltUp(OutSample.LocalUp);
 
 	// ── Z 스냅 높이 ──
-	// 회전 pivot 의 XY 위치에서의 평면 높이. 회전 중심과 높이 기준이 같은 점이어야
+	// 회전 pivot 의 XY 위치에서의 선 높이. 회전 중심과 높이 기준이 같은 점이어야
 	// 기울기가 바뀔 때 발이 지면을 뚫거나 뜨지 않는다.
-	if (OutSample.bCenterHit)
+	// TiltPivotForward 가 앞발과 뒷발 사이에 있으면 외삽이 아니라 내삽이라, 단차에 걸친 자세에서도
+	// 뒷발이 지면에서 크게 뜨지 않는다(앞발+무게중심 기준일 때의 문제).
+	if (bHasAnchor)
 	{
-		const FVector C = ToLocal(OutSample.CenterPoint);
-		OutSample.SupportZ     = OutSample.CenterPoint.Z + OutSample.PitchSlope * (TiltPivotForward - C.X)
-			+ OutSample.RollSlope * (0.0f - C.Y);
+		OutSample.SupportZ     = (Frontmost.Z + FootZ) + OutSample.PitchSlope * (TiltPivotForward - Frontmost.X);
 		OutSample.bHasSupportZ = true;
 	}
 
 	// ── 접지 유지 판정 ──
-	// sphere 가 잡지 못하면 밟을 게 없는 것. 앞다리 ray 가 비면 앞이 낭떠러지 — 어느 쪽이든 접지 상실.
-	const bool bFrontLost = bLoseGroundOnAnyFrontMiss ? (FrontHits < 2) : (FrontHits == 0);
-	return OutSample.bCenterHit && !bFrontLost;
+	// 무게중심 sphere 하나로만 판단한다. 앞발이 허공인 건 접지 상실이 아니라 '실족' 이고,
+	// 호출자가 bFrontHit 를 보고 EdgeSlipSpeed 로 앞으로 밀어 무게중심까지 넘기는 방식으로 처리한다.
+	// 앞발 miss 를 여기서 접지 상실로 처리하면, 착지 판정은 여전히 무게중심을 잡으므로
+	// Grounded/Falling 이 매 frame 뒤집힌다.
+	return OutSample.bCenterHit;
 }
 
 // ============================================================================
@@ -758,85 +787,6 @@ void UHorseMovementComponent::GetBodyTiltSlopes(float& OutPitchSlope, float& Out
 	OutRollSlope  = -Up.Y / UpZ;
 }
 
-void UHorseMovementComponent::SolveBodyHeight(float DeltaTime, const FVector& ActorLoc, bool bGrounded)
-{
-	for (int i = 0; i < HorseFootCount; ++i)
-	{
-		FootContacts[i] = FHorseFootContact(); // 이전 frame의 값 잘못 사용하지 못하게 아예 0으로 초기화
-	}
-
-	const USceneComponent* Updated = GetUpdatedComponent();
-	const bool bActive = bGrounded && bAlignBodyToGround && Updated != nullptr;
-
-	float Target = 0.0f;
-	if (bActive)
-	{
-		FVector Forward = Updated->GetForwardVector();
-		FVector Right   = Updated->GetRightVector();
-		Forward.Z = 0.0f;
-		Right.Z   = 0.0f;
-		Forward = Forward.IsNearlyZero() ? FVector(1.0f, 0.0f, 0.0f) : Forward.Normalized();
-		Right   = Right.IsNearlyZero()   ? FVector(0.0f, 1.0f, 0.0f) : Right.Normalized();
-
-		const FVector Pivot      = GetTiltPivotLocal();
-		const float   FootPlaneZ = -StandHeight;   // 발 평면의 기준 높이 (actor pivot 기준)
-		const float   HalfW      = FrontProbeHalfWidth;
-
-		// 발 위치(actor 로컬, 기울기 적용 전). 앞발은 1차 probe 지점과 같은 곳을 쓴다.
-		const FVector FootLocal[HorseFootCount] =
-		{
-			FVector(FrontProbeForward, -HalfW, FootPlaneZ),
-			FVector(FrontProbeForward,  HalfW, FootPlaneZ),
-			FVector(-RearFootBack,     -HalfW, FootPlaneZ),
-			FVector(-RearFootBack,      HalfW, FootPlaneZ),
-		};
-
-		bool bAnyHit = false;
-		for (int i = 0; i < HorseFootCount; ++i)
-		{
-			// 1차 solve(기울기)만 적용했을 때의 발 위치
-			const FVector RotatedLocal = Pivot + BodyTilt.RotateVector(FootLocal[i] - Pivot);
-			const FVector RotatedWorld = ActorLoc + Forward * RotatedLocal.X + Right * RotatedLocal.Y + FVector(0.0f, 0.0f, RotatedLocal.Z);
-
-			FHorseFootContact& Contact = FootContacts[i];
-			Contact.FootWorld = RotatedWorld;
-
-			// 탐색 범위는 액터 발 평면을 기준으로 잡되, 기울기로 멀리 올라간(또는 내려간) 발까지 덮도록 넓힌다.
-			// 그냥 posed 발 높이 ±ProbeUp/Down 으로 잡으면, 크게 들린 발이 자기 밑 지면을 놓쳐서
-			// IK 가 쓸 접지 정보가 비어버린다.
-			const float AnchorZ = ActorLoc.Z - StandHeight;
-			const float RayUp   = ProbeUp   + std::max(0.0f, RotatedWorld.Z - AnchorZ);
-			const float RayDown = ProbeDown + std::max(0.0f, AnchorZ - RotatedWorld.Z);
-
-			FHitResult Hit;
-			if (!TraceGroundAt(RotatedWorld, AnchorZ, RayUp, RayDown, Hit))
-			{
-				continue;   // 발밑이 정말로 비었다 — 높이 결정에 참여하지 않는다.
-			}
-			Contact.bHit         = true;
-			Contact.GroundPoint  = Hit.WorldHitLocation;
-			Contact.GroundNormal = GroundNormal(Hit);
-			Contact.Delta        = Contact.GroundPoint.Z - RotatedWorld.Z;   // + 면 발이 지형에 파묻힘
-
-			// '가장 낮은 접촉' 기준 — 어떤 발도 공중에 뜨지 않는 최소 높이 (단, 애초에 닿을 지면이 없는 발은 예외)
-			Target  = bAnyHit ? std::min(Target, Contact.Delta) : Contact.Delta;
-			bAnyHit = true;
-		}
-
-		if (!bAnyHit || !bSolveBodyHeight)
-		{
-			Target = 0.0f;   // 밟을 게 하나도 없거나 기능을 껐으면 1차 평면 높이 그대로.
-		}
-		Target = std::clamp(Target, -MaxBodyHeightOffset, MaxBodyHeightOffset);
-	}
-
-	BodyHeightZ += (Target - BodyHeightZ) * DampAlpha(DeltaTime, bActive ? BodyHeightSpeed : AirLevelSpeed);
-	if (std::fabs(BodyHeightZ) < 1.e-4f)
-	{
-		BodyHeightZ = 0.0f;
-	}
-}
-
 void UHorseMovementComponent::ApplyBodyTiltToMesh()
 {
 	USkeletalMeshComponent* MeshComp = Mesh.Get();
@@ -879,11 +829,12 @@ void UHorseMovementComponent::ApplyBodyTiltToMesh()
 
 void UHorseMovementComponent::EnterFalling(bool bFromJump)
 {
-	MoveMode     = EHorseMoveMode::Falling;
-	AirTime      = 0.0f;
-	StuckTime    = 0.0f;
-	bSteepGround = false;
-	bSkidding    = false;   // skid 관성은 Velocity 로 넘겨져 ballistic 으로 이어진다.
+	MoveMode      = EHorseMoveMode::Falling;
+	AirTime       = 0.0f;
+	StuckTime     = 0.0f;
+	bSteepGround  = false;
+	bEdgeSlipping = false;   // 이미 떨어졌으니 실족 밀기는 끝.
+	bSkidding     = false;   // skid 관성은 Velocity 로 넘겨져 ballistic 으로 이어진다.
 	bCollapseRequested = false;
 	if (!bFromJump)
 	{
@@ -1409,11 +1360,10 @@ void UHorseMovementComponent::DrawGroundProbeDebug(const FVector& PivotLoc, cons
 		DrawDebugSphere(World, FVector(ComXY.X, ComXY.Y, FootZ - Down + Radius), Radius, 16, Red);
 	}
 
-	// (2) 앞다리 ray 2개.
-	const FVector FrontMid  = PivotLoc + Forward * FrontProbeForward;
-	const FVector Probes[2] = { FrontMid - Right * FrontProbeHalfWidth, FrontMid + Right * FrontProbeHalfWidth };
-	const bool    Hits[2]   = { Sample.bFrontLeftHit, Sample.bFrontRightHit };
-	const FVector Points[2] = { Sample.FrontLeftPoint, Sample.FrontRightPoint };
+	// (2) 앞발/뒷발 ray. 좌우로는 벌리지 않는다(roll 미계산).
+	const FVector Probes[2] = { PivotLoc + Forward * FrontProbeForward, PivotLoc - Forward * RearFootBack };
+	const bool    Hits[2]   = { Sample.bFrontHit, Sample.bRearHit };
+	const FVector Points[2] = { Sample.FrontPoint, Sample.RearPoint };
 	for (int i = 0; i < 2; ++i)
 	{
 		const FVector Start = FVector(Probes[i].X, Probes[i].Y, FootZ + Up);
@@ -1425,13 +1375,10 @@ void UHorseMovementComponent::DrawGroundProbeDebug(const FVector& PivotLoc, cons
 		}
 	}
 
-	// (3) 접점 3개를 잇는 삼각형 = 기울기 계산에 실제로 쓰인 평면. 흰색.
-	if (Sample.bCenterHit && Sample.GetFrontHitCount() == 2)
+	// (3) 앞뒤 접점을 잇는 선 = pitch 계산에 실제로 쓰인 기준. 흰색.
+	if (Sample.bFrontHit && Sample.bRearHit)
 	{
-		const FColor White(255, 255, 255);
-		DrawDebugLine(World, Sample.CenterPoint,    Sample.FrontLeftPoint,  White);
-		DrawDebugLine(World, Sample.FrontLeftPoint, Sample.FrontRightPoint, White);
-		DrawDebugLine(World, Sample.FrontRightPoint, Sample.CenterPoint,    White);
+		DrawDebugLine(World, Sample.RearPoint, Sample.FrontPoint, FColor(255, 255, 255));
 	}
 
 	// (4) 회전 pivot — 이 점이 지면 위에 얹혀 있어야 기울기가 변할 때 발이 안 쓸린다. 노란 구.
@@ -1461,26 +1408,7 @@ void UHorseMovementComponent::DrawGroundProbeDebug(const FVector& PivotLoc, cons
 		}
 	}
 
-	// (6) 2차 패스 — 기울기 적용된 발 위치(주황)와 그 발밑 지면 접점(노랑) 사이를 잇는다.
-	//     선 길이가 곧 그 발의 Delta 이고, 그중 가장 긴(위로 향한) 것이 몸통 높이 보정량이 된다.
-	{
-		const FColor FootColor(255, 140, 0);
-		const FColor GroundColor(255, 230, 60);
-		for (int i = 0; i < HorseFootCount; ++i)
-		{
-			const FHorseFootContact& C = FootContacts[i];
-			// 실제로 화면에 보이는 발 위치는 높이 보정이 적용된 뒤다.
-			const FVector Shown = C.FootWorld + FVector(0.0f, 0.0f, BodyHeightZ);
-			DrawDebugPoint(World, Shown, 0.07f, FootColor);
-			if (C.bHit)
-			{
-				DrawDebugLine(World, Shown, C.GroundPoint, GroundColor);
-				DrawDebugPoint(World, C.GroundPoint, 0.07f, GroundColor);
-			}
-		}
-	}
-
-	// (7) 목표 up 벡터(클램프 후) — 파란 선.
+	// (6) 목표 up 벡터(클램프 후) — 파란 선.
 	const FVector UpWorld = Forward * Sample.LocalTiltUp.X + Right * Sample.LocalTiltUp.Y
 		+ FVector(0.0f, 0.0f, Sample.LocalTiltUp.Z);
 	DrawDebugLine(World, PivotWorld, PivotWorld + UpWorld * 1.5f, PlaneColor);
@@ -1526,12 +1454,11 @@ void UHorseMovementComponent::Serialize(FArchive& Ar)
 	Ar << FrontProbeHalfWidth;
 	Ar << ProbeUp;
 	Ar << ProbeDown;
-	Ar << bLoseGroundOnAnyFrontMiss;
 	Ar << RearFootBack;
+	Ar << EdgeSlipSpeed;
 	// ── 몸통 기울기 ──
 	Ar << bAlignBodyToGround;
 	Ar << MaxBodyPitch;
-	Ar << MaxBodyRoll;
 	Ar << BodyAlignSpeed;
 	Ar << AirLevelSpeed;
 	Ar << TiltPivotForward;

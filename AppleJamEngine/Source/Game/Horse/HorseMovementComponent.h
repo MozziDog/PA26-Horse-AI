@@ -40,37 +40,39 @@ enum class EHorseMoveMode : uint8
 	            // 접지 상실로 진입한 경우엔 고속 강제 낙마 / 끼임 탈출 규칙이 함께 돈다.
 };
 
-// 한 프레임의 지면 표본 — 접지점 3개(무게중심 sphere sweep + 앞다리 좌/우 raycast).
+// 한 프레임의 지면 표본 — probe 3개(무게중심 sphere sweep + 앞발/뒷발 중앙 raycast).
 // 접지점 위치는 actor 로컬(yaw 만 반영된 프레임) 기준 offset 으로 정의된다.
+//
+// 세 probe 의 역할이 서로 다르다:
+//   Center — 접지 판정 전담("밟을 게 있는가"). 기울기에는 관여하지 않는다.
+//   Front/Rear — 몸통 기울기(pitch) 전담. 접지 판정에는 관여하지 않는다.
+// 좌/우 probe 가 없는 건 의도된 것 — roll 은 계산하지 않는다(아래 PitchSlope 주석 참고).
 struct FHorseGroundSample
 {
-	bool  bCenterHit     = false;   // 무게중심 아래 sphere sweep 성공 = "밟을 게 있다" (= 접지 판정)
-	bool  bFrontLeftHit  = false;
-	bool  bFrontRightHit = false;
+	bool  bCenterHit = false;   // 무게중심 아래 sphere sweep 성공 = "밟을 게 있다" (= 접지 판정)
+	bool  bFrontHit  = false;   // 앞발 중앙. 빗나가면 = 앞이 낭떠러지 → 실족(EdgeSlipSpeed)
+	bool  bRearHit   = false;   // 뒷발 중앙
 
-	// 각 probe 의 접점(world). 이 3점이 곧 몸통 기울기 평면이다.
-	FVector CenterPoint    = FVector(0.0f, 0.0f, 0.0f);
-	FVector FrontLeftPoint = FVector(0.0f, 0.0f, 0.0f);
-	FVector FrontRightPoint= FVector(0.0f, 0.0f, 0.0f);
+	// 각 probe 의 접점(world). Front/Rear 를 잇는 선이 곧 몸통 기울기의 기준이다.
+	FVector CenterPoint = FVector(0.0f, 0.0f, 0.0f);
+	FVector FrontPoint  = FVector(0.0f, 0.0f, 0.0f);
+	FVector RearPoint   = FVector(0.0f, 0.0f, 0.0f);
 	// 무게중심 접점의 면 노멀. 보행 가능/불가(Sliding) 판정은 추정 평면이 아니라 이걸로 한다.
-	FVector CenterNormal   = FVector(0.0f, 0.0f, 1.0f);
+	FVector CenterNormal = FVector(0.0f, 0.0f, 1.0f);
 
-	// 3점 평면의 기울기(actor 로컬).
-	//   PitchSlope: +X(전방) 방향 기울기. + 면 오르막.
-	//   RollSlope : +Y(우측) 방향 기울기. + 면 오른쪽이 높음.
+	// 앞뒤 접점을 잇는 선의 기울기(actor 로컬). +X(전방) 방향, + 면 오르막.
+	// roll 은 일부러 계산하지 않는다 — 말은 좌우 발 간격이 좁아서 좌/우 probe 로 roll 을 뽑으면
+	// 단차를 비스듬히 내려올 때 한쪽 발이 먼저 떨어지며 몸이 크게 요동친다. 항상 위를 보게 고정한다.
 	float PitchSlope = 0.0f;
-	float RollSlope  = 0.0f;
-	// 위 두 기울기로 만든 평면 노멀(actor 로컬) = 몸통 up 목표 방향의 원본.
+	// PitchSlope 로 만든 평면 노멀(actor 로컬, roll=0) = 몸통 up 목표 방향의 원본.
 	FVector LocalUp = FVector(0.0f, 0.0f, 1.0f);
-	// MaxBodyPitch / MaxBodyRoll 로만 잘라낸 노멀 — 실제 몸통 기울기 목표.
+	// MaxBodyPitch 로 잘라낸 노멀 — 실제 몸통 기울기 목표.
 	FVector LocalTiltUp = FVector(0.0f, 0.0f, 1.0f);
 
 	// 발이 놓일 지면 높이(world Z) — '기울기 pivot 의 XY 위치' 에서의 추정 평면 높이.
 	// 회전 pivot 과 Z 스냅 기준이 같은 점이어야 기울기가 바뀔 때 발이 지면을 뚫거나 뜨지 않는다.
 	float SupportZ     = 0.0f;
 	bool  bHasSupportZ = false;
-
-	int GetFrontHitCount() const { return (bFrontLeftHit ? 1 : 0) + (bFrontRightHit ? 1 : 0); }
 };
 
 // 2차 raycast 결과 — 1차에서 구한 기울기를 적용한 자세에서 각 발이 실제로 어디에 닿는지.
@@ -128,12 +130,6 @@ public:
 	// 2차 패스가 적용한 몸통 높이 보정(m)
 	UFUNCTION(Pure, Category="HorseMovement")
 	float   GetBodyHeightOffset() const { return BodyHeightZ; }
-	// 발마다의 접지 정보(0=앞왼, 1=앞오른, 2=뒤왼, 3=뒤오른). 다리 IK 가 쓸 자리.
-	// 반환 transform 은 높이 보정 '전' 기준이라, IK 에서 쓸 땐 GetBodyHeightOffset() 을 더해서 비교한다.
-	const FHorseFootContact& GetFootContact(int Index) const
-	{
-		return FootContacts[(Index >= 0 && Index < HorseFootCount) ? Index : 0];
-	}
 
 	// 점프 시작 요청
 	// 도움닫기 + 점프 애니메이션을 시작한다. 실제 이륙은 AnimNotify_HorseJump → NotifyJumpTakeoff() 가 담당
@@ -197,9 +193,10 @@ public:
 	UPROPERTY(Edit, Save, Category="HorseMovement|Ground", DisplayName="Support Sphere Forward", Min=-3.0f, Max=3.0f, Speed=0.01f)
 	float SupportSphereForward = 0.0f; // m — actor pivot 기준 전방 offset. 실제 무게중심(가슴 쪽)에 맞춘다.
 	UPROPERTY(Edit, Save, Category="HorseMovement|Ground", DisplayName="Front Probe Forward", Min=0.0f, Max=5.0f, Speed=0.01f)
-	float FrontProbeForward = 0.45f;   // m — 앞다리 raycast 지점의 전방 offset(actor pivot 기준)
+	float FrontProbeForward = 0.45f;   // m — 앞발 raycast 지점의 전방 offset(actor pivot 기준). 좌우 중앙 1개뿐.
 	UPROPERTY(Edit, Save, Category="HorseMovement|Ground", DisplayName="Front Probe Half Width", Min=0.0f, Max=2.0f, Speed=0.01f)
-	float FrontProbeHalfWidth = 0.15f; // m — 좌/우 앞다리 간격의 절반. roll 산출의 기준 거리.
+	float FrontProbeHalfWidth = 0.15f; // m — 좌/우 발 간격의 절반. 기울기 산출에는 쓰지 않고(roll 미계산)
+	                                   // 2차 패스의 발 4곳 위치 = 다리 IK 타겟 배치에만 쓴다.
 
 	// 세 probe 가 공유하는 수직 탐색 범위(발 평면 기준).
 	UPROPERTY(Edit, Save, Category="HorseMovement|Ground", DisplayName="Probe Up", Min=0.0f, Max=5.0f, Speed=0.01f)
@@ -209,21 +206,26 @@ public:
 	UPROPERTY(Edit, Save, Category="HorseMovement|Ground", DisplayName="Probe Down", Min=0.0f, Max=5.0f, Speed=0.01f)
 	float ProbeDown = 1.00f;           // m — 발 높이 아래로 지면을 찾는 최대 깊이. 이보다 깊으면 '비었다'.
 
-	UPROPERTY(Edit, Save, Category="HorseMovement|Ground", DisplayName="Lose Ground On Any Front Miss")
-	bool  bLoseGroundOnAnyFrontMiss = false;  // true = 한쪽만 빗나가도 접지 상실(원안 그대로), false = 양쪽 다 빗나가야.
-
-	// 2차(높이) raycast 의 뒷발 위치. 앞발은 FrontProbeForward / FrontProbeHalfWidth 를 그대로 쓴다.
-	// 뒷발은 접지 판정과 기울기에는 관여하지 않는다 — 뒷발이 떠도 접지 유지라는 원안 규칙 그대로.
+	// 뒷발 probe 위치. 앞발(FrontProbeForward)과 짝을 이뤄 몸통 pitch 를 만든다.
+	// 2차(높이) raycast 의 뒷발 위치이기도 하다.
+	// 접지 판정에는 관여하지 않는다 — 앞뒤 발이 다 떠도 무게중심만 지면 위면 접지 유지.
 	UPROPERTY(Edit, Save, Category="HorseMovement|Ground", DisplayName="Rear Foot Back", Min=0.0f, Max=5.0f, Speed=0.01f)
 	float RearFootBack = 0.65f;        // m — actor pivot 기준 뒷발 후방 offset
+
+	// 무게중심은 지면 위인데 앞발 probe 가 허공인 상태 = 낭떠러지에 앞발을 걸친 자세.
+	// 이때 전방으로 천천히 밀어 결국 무게중심까지 넘어가 떨어지게 만든다(실족).
+	// 접지를 즉시 끊지 않는 이유: 무게중심 sphere 는 아직 지면을 잡고 있어서, 끊으면 착지 판정이
+	// 곧바로 접지를 되살려 Grounded/Falling 이 매 frame 발진한다.
+	// 0 이면 앞발이 허공이어도 그 자리에 계속 걸쳐 있는다.
+	UPROPERTY(Edit, Save, Category="HorseMovement|Ground", DisplayName="Edge Slip Speed", Min=0.0f, Max=5.0f, Speed=0.01f)
+	float EdgeSlipSpeed = 0.5f;        // m/s — 조작으로 물러설 여지를 주려면 보행 속도보다 충분히 느려야 한다.
 
 	// ── 몸통 기울기(지면 정렬) ──
 	UPROPERTY(Edit, Save, Category="HorseMovement|BodyTilt", DisplayName="Align Body To Ground")
 	bool  bAlignBodyToGround = true;
 	UPROPERTY(Edit, Save, Category="HorseMovement|BodyTilt", DisplayName="Max Body Pitch", Min=0.0f, Max=89.0f, Speed=0.5f)
 	float MaxBodyPitch = 60.0f;        // deg — 종방향 기울기 한계(+오르막). 발산 방지용 안전 클램프.
-	UPROPERTY(Edit, Save, Category="HorseMovement|BodyTilt", DisplayName="Max Body Roll", Min=0.0f, Max=89.0f, Speed=0.5f)
-	float MaxBodyRoll = 45.0f;         // deg — 횡방향 기울기 한계
+	                                   // roll 은 항상 0 이라 대응하는 한계값이 없다(ClampTiltUp).
 	UPROPERTY(Edit, Save, Category="HorseMovement|BodyTilt", DisplayName="Ground Align Speed", Min=0.1f, Max=60.0f, Speed=0.1f)
 	float BodyAlignSpeed = 10.0f;      // 1/s — 접지 중 목표 기울기로 수렴하는 지수 감쇠율
 	UPROPERTY(Edit, Save, Category="HorseMovement|BodyTilt", DisplayName="Air Level Speed", Min=0.1f, Max=60.0f, Speed=0.1f)
@@ -290,18 +292,15 @@ protected:
 	bool ProbeCenterOfMass(const FVector& PivotLoc, FHitResult& OutHit) const;
 	// world 지면 노멀 → actor 로컬(yaw 만 반영된 프레임) 노멀.
 	FVector LocalizeGroundNormal(const FVector& WorldNormal) const;
-	// 로컬 노멀을 MaxBodyPitch / MaxBodyRoll 한계로 잘라 몸통 기울기 목표로 만든다.
+	// 로컬 노멀에서 roll 을 버리고 pitch 만 MaxBodyPitch 한계로 잘라 몸통 기울기 목표로 만든다.
 	FVector ClampTiltUp(const FVector& LocalUp) const;
-	// sphere overlap + 3점 raycast 를 모아 한 프레임의 지면 표본을 만든다.
-	// 반환값 = 이 표본으로 '접지 상태' 를 유지할 수 있는가.
+	// 무게중심 sphere sweep + 앞발/뒷발 raycast 를 모아 한 프레임의 지면 표본을 만든다.
+	// 반환값 = 이 표본으로 '접지 상태' 를 유지할 수 있는가 (= 무게중심 sphere 가 지면을 잡았는가).
+	// 앞발이 허공인지(Sample.bFrontHit)는 접지가 아니라 실족 처리로 이어진다.
 	bool SampleGround(const FVector& PivotLoc, FHorseGroundSample& OutSample) const;
 
 	// 표본의 LocalUp 으로 목표 기울기를 만들어 BodyTilt 를 수렴시킨다. bGrounded=false 면 수평으로 복귀.
 	void UpdateBodyTilt(float DeltaTime, const FHorseGroundSample& Sample, bool bGrounded);
-	// 2차 패스 — 기울기를 적용한 실제 발 위치 4곳에서 다시 아래로 raycast 해서
-	// '어떤 발도 지형을 파고들지 않는 최소 높이'(= 가장 높은 접촉)를 BodyHeightZ 로 수렴시킨다.
-	// 접촉 정보는 FootContacts 에 남겨 두고 나중에 다리 IK 가 그대로 쓴다.
-	void SolveBodyHeight(float DeltaTime, const FVector& ActorLoc, bool bGrounded);
 	// BodyTilt / BodyHeightZ 를 mesh 의 relative transform 에 반영(TiltPivot 기준 회전).
 	// root 는 건드리지 않는다 — root 를 기울이면 XY 평면 가정의 이동/스냅/sweep 이 전부 깨진다.
 	void ApplyBodyTiltToMesh();
@@ -385,7 +384,6 @@ protected:
 	// ── 지면 정렬 상태 ──
 	FQuat   BodyTilt        = FQuat(0.0f, 0.0f, 0.0f, 1.0f);   // 1차 결과 — actor 로컬(yaw 제외) 몸통 기울기
 	float   BodyHeightZ     = 0.0f;                            // 2차 결과 — mesh local Z 보정(m)
-	FHorseFootContact FootContacts[HorseFootCount];            // 2차 raycast 결과(IK 용으로도 보관)
 	FQuat   LastAppliedTilt = FQuat(0.0f, 0.0f, 0.0f, 1.0f);   // 마지막으로 mesh 에 써넣은 값(중복 write 방지)
 	float   LastAppliedHeight = 0.0f;
 	bool    bTiltApplied    = false;
@@ -394,6 +392,9 @@ protected:
 	bool    bMeshBaseCached = false;
 	// 직전 표본이 '보행 불가 경사' 였는지. 실제 Sliding 이행은 다음 이동이 발생하는 frame 에 한다.
 	bool    bSteepGround    = false;
+	// 직전 표본에서 앞발 probe 가 허공이었는지 = 낭떠러지에 앞발을 걸친 상태.
+	// bSteepGround 와 같은 규약으로, 실제 실족 밀기는 다음 frame 이동에 얹는다.
+	bool    bEdgeSlipping   = false;
 
 	// ── Falling 상태 관련 ──
 	FVector LastInputDirXY  = FVector(0.0f, 0.0f, 0.0f);   // 마지막 유효 조작 방향(수평, 정규화)
