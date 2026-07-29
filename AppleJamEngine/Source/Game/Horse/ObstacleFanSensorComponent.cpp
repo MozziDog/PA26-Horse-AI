@@ -43,14 +43,12 @@ void UObstacleFanSensorComponent::TickComponent(float DeltaTime, ELevelTick Tick
 		return;
 	}
 
-	// 부채꼴 기준: 소유 액터 forward(수평). arbiter 가 각도를 해석하는 축과 동일해야 한다.
-	FVector Forward = Owner->GetActorForward();
-	Forward.Z = 0.0f;
+	// 부채꼴 기준: Component forward. arbiter 가 각도를 해석하는 축과 동일해야 한다.
+	FVector Forward = GetForwardVector();
 	if (Forward.IsNearlyZero())
 	{
 		return;
 	}
-	Forward = Forward.Normalized();
 
 	const FVector Origin = GetWorldLocation();
 
@@ -106,7 +104,7 @@ void UObstacleFanSensorComponent::TickComponent(float DeltaTime, ELevelTick Tick
 void UObstacleFanSensorComponent::ContributeSelectedVisuals(FScene& Scene) const
 {
 	FVector RayOrigin = GetWorldLocation();
-	FVector Forward = Owner->GetActorForward();
+	FVector Forward = GetForwardVector();
 	// ── 스티어링 판단용 부채꼴 sphere sweep 센서 ── 끝점에 BodyRadius sphere 로 폭을 표시.
 	for (int i = 0; i < HorseBBKeys::ObsFanCount; i++)
 	{

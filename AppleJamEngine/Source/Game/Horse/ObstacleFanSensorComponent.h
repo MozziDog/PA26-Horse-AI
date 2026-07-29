@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "Component/SceneComponent.h"
 #include "Component/AI/BlackboardComponent.h"
@@ -13,7 +13,7 @@
 // sphere sweep한 값 재사용하지 않고 별개의 ray 2개 사용 (sphere 사용하면 반지름만큼 편향 발생
 // 
 // 소비: UHorseLocomotionComponent 의 context-steering
-// NOTE: 현재는 WorldStatic 대상만. 방향은 actor forward 기준.
+// NOTE: 현재는 WorldStatic 대상만. 방향은 Component forward 기준.
 UCLASS()
 class UObstacleFanSensorComponent : public USceneComponent
 {
