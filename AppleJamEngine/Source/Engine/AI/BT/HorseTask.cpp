@@ -2,7 +2,7 @@
 
 #include "AI/BT/BTBehaviorRegistry.h"
 #include "AI/Blackboard.h"
-#include "Component/Movement/HorseLocomotionComponent.h"   // EHorseGait
+#include "Game/Horse/HorseLocomotionComponent.h"   // EHorseGait
 #include "GameFramework/AActor.h"
 #include "Runtime/EngineInitHooks.h"
 

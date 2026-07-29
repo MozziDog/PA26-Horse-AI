@@ -50,6 +50,11 @@ public:
 	UFUNCTION(Pure, Category="Horse|Ragdoll Test")
 	bool IsRagdolling() const { return Phase != EHorseRagdollTestPhase::Idle; }
 
+	// 외부(강제 낙마 등)에서 래그돌을 켜고 끄는 진입점. 프로퍼티 체크박스와 같은 플래그를 건드리므로
+	// 다음 tick 에서 EnterRagdoll / BeginRecover 가 평소대로 돌아간다.
+	UFUNCTION(Callable, Category="Horse|Ragdoll Test")
+	void RequestRagdoll(bool bEnable) { bRagdollEnabled = bEnable; }
+
 protected:
 	void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction& ThisTickFunction) override;
 
