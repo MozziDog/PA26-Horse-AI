@@ -40,13 +40,9 @@ enum class EHorseMoveMode : uint8
 	            // 접지 상실로 진입한 경우엔 고속 강제 낙마 / 끼임 탈출 규칙이 함께 돈다.
 };
 
-// 한 프레임의 지면 표본 — probe 3개(무게중심 sphere sweep + 앞발/뒷발 중앙 raycast).
+// 현재 프레임의 지면 샘플링 데이터
 // 접지점 위치는 actor 로컬(yaw 만 반영된 프레임) 기준 offset 으로 정의된다.
-//
-// 세 probe 의 역할이 서로 다르다:
-//   Center — 접지 판정 전담("밟을 게 있는가"). 기울기에는 관여하지 않는다.
-//   Front/Rear — 몸통 기울기(pitch) 전담. 접지 판정에는 관여하지 않는다.
-// 좌/우 probe 가 없는 건 의도된 것 — roll 은 계산하지 않는다(아래 PitchSlope 주석 참고).
+// roll은 계산하지 않는다 → 좌/우 probe 따로 두지 않음
 struct FHorseGroundSample
 {
 	bool  bCenterHit = false;   // 무게중심 아래 sphere sweep 성공 = "밟을 게 있다" (= 접지 판정)
@@ -60,9 +56,7 @@ struct FHorseGroundSample
 	// 무게중심 접점의 면 노멀. 보행 가능/불가(Sliding) 판정은 추정 평면이 아니라 이걸로 한다.
 	FVector CenterNormal = FVector(0.0f, 0.0f, 1.0f);
 
-	// 앞뒤 접점을 잇는 선의 기울기(actor 로컬). +X(전방) 방향, + 면 오르막.
-	// roll 은 일부러 계산하지 않는다 — 말은 좌우 발 간격이 좁아서 좌/우 probe 로 roll 을 뽑으면
-	// 단차를 비스듬히 내려올 때 한쪽 발이 먼저 떨어지며 몸이 크게 요동친다. 항상 위를 보게 고정한다.
+	// 앞뒤 접점을 잇는 선의 기울기 (actor forward 방향, 클 수록 오르막)
 	float PitchSlope = 0.0f;
 	// PitchSlope 로 만든 평면 노멀(actor 로컬, roll=0) = 몸통 up 목표 방향의 원본.
 	FVector LocalUp = FVector(0.0f, 0.0f, 1.0f);
@@ -75,19 +69,36 @@ struct FHorseGroundSample
 	bool  bHasSupportZ = false;
 };
 
-// 2차 raycast 결과 — 1차에서 구한 기울기를 적용한 자세에서 각 발이 실제로 어디에 닿는지.
-// 몸통 높이(mesh local Z) 결정에 쓰고, 다리 IK 를 붙일 때 그대로 타겟으로 재사용한다.
-struct FHorseFootContact
+// 접지 계산이 쓰는 기준 프레임 — actor pivot 에서 yaw 만 반영한 축과 발 평면 높이.
+// 지면 probe/기울기 계산이 전부 이 프레임 위에서 돌아서, 함수마다 축을 다시 뽑지 않으려고 묶어 둔다.
+struct FHorseLocalFrame
 {
-	bool    bHit         = false;
-	FVector FootWorld    = FVector(0.0f, 0.0f, 0.0f);   // 기울기 적용된 발 위치(높이 보정 전, world)
-	FVector GroundPoint  = FVector(0.0f, 0.0f, 0.0f);   // 그 발 바로 아래 지면 접점(world)
-	FVector GroundNormal = FVector(0.0f, 0.0f, 1.0f);
-	float   Delta        = 0.0f;   // GroundPoint.Z - FootWorld.Z. + 면 발이 지면 아래로 파묻힌 상태.
+	FVector Origin  = FVector(0.0f, 0.0f, 0.0f);   // actor pivot(world)
+	FVector Forward = FVector(1.0f, 0.0f, 0.0f);   // 수평 전방(단위)
+	FVector Right   = FVector(0.0f, 1.0f, 0.0f);   // 수평 우측(단위)
+	float   FootZ   = 0.0f;                        // 발 평면 높이(world Z) = Origin.Z - StandHeight
+
+	// world 점 → (전방, 우측, 발 평면 대비 높이). Z 기준만 Origin 이 아니라 FootZ 인 점에 주의.
+	FVector ToLocal(const FVector& World) const
+	{
+		const FVector D = World - Origin;
+		return FVector(D.Dot(Forward), D.Dot(Right), World.Z - FootZ);
+	}
+	// pivot 기준 (전방, 우측, 높이) offset → world. 이쪽 Z 는 Origin 기준이다(root 로컬과 같은 규약).
+	FVector OffsetToWorld(const FVector& RootLocal) const
+	{
+		return Origin + Forward * RootLocal.X + Right * RootLocal.Y + FVector(0.0f, 0.0f, RootLocal.Z);
+	}
 };
 
-// 발 순서: 앞왼, 앞오른, 뒤왼, 뒤오른
-static constexpr int HorseFootCount = 4;
+// 몸통 콜라이더의 world 스냅샷. 에디터 시각화와 어긋나지 않게 CapsuleComponent 값을 그대로 읽는다.
+struct FHorseTorsoCapsule
+{
+	float   Radius   = 0.0f;
+	float   HalfLen  = 0.0f;
+	FVector Center   = FVector(0.0f, 0.0f, 0.0f);
+	FQuat   Rotation = FQuat(0.0f, 0.0f, 0.0f, 1.0f);
+};
 
 UCLASS()
 class UHorseMovementComponent : public UPawnMovementComponent
@@ -127,9 +138,6 @@ public:
 	// 현재 몸통에 적용 중인 지면 정렬 기울기(actor 로컬, yaw 제외). 카메라/IK 등이 참고 가능.
 	UFUNCTION(Pure, Category="HorseMovement")
 	FVector GetBodyUpVector() const { return BodyTilt.GetUpVector(); }
-	// 2차 패스가 적용한 몸통 높이 보정(m)
-	UFUNCTION(Pure, Category="HorseMovement")
-	float   GetBodyHeightOffset() const { return BodyHeightZ; }
 
 	// 점프 시작 요청
 	// 도움닫기 + 점프 애니메이션을 시작한다. 실제 이륙은 AnimNotify_HorseJump → NotifyJumpTakeoff() 가 담당
@@ -195,8 +203,8 @@ public:
 	UPROPERTY(Edit, Save, Category="HorseMovement|Ground", DisplayName="Front Probe Forward", Min=0.0f, Max=5.0f, Speed=0.01f)
 	float FrontProbeForward = 0.45f;   // m — 앞발 raycast 지점의 전방 offset(actor pivot 기준). 좌우 중앙 1개뿐.
 	UPROPERTY(Edit, Save, Category="HorseMovement|Ground", DisplayName="Front Probe Half Width", Min=0.0f, Max=2.0f, Speed=0.01f)
-	float FrontProbeHalfWidth = 0.15f; // m — 좌/우 발 간격의 절반. 기울기 산출에는 쓰지 않고(roll 미계산)
-	                                   // 2차 패스의 발 4곳 위치 = 다리 IK 타겟 배치에만 쓴다.
+	float FrontProbeHalfWidth = 0.15f; // m — 좌/우 발 간격의 절반. probe 는 중앙 1줄만 쏘므로(roll 미계산)
+	                                   // 지금은 디버그 드로우 폭에만 쓰인다. 다리 IK 가 붙으면 타겟 간격이 될 값.
 
 	// 세 probe 가 공유하는 수직 탐색 범위(발 평면 기준).
 	UPROPERTY(Edit, Save, Category="HorseMovement|Ground", DisplayName="Probe Up", Min=0.0f, Max=5.0f, Speed=0.01f)
@@ -207,7 +215,6 @@ public:
 	float ProbeDown = 1.00f;           // m — 발 높이 아래로 지면을 찾는 최대 깊이. 이보다 깊으면 '비었다'.
 
 	// 뒷발 probe 위치. 앞발(FrontProbeForward)과 짝을 이뤄 몸통 pitch 를 만든다.
-	// 2차(높이) raycast 의 뒷발 위치이기도 하다.
 	// 접지 판정에는 관여하지 않는다 — 앞뒤 발이 다 떠도 무게중심만 지면 위면 접지 유지.
 	UPROPERTY(Edit, Save, Category="HorseMovement|Ground", DisplayName="Rear Foot Back", Min=0.0f, Max=5.0f, Speed=0.01f)
 	float RearFootBack = 0.65f;        // m — actor pivot 기준 뒷발 후방 offset
@@ -227,9 +234,7 @@ public:
 	float MaxBodyPitch = 60.0f;        // deg — 종방향 기울기 한계(+오르막). 발산 방지용 안전 클램프.
 	                                   // roll 은 항상 0 이라 대응하는 한계값이 없다(ClampTiltUp).
 	UPROPERTY(Edit, Save, Category="HorseMovement|BodyTilt", DisplayName="Ground Align Speed", Min=0.1f, Max=60.0f, Speed=0.1f)
-	float BodyAlignSpeed = 10.0f;      // 1/s — 접지 중 목표 기울기로 수렴하는 지수 감쇠율
-	UPROPERTY(Edit, Save, Category="HorseMovement|BodyTilt", DisplayName="Air Level Speed", Min=0.1f, Max=60.0f, Speed=0.1f)
-	float AirLevelSpeed = 3.0f;        // 1/s — 공중에서 수평으로 되돌아가는 속도
+	float BodyAlignSpeed = 3.0f;      // 1/s — 접지 중 목표 기울기로 수렴하는 지수 감쇠율
 
 	// 회전 중심은 '네 발이 만드는 접지면의 중앙, 지면 높이' 여야 한다.
 	// pivot 이 지면보다 h 만큼 위에 있으면 기울기가 Δθ 바뀔 때 발이 수평으로 h·Δθ 만큼 쓸린다(미끄러짐).
@@ -242,15 +247,6 @@ public:
 	UPROPERTY(Edit, Save, Category="HorseMovement|BodyTilt", DisplayName="Tilt Pivot Height", Min=-3.0f, Max=3.0f, Speed=0.01f)
 	float TiltPivotHeight = 0.0f;      // m — 발 평면(= actor pivot - StandHeight) 기준 추가 높이. 0 이 정답이고,
 	                                   // 일부러 위로 올려 미끄러짐이 생기는지 비교해볼 때만 건드린다.
-
-	// ── 2차: 몸통 높이(mesh local Z) ──
-	UPROPERTY(Edit, Save, Category="HorseMovement|BodyHeight", DisplayName="Solve Body Height")
-	bool  bSolveBodyHeight = true;     // 끄면 1차 평면 높이 그대로(2차 raycast 는 디버그용으로만 돈다).
-	UPROPERTY(Edit, Save, Category="HorseMovement|BodyHeight", DisplayName="Body Height Speed", Min=0.1f, Max=60.0f, Speed=0.1f)
-	float BodyHeightSpeed = 15.0f;     // 1/s — 높이 수렴 속도. 기울기보다 빨라야 발이 잠깐이라도 안 파고든다.
-	UPROPERTY(Edit, Save, Category="HorseMovement|BodyHeight", DisplayName="Max Body Height Offset", Min=0.0f, Max=3.0f, Speed=0.01f)
-	float MaxBodyHeightOffset = 1.00f; // m — mesh 가 캡슐에서 벗어날 수 있는 한계. 기하학적으로 이 이상 나올 일이
-	                                   // 거의 없어서 넉넉히 잡은 안전값이다(관찰을 막지 않도록).
 
 	// ── 물리 기반 이동 ───────────────────────────────────────────────────────
 	UPROPERTY(Edit, Save, Category="HorseMovement|Physics", DisplayName="Forced Dismount Speed", Min=0.0f, Max=60.0f, Speed=0.1f)
@@ -276,8 +272,18 @@ public:
 	bool  bDrawGroundProbes = false;   // 접지 sphere / 앞다리 ray / 추정 평면 디버그 드로우
 
 protected:
+	// ── 기본 질의 ────────────────────────────────────────────────────────────
 	FVector GetGravity() const;
+	// actor 의 수평 기저(전방/우측). Z 를 버리고 정규화하며, 퇴화 시 world 축으로 대체한다.
+	void GetPlanarBasis(FVector& OutForward, FVector& OutRight) const;
+	// 주어진 pivot 위치에서의 접지 계산용 기준 프레임.
+	FHorseLocalFrame MakeLocalFrame(const FVector& PivotLoc) const;
+	// 몸통 콜라이더의 world 스냅샷. 콜라이더가 없으면 false — 호출자는 몸통 충돌을 skip 한다.
+	bool GetTorsoCapsule(FHorseTorsoCapsule& OutTorso) const;
+	// mesh 의 AnimGraph 인스턴스(변수 set 대상). 없으면 nullptr.
+	UAnimGraphInstance* GetGraphInstance() const;
 
+	// ── 지면 trace ───────────────────────────────────────────────────────────
 	// 발 높이(= ActorLocation.Z - StandHeight) 기준 위아래로 지면 raycast. WorldStatic 만 지면 후보.
 	// NOTE: OutHit.Distance 는 pivot 이 아니라 위로 띄운 시작점 기준!!!
 	//       높이 판정에는 Distance 대신 WorldHitLocation.Z 를 발 높이와 비교해서 쓸 것.
@@ -286,28 +292,51 @@ protected:
 	bool TraceGroundAt(const FVector& ProbeXY, float FootZ, float Up, float Down, FHitResult& OutHit) const;
 	// 지면 노멀(면 노멀 우선, 없으면 shape 노멀, 그래도 없으면 +Z). 항상 정규화.
 	FVector GroundNormal(const FHitResult& Hit) const;
-
-	// 무게중심 수직 아래로 sphere 를 훑어 접점을 찾는다 = 접지 판정 + 기울기 평면의 뒤쪽 표본.
+	// 무게중심 수직 아래로 sphere 를 훑어 접점을 찾는다 = 접지 판정.
 	// raycast 가 아니라 sphere 인 이유는 바위 사이 좁은 틈에서 ray 가 틈으로 빠지지 않게 하기 위해서다.
 	bool ProbeCenterOfMass(const FVector& PivotLoc, FHitResult& OutHit) const;
+
+	// ── 지면 샘플링 ────────────────────────────────────────────────────────────
+	// 무게중심 sphere sweep + 앞발/뒷발 raycast 를 모아 한 프레임의 지면 표본을 만든다.
+	// 반환값 = 이 샘플로 '접지 상태' 를 유지할 수 있는가 (= 무게중심 sphere 가 지면을 잡았는가).
+	// 앞발이 허공인지(Sample.bFrontHit)는 접지가 아니라 실족 처리로 이어진다.
+	bool SampleGround(const FVector& PivotLoc, FHorseGroundSample& OutSample) const;
+	// probe 3발을 쏴서 접점/노멀만 채운다(기울기 계산 전).
+	void ProbeGroundContacts(const FHorseLocalFrame& Frame, FHorseGroundSample& OutSample) const;
+	// 접점 중 가장 앞/가장 뒤를 골라 로컬 좌표로 돌려준다. 하나도 없으면 false.
+	bool FindPitchAnchors(const FHorseGroundSample& Sample, const FHorseLocalFrame& Frame,
+		FVector& OutRearmost, FVector& OutFrontmost) const;
+	// 앞뒤 anchor 로 PitchSlope / LocalUp / LocalTiltUp / SupportZ 를 채운다.
+	void SolveGroundPitch(const FHorseLocalFrame& Frame, FHorseGroundSample& OutSample) const;
 	// world 지면 노멀 → actor 로컬(yaw 만 반영된 프레임) 노멀.
 	FVector LocalizeGroundNormal(const FVector& WorldNormal) const;
 	// 로컬 노멀에서 roll 을 버리고 pitch 만 MaxBodyPitch 한계로 잘라 몸통 기울기 목표로 만든다.
 	FVector ClampTiltUp(const FVector& LocalUp) const;
-	// 무게중심 sphere sweep + 앞발/뒷발 raycast 를 모아 한 프레임의 지면 표본을 만든다.
-	// 반환값 = 이 표본으로 '접지 상태' 를 유지할 수 있는가 (= 무게중심 sphere 가 지면을 잡았는가).
-	// 앞발이 허공인지(Sample.bFrontHit)는 접지가 아니라 실족 처리로 이어진다.
-	bool SampleGround(const FVector& PivotLoc, FHorseGroundSample& OutSample) const;
+	// 현재 지면 경사를 [-1,+1] InclineAngle 로. 부호: 오르막 +, 내리막 -. 크기: walkable 한계 대비.
+	// probe 표본이 있으면 종방향 기울기(PitchSlope)를, 없으면 지면 노멀 하나로 근사한다.
+	float ComputeInclineAngle(const FHitResult& Ground) const;
+	float ComputeInclineAngle(const FHorseGroundSample& Sample) const;
 
+	// ── 몸통 기울기 ──────────────────────────────────────────────────────────
 	// 표본의 LocalUp 으로 목표 기울기를 만들어 BodyTilt 를 수렴시킨다. bGrounded=false 면 수평으로 복귀.
-	void UpdateBodyTilt(float DeltaTime, const FHorseGroundSample& Sample, bool bGrounded);
-	// BodyTilt / BodyHeightZ 를 mesh 의 relative transform 에 반영(TiltPivot 기준 회전).
+	void UpdateBodyTilt(float DeltaTime, const FHorseGroundSample& Sample);
+	// BodyTilt 를 mesh 의 relative transform 에 반영(TiltPivot 기준 회전).
 	// root 는 건드리지 않는다 — root 를 기울이면 XY 평면 가정의 이동/스냅/sweep 이 전부 깨진다.
 	void ApplyBodyTiltToMesh();
 	// 기울기 회전 중심(root 로컬). Z 는 발 평면(= -StandHeight) 기준.
 	FVector GetTiltPivotLocal() const;
 	// BodyTilt 를 (전방기울기, 우측기울기) slope 쌍으로 되돌린다. 파고듦 계산용.
 	void GetBodyTiltSlopes(float& OutPitchSlope, float& OutRollSlope) const;
+
+	// ── 입력 → AnimGraph 상태 ────────────────────────────────────────────────
+	// pending 입력을 소비해 NormalizedSpeed / LateralSpeed / TurnRate / rearing pulse 를 만든다.
+	void UpdateMoveInput();
+	// 평행이동 입력 처리 — 선회 없이 종/횡 성분만.
+	void UpdateStrafeInput(const FVector& InForward, const FVector& InRight);
+	// 일반 보행 입력 처리 — 목표 속도 + 급정지/뒷발서기 게이팅 + 조향각.
+	void UpdateSteeringInput(const FVector& InDesired, const FVector& InForward);
+	// 이번 frame 계산한 AnimGraph 변수들을 mesh AnimInstance 에 push.
+	void PushAnimGraphVariables();
 
 	// mesh AnimInstance가 이번 frame 누적한 root motion 을 소비해서
 	// 이동은 OutWorldDelta 로 반환(모드별 처리는 호출자), yaw 는 여기서 곧바로 root 에 적용,
@@ -317,15 +346,38 @@ protected:
 	//       UAnimSequence의 옵션 (RootRotationLock, bExtractRootMotionZ) 참고
 	void ConsumeRootMotion(FVector& OutWorldDelta);
 
+	// ── 모드별 tick ──────────────────────────────────────────────────────────
 	void TickGrounded(float DeltaTime, const FVector& WorldDelta);
 	void TickSliding(float DeltaTime);
-	// '물리 기반 이동' tick — 중력 적분 + 착지 판정 + (접지 상실 진입 시) 낙마/끼임 규칙.
-	void TickFalling(float DeltaTime);
+	void TickFalling(float DeltaTime);	// 끼임 탈출도 Falling에서 처리함
 
+	// ── Grounded 세부 ────────────────────────────────────────────────────────
+	// 이번 frame 실제로 적용할 수평 이동량. root motion / skid 관성 중 하나를 고르고 실족 밀기를 얹는다.
+	FVector ConsumeGroundedMoveXY(float DeltaTime, const FVector& WorldDelta);
+	// 몸통 충돌(전진 sweep + 겹침 해소)을 거친 뒤의 위치. Velocity XY 리포팅도 여기서 한다.
+	FVector MoveTorsoXY(float DeltaTime, FVector Loc, const FVector& MoveXY);
+	// 표본 높이로 Z 스냅. step 범위를 벗어나면(낭떠러지) false — 호출자가 낙하로 넘긴다.
+	bool TrySnapToGround(const FHorseGroundSample& Sample, FVector& Loc);
+	// 접지 유지가 확정된 뒤의 상태 갱신 — 경사 이징, 몸통 기울기, 다음 frame 용 표식들.
+	void UpdateGroundedState(float DeltaTime, const FHorseGroundSample& Sample);
+	// 급경사에서 이동이 발생 → 미끄러짐 모드로.
+	void EnterSliding();
+
+	// ── Sliding / Falling 세부 ───────────────────────────────────────────────
+	// 중력의 경사면 접선 성분으로 가속한 뒤 마찰 감쇠.
+	void ApplySlideAcceleration(float DeltaTime, const FVector& GroundN);
+	// 미끄러짐 중의 경사/기울기 갱신 + 접선 투영 + 완경사 도달 시 보행 복귀.
+	void UpdateSlidingState(float DeltaTime, const FHitResult& Ground);
 	// 접지 상실 → Physics 모드 진입. bFromJump 면 의도한 점프라 낙마 규칙을 유예한다.
 	void EnterFalling(bool bFromJump);
+	// 착지 확정 — Z 스냅 + 공중 상태 리셋 + 경사에 따라 Grounded/Sliding 결정.
+	void Land(FVector Loc, float TargetZ, const FHorseGroundSample& Sample);
+
+	// ── 낙마 / 끼임 ──────────────────────────────────────────────────────────
 	// 고속 낙마 / 끼임 판정. Physics 모드에서만 호출.
 	void EvaluateDismountRules(float DeltaTime);
+	// 마지막 조작 방향으로 전혀 나아가지 못하는 상태인지(= 끼임 후보).
+	bool IsWedged(float Speed) const;
 	// 낙마 연출 위임 — HorseRagdollTestComponent 가 붙어 있으면 래그돌을 켠다. 켜졌으면 true.
 	bool TryTriggerRagdoll();
 	// 끼임 확정 — 몸통 충돌을 잠시 내리고 마지막 조작 방향으로 밀어낸다(+ 낙마).
@@ -333,28 +385,29 @@ protected:
 	void UpdateStuckEscape(float DeltaTime);
 	void EndStuckEscape();
 
-	// bWantJump 소비 — 상향 임펄스(JumpSpeed) + 즉시 Physics 전환 + 착지 오인 방지용 살짝 띄우기.
+	// bWantJump 소비 — 상향 임펄스(JumpSpeed) + 즉시 Falling 전환 + 착지 오인 방지용 살짝 띄우기.
 	// TickGrounded 가 접지 frame 에서만 호출한다(CharacterMovementComponent 의 launch 패턴).
 	void PerformJump();
 
+	// ── 몸통 충돌 ────────────────────────────────────────────────────────────
+	// NOTE: 아래 셋은 전부 캡슐의 '현재' world transform 을 기준으로 판정한다. 호출 시점에 actor 를
+	//       아직 옮기지 않았다면 그 위치가 곧 판정 위치다(반환값을 적용하는 건 호출자 몫).
 	// 이동하려는 방향에 장애물이 있는지 판단, 있다면 장애물에 겹치지 않을 만큼만 이동
-	FVector ResolveTorsoMove(const FVector& FromLoc, const FVector& DeltaXY);
-
+	FVector ResolveTorsoMove(const FVector& DeltaXY);
+	// 몸통 앞부분만 잘라낸 캡슐로 진행 방향 sweep. 엉덩이가 벽에 스쳤다고 전진이 막히지 않게 한다.
+	bool SweepTorsoFront(const FHorseTorsoCapsule& Torso, const FVector& DeltaXY, FHitResult& OutHit) const;
 	// 제자리 회전 등, 몸통이 장애물과 겹치는 상황 발생했을 때 수평방향으로 밀어내어 겹침 해소
 	// solve 횟수는 최대 MaxDenetrationIter까지만, 그 후에도 겹쳐있다면 겹쳐진대로 방치 (완전 분리 보장 X)
-	FVector DepenetrateTorso(const FVector& FromLoc);
+	FVector DepenetrateTorso();
+	// 겹침 1회분 해소량. 더 밀어낼 게 없으면 false 로 반복을 끝낸다.
+	bool SolveTorsoPenetration(const FHorseTorsoCapsule& Torso, const FVector& Center, FVector& OutStep) const;
 
-	// 현재 지면 경사를 [-1,+1] InclineAngle 로. 부호: 오르막 +, 내리막 -. 크기: walkable 한계 대비.
-	// probe 표본이 있으면 종방향 기울기(PitchSlope)를, 없으면 지면 노멀 하나로 근사한다.
-	float ComputeInclineAngle(const FHitResult& Ground) const;
-	float ComputeInclineAngle(const FHorseGroundSample& Sample) const;
-
-	// mesh 의 AnimGraph 인스턴스(변수 set 대상). 없으면 nullptr.
-	UAnimGraphInstance* GetGraphInstance() const;
-	// 이번 frame 계산한 AnimGraph 변수들을 mesh AnimInstance 에 push.
-	void PushAnimGraphVariables();
-
+	// ── 디버그 드로우 ────────────────────────────────────────────────────────
 	void DrawGroundProbeDebug(const FVector& PivotLoc, const FHorseGroundSample& Sample) const;
+	// probe 자체 — 무게중심 sphere, 앞뒤 ray, 그 둘을 잇는 pitch 기준선.
+	void DrawProbeDebug(const FHorseLocalFrame& Frame, const FHorseGroundSample& Sample) const;
+	// 기울기 결과 — 회전 pivot, 현재 적용 중인 발 평면, 목표 up 벡터.
+	void DrawBodyTiltDebug(const FHorseLocalFrame& Frame, const FHorseGroundSample& Sample) const;
 
 	FVector        Velocity = FVector(0.0f, 0.0f, 0.0f);   // Z=중력/점프, XY=root motion 파생 관성(리포팅·이륙 관성)
 	EHorseMoveMode MoveMode = EHorseMoveMode::Falling;     // 시작 시 지면 잡아야 해서 낙하
@@ -382,10 +435,8 @@ protected:
 	float StrafeLateral      = 0.0f;   // 횡방향 입력([-1,1], +우측)
 
 	// ── 지면 정렬 상태 ──
-	FQuat   BodyTilt        = FQuat(0.0f, 0.0f, 0.0f, 1.0f);   // 1차 결과 — actor 로컬(yaw 제외) 몸통 기울기
-	float   BodyHeightZ     = 0.0f;                            // 2차 결과 — mesh local Z 보정(m)
+	FQuat   BodyTilt        = FQuat(0.0f, 0.0f, 0.0f, 1.0f);   // actor 로컬(yaw 제외) 몸통 기울기
 	FQuat   LastAppliedTilt = FQuat(0.0f, 0.0f, 0.0f, 1.0f);   // 마지막으로 mesh 에 써넣은 값(중복 write 방지)
-	float   LastAppliedHeight = 0.0f;
 	bool    bTiltApplied    = false;
 	FQuat   MeshBaseRotation= FQuat(0.0f, 0.0f, 0.0f, 1.0f);   // BeginPlay 시점의 mesh relative rotation
 	FVector MeshBaseLocation= FVector(0.0f, 0.0f, 0.0f);   // BeginPlay 시점의 mesh relative location
