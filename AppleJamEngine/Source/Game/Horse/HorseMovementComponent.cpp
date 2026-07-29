@@ -381,7 +381,7 @@ FVector UHorseMovementComponent::MoveTorsoXY(float DeltaTime, FVector Loc, const
 
 	// 겹침 해소 — 제자리 회전이나 지형 자체의 움직임 등으로 몸통이 벽에 파고들면 MTD(최소이동거리)로 해소
 	// Velocity 에는 반영 X: 벽 밀기는 locomotion 속도가 아니므로 anim/rearing 을 오염시키면 안 됨.
-	const FVector Push = DepenetrateTorso();
+	const FVector Push = DepenetrateTorso(DeltaXY);
 	Loc.X += Push.X;
 	Loc.Y += Push.Y;
 	return Loc;
@@ -421,9 +421,7 @@ void UHorseMovementComponent::UpdateGroundedState(float DeltaTime, const FHorseG
 	UpdateBodyTilt(DeltaTime, Sample);
 
 	// 보행 불가 경사면 표식만 남긴다. 실제 Sliding 이행은 '다음 이동' frame 에서(TickGrounded 위쪽 가드).
-	// 판정 기준은 추정 평면이 아니라 '실제로 밟고 있는 면' 의 노멀 — 단차 앞에서 평면 기울기가
-	// 아무리 커도, 발밑이 평평하면 미끄러지지 않고 그냥 몸만 기울어야 한다.
-	bSteepGround = (Sample.CenterNormal.Z < WalkableSlopeZ);
+	bSteepGround = !IsWalkableSlope(Sample);
 	// 같은 규약으로 실족 표식도 남긴다 — 밀기는 다음 frame 이동에 얹힌다.
 	bEdgeSlipping = !Sample.bFrontHit;
 }
@@ -490,11 +488,11 @@ void UHorseMovementComponent::Land(FVector Loc, float TargetZ, const FHorseGroun
 	AirTime     = 0.0f;
 	StuckTime   = 0.0f;
 	bCollapseRequested = false;
-	// 급경사면에 착지하면 곧바로 미끄러짐. 기준은 추정 선이 아니라 실제로 밟은 면의 노멀 —
-	// TickGrounded 의 bSteepGround 와 같아야 착지 직후 판정이 엇갈리지 않는다.
-	MoveMode = (Sample.CenterNormal.Z < WalkableSlopeZ)
-		? EHorseMoveMode::Sliding
-		: EHorseMoveMode::Grounded;
+	// 급경사면에 착지하면 곧바로 미끄러짐. TickGrounded 의 bSteepGround 와 같은 기준이어야
+	// 착지 직후 판정이 엇갈리지 않는다.
+	MoveMode = IsWalkableSlope(Sample)
+		? EHorseMoveMode::Grounded
+		: EHorseMoveMode::Sliding;
 	bSteepGround  = false;   // 착지 판정에서 이미 결론이 났다.
 	bEdgeSlipping = !Sample.bFrontHit;   // 낭떠러지 턱에 착지했으면 곧바로 실족 밀기로 이어진다.
 }
@@ -552,7 +550,7 @@ void UHorseMovementComponent::UpdateSlidingState(float DeltaTime, const FHitResu
 	// 미끄러지는 중에도 몸통은 경사면을 따라 눕는다 — 표본이 없으니 지면 노멀 하나로 만든다.
 	FHorseGroundSample SlideSample;
 	SlideSample.LocalUp     = LocalizeGroundNormal(N);
-	SlideSample.LocalTiltUp = ClampTiltUp(SlideSample.LocalUp);
+	SlideSample.ClampedTiltUp = ClampTiltUp(SlideSample.LocalUp);
 	UpdateBodyTilt(DeltaTime, SlideSample);
 
 	// 속도를 지면 접선으로 투영(수직 성분 제거) — 표면을 따라 미끄러지게 유지.
@@ -617,6 +615,12 @@ bool UHorseMovementComponent::ProbeCenterOfMass(const FVector& PivotLoc, FHitRes
 		}
 	}
 	return true;
+}
+
+bool UHorseMovementComponent::IsWalkableSlope(const FHorseGroundSample& Sample) const
+{
+	// 기준은 앞뒤 probe 가 만든 지지선의 노멀(LocalUp). MaxBodyPitch 클램프 전 값이라 실제 지형 각도다.
+	return Sample.LocalUp.Z >= WalkableSlopeZ;
 }
 
 FVector UHorseMovementComponent::LocalizeGroundNormal(const FVector& WorldNormal) const
@@ -737,7 +741,7 @@ void UHorseMovementComponent::SolveGroundPitch(const FHorseLocalFrame& Frame, FH
 	FVector Frontmost(0.0f, 0.0f, 0.0f);
 	if (!FindPitchAnchors(OutSample, Frame, Rearmost, Frontmost))
 	{
-		OutSample.LocalTiltUp = ClampTiltUp(OutSample.LocalUp);
+		OutSample.ClampedTiltUp = ClampTiltUp(OutSample.LocalUp);
 		return;
 	}
 
@@ -753,7 +757,7 @@ void UHorseMovementComponent::SolveGroundPitch(const FHorseLocalFrame& Frame, FH
 		OutSample.PitchSlope = (N.Z > 1.e-3f) ? (-N.X / N.Z) : 0.0f;
 	}
 	OutSample.LocalUp     = FVector(-OutSample.PitchSlope, 0.0f, 1.0f).Normalized();
-	OutSample.LocalTiltUp = ClampTiltUp(OutSample.LocalUp);
+	OutSample.ClampedTiltUp = ClampTiltUp(OutSample.LocalUp);
 
 	// ── Z 스냅 높이 ──
 	// 회전 pivot 의 XY 위치에서의 선 높이. 회전 중심과 높이 기준이 같은 점이어야
@@ -777,7 +781,7 @@ void UHorseMovementComponent::UpdateBodyTilt(float DeltaTime, const FHorseGround
 	}
 
 	FQuat Target = IdentityQuat;
-	FVector Up = Sample.LocalTiltUp;
+	FVector Up = Sample.ClampedTiltUp;
 	Up = Up.IsNearlyZero() ? FVector(0.0f, 0.0f, 1.0f) : Up.Normalized();
 	if (Up.Z > 1.e-3f)
 	{
@@ -1309,7 +1313,7 @@ bool UHorseMovementComponent::SweepTorsoFront(const FHorseTorsoCapsule& Torso, c
 		ObjectTypeBit(ECollisionChannel::WorldStatic), Owner);
 }
 
-FVector UHorseMovementComponent::DepenetrateTorso()
+FVector UHorseMovementComponent::DepenetrateTorso(const FVector& PendingMoveXY)
 {
 	FVector Accum(0.0f, 0.0f, 0.0f);
 	// 끼임 탈출 중엔 밀어내기도 멈춘다 — 어차피 통과시켜서 빠져나오는 게 목적.
@@ -1323,8 +1327,10 @@ FVector UHorseMovementComponent::DepenetrateTorso()
 		return Accum;   // 콜라이더 없으면 skip.
 	}
 
+	// 캡슐은 root 의 자식이라 actor 가 PendingMoveXY 만큼 움직이면 같은 양만큼 따라온다.
+	// actor 반영은 호출자가 뒤에서 하므로, 여기서는 그 이동을 미리 얹은 위치에서 겹침을 푼다.
 	// solve 반복 계산
-	FVector Center = Torso.Center;
+	FVector Center = Torso.Center + PendingMoveXY;
 	for (int Iter = 0; Iter < MaxDenetrationIter; ++Iter)
 	{
 		FVector Step;
@@ -1472,8 +1478,8 @@ void UHorseMovementComponent::DrawBodyTiltDebug(const FHorseLocalFrame& Frame, c
 	}
 
 	// (6) 목표 up 벡터(클램프 후) — 파란 선.
-	const FVector UpWorld = Frame.Forward * Sample.LocalTiltUp.X + Frame.Right * Sample.LocalTiltUp.Y
-		+ FVector(0.0f, 0.0f, Sample.LocalTiltUp.Z);
+	const FVector UpWorld = Frame.Forward * Sample.ClampedTiltUp.X + Frame.Right * Sample.ClampedTiltUp.Y
+		+ FVector(0.0f, 0.0f, Sample.ClampedTiltUp.Z);
 	DrawDebugLine(World, PivotWorld, PivotWorld + UpWorld * 1.5f, PlaneColor);
 }
 

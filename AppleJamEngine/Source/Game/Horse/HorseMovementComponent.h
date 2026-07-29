@@ -53,15 +53,16 @@ struct FHorseGroundSample
 	FVector CenterPoint = FVector(0.0f, 0.0f, 0.0f);
 	FVector FrontPoint  = FVector(0.0f, 0.0f, 0.0f);
 	FVector RearPoint   = FVector(0.0f, 0.0f, 0.0f);
-	// 무게중심 접점의 면 노멀. 보행 가능/불가(Sliding) 판정은 추정 평면이 아니라 이걸로 한다.
+	// 무게중심 접점의 면 노멀. 앞뒤 probe 가 둘 다 비었을 때 pitch 를 근사하는 용도로만 쓴다.
+	// 보행 가능/불가(Sliding) 판정에는 쓰지 않는다 — IsWalkableSlope() 주석 참고.
 	FVector CenterNormal = FVector(0.0f, 0.0f, 1.0f);
 
 	// 앞뒤 접점을 잇는 선의 기울기 (actor forward 방향, 클 수록 오르막)
 	float PitchSlope = 0.0f;
-	// PitchSlope 로 만든 평면 노멀(actor 로컬, roll=0) = 몸통 up 목표 방향의 원본.
+	// PitchSlope로 만든 평면 노멀(actor 로컬, roll=0) = 몸통 up 목표 방향
 	FVector LocalUp = FVector(0.0f, 0.0f, 1.0f);
-	// MaxBodyPitch 로 잘라낸 노멀 — 실제 몸통 기울기 목표.
-	FVector LocalTiltUp = FVector(0.0f, 0.0f, 1.0f);
+	// MaxBodyPitch로 제한한 '위' 방향 — 실제 몸통 기울기 목표
+	FVector ClampedTiltUp = FVector(0.0f, 0.0f, 1.0f);
 
 	// 발이 놓일 지면 높이(world Z) — '기울기 pivot 의 XY 위치' 에서의 추정 평면 높이.
 	// 회전 pivot 과 Z 스냅 기준이 같은 점이어야 기울기가 바뀔 때 발이 지면을 뚫거나 뜨지 않는다.
@@ -306,8 +307,11 @@ protected:
 	// 접점 중 가장 앞/가장 뒤를 골라 로컬 좌표로 돌려준다. 하나도 없으면 false.
 	bool FindPitchAnchors(const FHorseGroundSample& Sample, const FHorseLocalFrame& Frame,
 		FVector& OutRearmost, FVector& OutFrontmost) const;
-	// 앞뒤 anchor 로 PitchSlope / LocalUp / LocalTiltUp / SupportZ 를 채운다.
+	// 앞뒤 anchor 로 PitchSlope / LocalUp / ClampedTiltUp / SupportZ 를 채운다.
 	void SolveGroundPitch(const FHorseLocalFrame& Frame, FHorseGroundSample& OutSample) const;
+	// 이 표본 위에서 걸을 수 있는가(= Sliding 으로 넘어가지 않아도 되는가).
+	// 접지 유지(TickGrounded)와 착지(TickFalling)가 반드시 같은 답을 내야 해서 한 곳에 모아 둔다.
+	bool IsWalkableSlope(const FHorseGroundSample& Sample) const;
 	// world 지면 노멀 → actor 로컬(yaw 만 반영된 프레임) 노멀.
 	FVector LocalizeGroundNormal(const FVector& WorldNormal) const;
 	// 로컬 노멀에서 roll 을 버리고 pitch 만 MaxBodyPitch 한계로 잘라 몸통 기울기 목표로 만든다.
@@ -390,15 +394,17 @@ protected:
 	void PerformJump();
 
 	// ── 몸통 충돌 ────────────────────────────────────────────────────────────
-	// NOTE: 아래 셋은 전부 캡슐의 '현재' world transform 을 기준으로 판정한다. 호출 시점에 actor 를
-	//       아직 옮기지 않았다면 그 위치가 곧 판정 위치다(반환값을 적용하는 건 호출자 몫).
+	// NOTE: 판정 기준은 캡슐의 '현재' world transform 이다. actor 를 아직 옮기지 않은 시점에 부르므로
+	//       이번 frame 이미 확정한 이동분이 있다면 호출자가 넘겨서 보정해야 한다(PendingMoveXY).
 	// 이동하려는 방향에 장애물이 있는지 판단, 있다면 장애물에 겹치지 않을 만큼만 이동
 	FVector ResolveTorsoMove(const FVector& DeltaXY);
 	// 몸통 앞부분만 잘라낸 캡슐로 진행 방향 sweep. 엉덩이가 벽에 스쳤다고 전진이 막히지 않게 한다.
 	bool SweepTorsoFront(const FHorseTorsoCapsule& Torso, const FVector& DeltaXY, FHitResult& OutHit) const;
 	// 제자리 회전 등, 몸통이 장애물과 겹치는 상황 발생했을 때 수평방향으로 밀어내어 겹침 해소
 	// solve 횟수는 최대 MaxDenetrationIter까지만, 그 후에도 겹쳐있다면 겹쳐진대로 방치 (완전 분리 보장 X)
-	FVector DepenetrateTorso();
+	// PendingMoveXY = 이번 frame 전진분(ResolveTorsoMove 결과). 캡슐은 아직 그만큼 안 움직였으므로
+	// 여기서 더해 '이동 후' 위치에서 겹침을 푼다 — 안 더하면 한 frame 전 위치를 푸는 셈이 된다.
+	FVector DepenetrateTorso(const FVector& PendingMoveXY);
 	// 겹침 1회분 해소량. 더 밀어낼 게 없으면 false 로 반복을 끝낸다.
 	bool SolveTorsoPenetration(const FHorseTorsoCapsule& Torso, const FVector& Center, FVector& OutStep) const;
 
