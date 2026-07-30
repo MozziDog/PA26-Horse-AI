@@ -8,6 +8,7 @@
 struct FHitResult;
 class USkeletalMeshComponent;
 class UCapsuleComponent;
+class UBoxComponent;
 class UAnimGraphInstance;
 
 // 말 전용 이동 — root motion 구동. 수평 전진/선회는 애니메이션 root motion 이 만든다(발 미끄러짐 방지)
@@ -176,9 +177,16 @@ public:
 	float SlideFriction = 1.5f;        // 1/s — 미끄러질 때 속도 감쇠율
 
 	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Torso Collision")
-	bool  bTorsoCollision = true;      // 몸통 box(root) sweep 으로 벽/절벽 관통·비비기(rubbing climb) 차단
+	bool  bTorsoCollision = true;      // 몸통 Capsule sweep 으로 벽/절벽 관통·비비기 차단
 	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Torso Skin", Min=0.0f, Max=1.0f, Speed=0.001f)
 	float TorsoSkin = 0.05f;           // Torso box에 여유 줘서 벽 근처에서 지형과 캐릭터 메시 교차 방지
+	bool  bLegCollision = true;  // 무릎 높이에서 추가적인 Box sweep으로 
+									   // '올라서기엔 높고 몸통 캡슐에 걸리기엔 낮은' 애매한 단차 관통 차단. 
+									   // Grounded 이동에서만 동작.
+	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Step Block Wall Normal Z", Min=0.0f, Max=1.0f, Speed=0.01f)
+	float StepBlockWallZ = 0.35f;      // 하체 box가 '오르막길'이 아니라 '장애물'로 보는 노멀 Z 상한(0.35 ≈ 70°).
+	                                   // 이보다 완만한 면은 오르막으로 보고 통과시킨다
+									   // NOTE: WalkableSlopeZ보다 작게 설정해야 경사면에 일단 올라가지고, 이후 미끄러짐
 
 	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Jump Speed", Min=0.0f, Max=30.0f, Speed=0.1f)
 	float JumpSpeed = 5.8f;            // m/s — 점프 시 초기 상향 속도. h≈v²/2g (5.8m/s → 약 1.7m)
@@ -249,7 +257,7 @@ public:
 	float TiltPivotHeight = 0.0f;      // m — 발 평면(= actor pivot - StandHeight) 기준 추가 높이. 0 이 정답이고,
 	                                   // 일부러 위로 올려 미끄러짐이 생기는지 비교해볼 때만 건드린다.
 
-	// ── 물리 기반 이동 ───────────────────────────────────────────────────────
+	// ── Falling 관련 ───────────────────────────────────────────────────────
 	UPROPERTY(Edit, Save, Category="HorseMovement|Physics", DisplayName="Forced Dismount Speed", Min=0.0f, Max=60.0f, Speed=0.1f)
 	float ForcedDismountSpeed = 14.0f; // m/s — 물리 이동 중 이 속력을 넘으면 강제 낙마 + 래그돌
 	UPROPERTY(Edit, Save, Category="HorseMovement|Physics", DisplayName="Physics Grace Time", Min=0.0f, Max=3.0f, Speed=0.01f)
@@ -324,9 +332,14 @@ protected:
 	// ── 몸통 기울기 ──────────────────────────────────────────────────────────
 	// 표본의 LocalUp 으로 목표 기울기를 만들어 BodyTilt 를 수렴시킨다. bGrounded=false 면 수평으로 복귀.
 	void UpdateBodyTilt(float DeltaTime, const FHorseGroundSample& Sample);
-	// BodyTilt 를 mesh 의 relative transform 에 반영(TiltPivot 기준 회전).
-	// root 는 건드리지 않는다 — root 를 기울이면 XY 평면 가정의 이동/스냅/sweep 이 전부 깨진다.
-	void ApplyBodyTiltToMesh();
+	// BodyTilt 를 mesh + 하체 box에 반영(TiltPivot 기준 회전).
+	// root(=actor)의 기울기는 건드리지 않음 — 기존 root가 yaw만 움직인다는 것을 전제로한 기능들 보존 (이동/지면 스냅/sweep 등)
+	void ApplyBodyTilt();
+	// 회전하는 컴포넌트들 대상으로 초기 상태의 relative transform 보관, 매 프레임 회전 시 기준으로 사용
+	void CacheTiltBases();
+	// 단일 컴포넌트 대상으로 Pivot 기준으로 회전 + 위치까지 업데이트
+	void TiltComponent(USceneComponent* Comp, const FQuat& BaseRotation, const FVector& BaseLocation,
+		const FVector& Pivot) const;
 	// 기울기 회전 중심(root 로컬). Z 는 발 평면(= -StandHeight) 기준.
 	FVector GetTiltPivotLocal() const;
 	// BodyTilt 를 (전방기울기, 우측기울기) slope 쌍으로 되돌린다. 파고듦 계산용.
@@ -397,16 +410,29 @@ protected:
 	// NOTE: 판정 기준은 캡슐의 '현재' world transform 이다. actor 를 아직 옮기지 않은 시점에 부르므로
 	//       이번 frame 이미 확정한 이동분이 있다면 호출자가 넘겨서 보정해야 한다(PendingMoveXY).
 	// 이동하려는 방향에 장애물이 있는지 판단, 있다면 장애물에 겹치지 않을 만큼만 이동
-	FVector ResolveTorsoMove(const FVector& DeltaXY);
+	FVector ResolveTorso(const FVector& DeltaXY);
 	// 몸통 앞부분만 잘라낸 캡슐로 진행 방향 sweep. 엉덩이가 벽에 스쳤다고 전진이 막히지 않게 한다.
 	bool SweepTorsoFront(const FHorseTorsoCapsule& Torso, const FVector& DeltaXY, FHitResult& OutHit) const;
+	// 벽 hit → 이번 frame 허용 이동량. skin 만 남기고 자르고 벽 노멀 방향 velocity 성분을 제거한다.
+	FVector ClipMoveAtWall(const FVector& DeltaXY, const FHitResult& Hit);
+
+	// 하체 box(LegCollider) sweep — '올라서기엔 높고 몸통 캡슐에 걸리기엔 낮은' 단차를 벽으로 취급한다.
+	// box 밑면보다 낮은 지형은 그대로 통과 = 다리 사이로 지나간다(맨홀 턱, 낮은 통나무 등).
+	// TickGrounded 경로에서만 호출되므로 낙하/미끄러짐 중엔 자동으로 꺼진다 —
+	// 발이 구덩이에 빠져 낙하로 넘어가는 흐름을 이 box 가 막지 않는다.
+	FVector ResolveLegBox(const FVector& DeltaXY);
 	// 제자리 회전 등, 몸통이 장애물과 겹치는 상황 발생했을 때 수평방향으로 밀어내어 겹침 해소
 	// solve 횟수는 최대 MaxDenetrationIter까지만, 그 후에도 겹쳐있다면 겹쳐진대로 방치 (완전 분리 보장 X)
-	// PendingMoveXY = 이번 frame 전진분(ResolveTorsoMove 결과). 캡슐은 아직 그만큼 안 움직였으므로
+	// PendingMoveXY = 이번 frame 전진분(ResolveTorso 결과). 캡슐은 아직 그만큼 안 움직였으므로
 	// 여기서 더해 '이동 후' 위치에서 겹침을 푼다 — 안 더하면 한 frame 전 위치를 푸는 셈이 된다.
 	FVector DepenetrateTorso(const FVector& PendingMoveXY);
+	// 하체 box 겹침 해소. 제자리 회전(root motion yaw)은 sweep 을 거치지 않아 상자가 단차에
+	// 파고들 수 있고, 겹친 뒤에는 MTD 노멀만으로 판단해야 해서 판정이 헐거워진다 → 매 frame 풀어 준다.
+	FVector DepenetrateLegBox(const FVector& PendingMoveXY);
 	// 겹침 1회분 해소량. 더 밀어낼 게 없으면 false 로 반복을 끝낸다.
-	bool SolveTorsoPenetration(const FHorseTorsoCapsule& Torso, const FVector& Center, FVector& OutStep) const;
+	// SkipNormalZ = 이 값 이상의 노멀 Z(=올라갈 수 있는 면)는 밀어내지 않는다.
+	bool SolvePenetrationXY(const FCollisionShape& Shape, const FVector& Center, const FQuat& Rotation,
+		float SkipNormalZ, FVector& OutStep) const;
 
 	// ── 디버그 드로우 ────────────────────────────────────────────────────────
 	void DrawGroundProbeDebug(const FVector& PivotLoc, const FHorseGroundSample& Sample) const;
@@ -447,6 +473,9 @@ protected:
 	FQuat   MeshBaseRotation= FQuat(0.0f, 0.0f, 0.0f, 1.0f);   // BeginPlay 시점의 mesh relative rotation
 	FVector MeshBaseLocation= FVector(0.0f, 0.0f, 0.0f);   // BeginPlay 시점의 mesh relative location
 	bool    bMeshBaseCached = false;
+	FQuat   LegBoxBaseRotation = FQuat(0.0f, 0.0f, 0.0f, 1.0f);   // 기울기 0 일 때의 하체 box relative transform
+	FVector LegBoxBaseLocation = FVector(0.0f, 0.0f, 0.0f);
+	bool    bLegBoxBaseCached  = false;
 	// 직전 표본이 '보행 불가 경사' 였는지. 실제 Sliding 이행은 다음 이동이 발생하는 frame 에 한다.
 	bool    bSteepGround    = false;
 	// 직전 표본에서 앞발 probe 가 허공이었는지 = 낭떠러지에 앞발을 걸친 상태.
@@ -465,5 +494,7 @@ protected:
 
 	TWeakObjectPtr<USkeletalMeshComponent> Mesh = nullptr;
 	// 몸통 콜라이더. Root component와는 별개
-	TWeakObjectPtr<UCapsuleComponent> Collision = nullptr;
+	TWeakObjectPtr<UCapsuleComponent> BodyCollider = nullptr;
+	// 하체 콜라이더 — 몸통이랑 부딪히기엔 낮고 step up하기에는 높은 대략 무릎 높이의 애매한 단차 차단용
+	TWeakObjectPtr<UBoxComponent> LegCollider = nullptr;
 };

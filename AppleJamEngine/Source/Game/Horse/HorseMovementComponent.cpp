@@ -3,6 +3,7 @@
 #include "Animation/AnimInstance.h"
 #include "Animation/Graph/AnimGraphInstance.h"
 #include "Component/SceneComponent.h"
+#include "Component/Shape/BoxComponent.h"
 #include "Component/Shape/CapsuleComponent.h"
 #include "Component/Primitive/SkeletalMeshComponent.h"
 #include "Core/TickFunction.h"
@@ -91,20 +92,17 @@ void UHorseMovementComponent::BeginPlay()
 	if (AActor* Owner = GetOwner())
 	{
 		Mesh      = Owner->GetComponentByClass<USkeletalMeshComponent>();
-		Collision = Owner->GetComponentByClass<UCapsuleComponent>(); // 매번 sweep할 때마다 가져오지 않고 BeginPlay에서 캐싱
+		BodyCollider = Owner->GetComponentByClass<UCapsuleComponent>(); // 매번 sweep할 때마다 가져오지 않고 BeginPlay에서 캐싱
+		LegCollider = Owner->GetComponentByClass<UBoxComponent>();
 	}
 
-	// 지면 정렬은 mesh 의 relative transform 을 덮어쓰므로, 기울기 0 일 때의 원본을 여기서 잡아둔다.
-	BodyTilt        = IdentityQuat;
-	LastAppliedTilt = IdentityQuat;
-	bTiltApplied    = false;
-	bMeshBaseCached = false;
-	if (USkeletalMeshComponent* MeshComp = Mesh.Get())
-	{
-		MeshBaseRotation = MeshComp->GetRelativeQuat();
-		MeshBaseLocation = MeshComp->GetRelativeLocation();
-		bMeshBaseCached  = true;
-	}
+	// 지면 정렬은 mesh/하체 box 의 relative transform 을 덮어쓰므로, 기울기 0 일 때의 원본을 여기서 잡아둔다.
+	BodyTilt           = IdentityQuat;
+	LastAppliedTilt    = IdentityQuat;
+	bTiltApplied       = false;
+	bMeshBaseCached    = false;
+	bLegBoxBaseCached = false;
+	CacheTiltBases();
 }
 
 void UHorseMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction& ThisTickFunction)
@@ -144,7 +142,7 @@ void UHorseMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType
 
 	// ── 지면 정렬 결과를 mesh 에 반영 ──
 	// BodyTilt는 이미 앞서 EHorseMoveMode별 tick에서 계산 완료된 것으로 봄
-	ApplyBodyTiltToMesh();
+	ApplyBodyTilt();
 
 	// ── AnimGraph 변수 push ──
 	PushAnimGraphVariables();
@@ -264,7 +262,7 @@ void UHorseMovementComponent::ConsumeRootMotion(FVector& OutWorldDelta)
 	// Rotation — 방어적으로 up(+Z)축 yaw(twist)만 적분해 몸통 box 를 항상 세워 둔다
 	// (YawOnly 클립이면 delta 가 이미 순수 yaw 라 no-op, Full 클립이 섞여도 box 는 안 기움).
 	// NOTE: 지면 정렬(suspension)은 root 가 아니라 mesh 의 relative rotation 에만 얹으므로
-	//       (UpdateBodyTilt / ApplyBodyTiltToMesh) 여기의 yaw 적분과 축이 겹치지 않는다.
+	//       (UpdateBodyTilt / ApplyBodyTilt) 여기의 yaw 적분과 축이 겹치지 않는다.
 	//       순서상으로도 root yaw 가 먼저 확정된 뒤 그 로컬 프레임에서 기울기를 계산한다.
 	FQuat Swing, YawTwist;
 	Delta.Rotation.GetNormalized().ToSwingTwist(FVector(0.0f, 0.0f, 1.0f), Swing, YawTwist);
@@ -368,8 +366,8 @@ FVector UHorseMovementComponent::ConsumeGroundedMoveXY(float DeltaTime, const FV
 
 FVector UHorseMovementComponent::MoveTorsoXY(float DeltaTime, FVector Loc, const FVector& MoveXY)
 {
-	// 전진 판단 — 앞부분 몸통 sweep 으로 벽 관통 차단
-	const FVector DeltaXY = ResolveTorsoMove(MoveXY);
+	// 전진 판단 — 앞부분 몸통 sweep 으로 MoveXY를 이동 가능한 만큼만 자름 → CCD 없이도 벽 관통 원천 차단
+	const FVector DeltaXY = ResolveLegBox(ResolveTorso(MoveXY));
 	Loc.X += DeltaXY.X;
 	Loc.Y += DeltaXY.Y;
 	// NOTE: Root motion Z는 버림.
@@ -381,7 +379,9 @@ FVector UHorseMovementComponent::MoveTorsoXY(float DeltaTime, FVector Loc, const
 
 	// 겹침 해소 — 제자리 회전이나 지형 자체의 움직임 등으로 몸통이 벽에 파고들면 MTD(최소이동거리)로 해소
 	// Velocity 에는 반영 X: 벽 밀기는 locomotion 속도가 아니므로 anim/rearing 을 오염시키면 안 됨.
-	const FVector Push = DepenetrateTorso(DeltaXY);
+	FVector Push = DepenetrateTorso(DeltaXY);
+	// 하체 box도 겹침 해소: 이미 torso 겹침 해소를 수행한 후 후순위로 수행 (서로 어긋나지 않게)
+	Push += DepenetrateLegBox(DeltaXY + Push);
 	Loc.X += Push.X;
 	Loc.Y += Push.Y;
 	return Loc;
@@ -397,17 +397,25 @@ bool UHorseMovementComponent::TrySnapToGround(const FHorseGroundSample& Sample, 
 	}
 
 	// 발높이보다 GroundSnapMaxUp 이상 높은 곳은 밟을 지면이 아니라 벽으로 판정
-	// 이 경우 스냅 없이 현재 Z 유지
-	float       TargetZ = Loc.Z;
-	const float Rise    = Sample.SupportZ - (Loc.Z - StandHeight);
-	if (Rise <= GroundSnapMaxUp)
+	// 이 경우 스냅 없이 현재 Z 유지 — 이동을 막는 건 여기가 아니라 하체 box(ResolveLegBox) 담당이다.
+	// NOTE: 여기서 이번 frame 이동을 취소하는 방식은 쓰지 않는다. 제자리 회전만으로도 pivot 이 미세하게
+	//       움직여서 단차 판정에 걸리고, 그러면 탈출 방향까지 전부 취소돼 말이 그 자리에 끼어버린다.
+	float       TargetZ     = Loc.Z;
+	const float FootHeight  = Loc.Z - StandHeight;
+	const float FloorHeight = Sample.SupportZ;
+
+	const float Rise = FloorHeight - FootHeight;
+	if (Rise <= GroundSnapMaxUp) // 밟고 올라설 수 있는 경우
 	{
 		TargetZ = Sample.SupportZ + StandHeight;
 	}
-	if ((Loc.Z - TargetZ) > GroundSnapMaxDown)
+
+	const float Fall = Loc.Z - TargetZ;
+	if (Fall > GroundSnapMaxDown)
 	{
 		return false;   // 지면이 step 이상 아래 → 낭떠러지.
 	}
+
 	Loc.Z = TargetZ;
 	return true;
 }
@@ -807,33 +815,65 @@ void UHorseMovementComponent::GetBodyTiltSlopes(float& OutPitchSlope, float& Out
 	OutRollSlope  = -Up.Y / UpZ;
 }
 
-void UHorseMovementComponent::ApplyBodyTiltToMesh()
+void UHorseMovementComponent::CacheTiltBases()
 {
-	USkeletalMeshComponent* MeshComp = Mesh.Get();
-	if (!MeshComp)
+	// mesh component 또는 box component에 초기 회전값이 있을 경우를 고려, 
+	// BeginPlay 시점의 회전값 보관해뒀다가 매 프레임 회전 업데이트할 때 사용
+	if (!bMeshBaseCached)
+	{
+		if (USkeletalMeshComponent* MeshComp = Mesh.Get())
+		{
+			MeshBaseRotation = MeshComp->GetRelativeQuat();
+			MeshBaseLocation = MeshComp->GetRelativeLocation();
+			bMeshBaseCached  = true;
+		}
+	}
+	if (!bLegBoxBaseCached)
+	{
+		if (UBoxComponent* Box = LegCollider.Get())
+		{
+			LegBoxBaseRotation = Box->GetRelativeQuat();
+			LegBoxBaseLocation = Box->GetRelativeLocation();
+			bLegBoxBaseCached  = true;
+		}
+	}
+}
+
+void UHorseMovementComponent::TiltComponent(USceneComponent* Comp, const FQuat& BaseRotation,
+	const FVector& BaseLocation, const FVector& Pivot) const
+{
+	if (!Comp)
 	{
 		return;
 	}
-	if (!bMeshBaseCached)
-	{
-		MeshBaseRotation = MeshComp->GetRelativeQuat();
-		MeshBaseLocation = MeshComp->GetRelativeLocation();
-		bMeshBaseCached  = true;
-	}
+	Comp->SetRelativeRotation((BodyTilt * BaseRotation).GetNormalized());
+	Comp->SetRelativeLocation(Pivot + BodyTilt.RotateVector(BaseLocation - Pivot));
+}
 
+void UHorseMovementComponent::ApplyBodyTilt()
+{
 	// 기울기가 사실상 그대로면 건드리지 않는다 — relative transform write 는 octree/행렬 dirty 를 유발한다.
 	if (bTiltApplied && BodyTilt.Equals(LastAppliedTilt, 1.e-5f))
 	{
 		return;
 	}
 
-	// BodyTilt 는 root 로컬(yaw 만 반영된 프레임) 기준이라 mesh 의 relative 에 그대로 얹으면 된다.
+	// BodyTilt 는 root 로컬(yaw 만 반영된 프레임) 기준이라 자식의 relative 에 그대로 얹으면 된다.
 	// 회전 중심은 '네 발 접지면의 중앙 + 발 높이' — 지면 높이에 놓아야 기울기가 변할 때 발이 안 쓸린다.
-	const FVector Pivot       = GetTiltPivotLocal();
-	const FVector NewLocation = Pivot + BodyTilt.RotateVector(MeshBaseLocation - Pivot);
-
-	MeshComp->SetRelativeRotation((BodyTilt * MeshBaseRotation).GetNormalized());
-	MeshComp->SetRelativeLocation(NewLocation);
+	const FVector Pivot = GetTiltPivotLocal();
+	if (bMeshBaseCached)
+	{
+		TiltComponent(Mesh.Get(), MeshBaseRotation, MeshBaseLocation, Pivot);
+	}
+	// 하체 box 도 같이 기울인다 — 안 기울이면 오르막에서 상자 앞부분이 지면에 처박혀 오르막 자체가
+	// 벽으로 오판된다. 기울이면 판정 띠가 '지금 몸이 정렬한 지면 위 0.5~0.6m' 를 유지하므로,
+	// 경사면에 놓인 단차도 그 지면 기준 높이로 판정된다.
+	// NOTE: 기울기는 MaxBodyPitch 로 잘리고 BodyAlignSpeed 로 늦게 따라오므로 완벽히 정렬되진 않는다 —
+	//       남는 오차는 StepBlockWallZ(벽만 막는 기준)가 흡수한다.
+	if (bLegBoxBaseCached)
+	{
+		TiltComponent(LegCollider.Get(), LegBoxBaseRotation, LegBoxBaseLocation, Pivot);
+	}
 	LastAppliedTilt = BodyTilt;
 	bTiltApplied    = true;
 }
@@ -961,7 +1001,7 @@ void UHorseMovementComponent::BeginStuckEscape()
 
 	if (!bRagdollTookOver)
 	{
-		if (UCapsuleComponent* Capsule = Collision.Get())
+		if (UCapsuleComponent* Capsule = BodyCollider.Get())
 		{
 			SavedCollisionEnabled = Capsule->GetCollisionEnabled();
 			Capsule->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -1000,7 +1040,7 @@ void UHorseMovementComponent::EndStuckEscape()
 	EscapeTimer    = 0.0f;
 	if (bEscapeOwnsCollision)
 	{
-		if (UCapsuleComponent* Capsule = Collision.Get())
+		if (UCapsuleComponent* Capsule = BodyCollider.Get())
 		{
 			Capsule->SetCollisionEnabled(SavedCollisionEnabled);
 		}
@@ -1189,7 +1229,7 @@ bool UHorseMovementComponent::GetTorsoCapsule(FHorseTorsoCapsule& OutTorso) cons
 {
 	// 수치는 CapsuleComponent 에서 그대로 읽는다 — 에디터 시각화와 판정이 어긋나지 않게.
 	// NOTE: actor yaw 는 ConsumeRootMotion 에서 이미 반영된 상태.
-	const UCapsuleComponent* Capsule = Collision.Get();
+	const UCapsuleComponent* Capsule = BodyCollider.Get();
 	if (!Capsule || !GetUpdatedComponent())
 	{
 		return false;
@@ -1250,7 +1290,7 @@ FVector UHorseMovementComponent::GroundNormal(const FHitResult& Hit) const
 	return N.Normalized();
 }
 
-FVector UHorseMovementComponent::ResolveTorsoMove(const FVector& DeltaXY)
+FVector UHorseMovementComponent::ResolveTorso(const FVector& DeltaXY)
 {
 	// 끼임 탈출 중엔 몸통 충돌을 통과시켜 실제로 빠져나오게 한다.
 	if (!bTorsoCollision || bEscapingStuck || DeltaXY.IsNearlyZero())
@@ -1270,22 +1310,81 @@ FVector UHorseMovementComponent::ResolveTorsoMove(const FVector& DeltaXY)
 	}
 
 	// walkable 면(램프 등)은 무시 — 지면 스냅이 처리. 급경사/벽만 차단.
-	const FVector N = GroundNormal(Hit);
-	if (N.Z >= WalkableSlopeZ)
+	if (GroundNormal(Hit).Z >= WalkableSlopeZ)
+	{
+		return DeltaXY;
+	}
+	return ClipMoveAtWall(DeltaXY, Hit);
+}
+
+FVector UHorseMovementComponent::ResolveLegBox(const FVector& DeltaXY)
+{
+	UBoxComponent* Box = LegCollider.Get();
+	// 끼임 탈출 중엔 통과시켜 실제로 빠져나오게 한다(몸통 충돌과 같은 규약).
+	if (!bLegCollision || bEscapingStuck || !Box || DeltaXY.IsNearlyZero())
+	{
+		return DeltaXY;
+	}
+	AActor* Owner = GetOwner();
+	UWorld* World = Owner ? Owner->GetWorld() : nullptr;
+	if (!World)
 	{
 		return DeltaXY;
 	}
 
+	// 판정 shape 는 컴포넌트 값을 그대로 읽는다 — 에디터의 shape 시각화와 판정이 어긋나지 않게.
+	// NOTE: box 는 root 의 자식이라 아직 이번 frame 이동분이 반영되지 않은 위치다(몸통 캡슐과 동일).
+	const FVector         Center = Box->GetWorldLocation();
+	const FCollisionShape Shape  = FCollisionShape::MakeBox(Box->GetScaledBoxExtent());
+
+	FHitResult Hit;
+	if (!World->PhysicsSweepByObjectTypes(Center, Center + DeltaXY, Box->GetWorldRotation().ToQuaternion(),
+			Shape, Hit, ObjectTypeBit(ECollisionChannel::WorldStatic), Owner))
+	{
+		return DeltaXY;   // 막힘 없음
+	}
+
+	// 오르막은 '일단 진행' 시킨다 — 경사면을 막아버리면 몸통 pitch 도, 급경사 미끄러짐 이행도
+	// 시작되지 않아서 제자리 뜀박질이 된다. 여기서 막는 건 벽에 가까운 면(StepBlockWallZ)뿐이고,
+	// 보행 가능/불가 판단은 지면 표본(IsWalkableSlope → Sliding)이 계속 담당한다.
+	// NOTE: 겹친 상태에서는 이 노멀이 MTD 방향이라, 상자가 단차 '윗면' 을 품고 있으면 +Z 가 나와서
+	//       벽을 오르막으로 오판한다. 상자 높이 규약(EnsureStepBlockComponent 주석) 이 그걸 막는 전제다.
+	const FVector N = GroundNormal(Hit);
+	if (N.Z >= StepBlockWallZ)
+	{
+		return DeltaXY;
+	}
+
+	// 이미 단차에 파고든 상태(제자리 회전, 지형 변화, 구덩이 안에 착지 등)라면 '더 파고드는 성분' 만
+	// 지운다 — 전부 막으면 회전으로 살짝 겹치기만 해도 탈출 방향까지 막혀 그 자리에 끼어버린다.
+	// 겹침 자체는 DepenetrateLegBox 가 매 frame 밀어내서 해소한다.
+	if (Hit.bStartPenetrating)
+	{
+		FVector WallN(N.X, N.Y, 0.0f);
+		if (WallN.IsNearlyZero())
+		{
+			return DeltaXY;
+		}
+		WallN = WallN.Normalized();
+		const float Into = DeltaXY.Dot(WallN);
+		return (Into < 0.0f) ? DeltaXY - WallN * Into : DeltaXY;
+	}
+	return ClipMoveAtWall(DeltaXY, Hit);
+}
+
+FVector UHorseMovementComponent::ClipMoveAtWall(const FVector& DeltaXY, const FHitResult& Hit)
+{
 	// 벽 앞 skin 만큼 남기고 허용 이동 거리 산출.
 	const float   MoveLen = DeltaXY.Length();
 	const float   Allowed = std::max(0.0f, std::min(MoveLen, Hit.Distance - TorsoSkin));
-	const FVector Dir     = (MoveLen > 1.e-4f) ? DeltaXY * (1.0f / MoveLen) : FVector(0.0f, 0.0f, 0.0f);
+	const FVector Dir = (MoveLen > 1.e-4f) ? DeltaXY * (1.0f / MoveLen) : FVector(0.0f, 0.0f, 0.0f);
 
 	// 벽의 수평 노멀 방향 velocity 성분 제거 → 벽을 따라 미끄러지되 관통·비비기 금지(이륙 관성에 반영).
-	FVector WallN(N.X, N.Y, 0.0f);
+	const FVector N = GroundNormal(Hit);
+	FVector       WallN(N.X, N.Y, 0.0f);
 	if (!WallN.IsNearlyZero())
 	{
-		WallN    = WallN.Normalized();
+		WallN = WallN.Normalized();
 		Velocity = Velocity - WallN * Velocity.Dot(WallN);
 	}
 	return Dir * Allowed;
@@ -1330,11 +1429,12 @@ FVector UHorseMovementComponent::DepenetrateTorso(const FVector& PendingMoveXY)
 	// 캡슐은 root 의 자식이라 actor 가 PendingMoveXY 만큼 움직이면 같은 양만큼 따라온다.
 	// actor 반영은 호출자가 뒤에서 하므로, 여기서는 그 이동을 미리 얹은 위치에서 겹침을 푼다.
 	// solve 반복 계산
-	FVector Center = Torso.Center + PendingMoveXY;
+	const FCollisionShape Shape  = FCollisionShape::MakeCapsule(Torso.Radius, Torso.HalfLen);
+	FVector               Center = Torso.Center + PendingMoveXY;
 	for (int Iter = 0; Iter < MaxDenetrationIter; ++Iter)
 	{
 		FVector Step;
-		if (!SolveTorsoPenetration(Torso, Center, Step))
+		if (!SolvePenetrationXY(Shape, Center, Torso.Rotation, WalkableSlopeZ, Step))
 		{
 			break;
 		}
@@ -1347,8 +1447,38 @@ FVector UHorseMovementComponent::DepenetrateTorso(const FVector& PendingMoveXY)
 	return Accum;
 }
 
-bool UHorseMovementComponent::SolveTorsoPenetration(const FHorseTorsoCapsule& Torso, const FVector& Center,
-	FVector& OutStep) const
+FVector UHorseMovementComponent::DepenetrateLegBox(const FVector& PendingMoveXY)
+{
+	FVector        Accum(0.0f, 0.0f, 0.0f);
+	UBoxComponent* Box = LegCollider.Get();
+	if (!bLegCollision || bEscapingStuck || !Box)
+	{
+		return Accum;
+	}
+
+	// 제자리 회전(root motion yaw)은 sweep 대상이 아니라서 상자가 단차에 파고들 수 있다.
+	// 그 겹침을 그대로 두면 다음 frame 부터는 겹침 상태의 MTD 만 보고 판단해야 해서 판정이 헐거워진다
+	// (윗면에 걸리면 노멀이 +Z → 램프로 오판 → 관통). 몸통 캡슐과 같은 방식으로 매 frame 풀어 준다.
+	const FCollisionShape Shape    = FCollisionShape::MakeBox(Box->GetScaledBoxExtent());
+	const FQuat           Rotation = Box->GetWorldRotation().ToQuaternion();
+	FVector               Center   = Box->GetWorldLocation() + PendingMoveXY;
+	for (int Iter = 0; Iter < MaxDenetrationIter; ++Iter)
+	{
+		FVector Step;
+		// 오르막을 밀어내면 등판이 막힌다 — 벽에 가까운 면만 해소 대상이다(ResolveLegBox 와 같은 기준).
+		if (!SolvePenetrationXY(Shape, Center, Rotation, StepBlockWallZ, Step))
+		{
+			break;
+		}
+		Center += Step;
+		Accum  += Step;
+	}
+	Accum.Z = 0.0f;
+	return Accum;
+}
+
+bool UHorseMovementComponent::SolvePenetrationXY(const FCollisionShape& Shape, const FVector& Center,
+	const FQuat& Rotation, float SkipNormalZ, FVector& OutStep) const
 {
 	AActor* Owner = GetOwner();
 	UWorld* World = Owner ? Owner->GetWorld() : nullptr;
@@ -1356,12 +1486,11 @@ bool UHorseMovementComponent::SolveTorsoPenetration(const FHorseTorsoCapsule& To
 	{
 		return false;
 	}
-	const FCollisionShape Shape = FCollisionShape::MakeCapsule(Torso.Radius, Torso.HalfLen);
 
 	FHitResult Hit;
 	// 미세 거리 sweep - (거의) 제자리에서 겹침 판정 수행
 	const FVector ProbeEnd = Center + FVector(DepenetrationSweepDist, 0.0f, 0.0f);
-	if (!World->PhysicsSweepByObjectTypes(Center, ProbeEnd, Torso.Rotation, Shape, Hit,
+	if (!World->PhysicsSweepByObjectTypes(Center, ProbeEnd, Rotation, Shape, Hit,
 			ObjectTypeBit(ECollisionChannel::WorldStatic), Owner))
 	{
 		return false;   // 근처에 아무것도 없음 → 해소할 필요 X
@@ -1371,9 +1500,10 @@ bool UHorseMovementComponent::SolveTorsoPenetration(const FHorseTorsoCapsule& To
 		return false;   // sweep 시작 시점에 안겹침 또는 allow 수치보다 얕음 → 해소로 판정
 	}
 
-	// 만에 하나 부딪힌 게 등반 가능한 오르막길이었을 경우, 밀어내지 않고 그대로 이동
+	// 부딪힌 게 올라갈 수 있는 면이면 밀어내지 않고 그대로 이동 (기준은 호출자가 정한다 —
+	// 몸통 캡슐은 보행 가능 경사, 하체 box 는 '벽에 가까운 면' 만 밀어낸다)
 	const FVector N = GroundNormal(Hit);
-	if (N.Z >= WalkableSlopeZ)
+	if (N.Z >= SkipNormalZ)
 	{
 		return false;
 	}

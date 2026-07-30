@@ -11,6 +11,7 @@
 #include "Component/AI/BlackboardComponent.h"
 #include "Component/Primitive/SkeletalMeshComponent.h"
 #include "Component/SceneComponent.h"
+#include "Component/Shape/BoxComponent.h"
 #include "Component/Shape/CapsuleComponent.h"
 #include "Core/Types/CollisionTypes.h"
 #include "Math/Quat.h"
@@ -99,6 +100,19 @@ void AHorseCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 	CollisionComponent->SetCollisionObjectType(ECollisionChannel::Pawn);
 	CollisionComponent->SetKinematic(true);
 	CollisionComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+
+	// 하체 충돌 box — 몸통 캡슐 아래쪽 판정용
+	// NOTE: 겹친 상태의 sweep으로 MTD(최소 탈출 벡터)를 계산하여 측면 충돌만 처리하는데, 
+	// 충돌 판정이 장애물 윗면을 품고 있으면 MTD가 위방향 → 측면 충돌만 필터링하는 로직에 의해 투과됨
+	// 따라서 충돌판정을 가능한 얇게 유지하여 상하방향 충돌로 오인 완화
+	// (완전한 방지는 안됨. 구현 상의 사각지대로 유지)
+	StepBlockComponent = AddComponent<UBoxComponent>();
+	StepBlockComponent->AttachToComponent(RootSceneComponent);
+	StepBlockComponent->SetRelativeLocation(FVector(0.0f, 0.0f, 0.55f));
+	StepBlockComponent->SetBoxExtent(FVector(0.8f, 0.3f, 0.1f));
+	StepBlockComponent->SetCollisionObjectType(ECollisionChannel::Pawn);
+	StepBlockComponent->SetKinematic(true);
+	StepBlockComponent->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 
 	// SkeletalMesh. 발바닥이 지면에 닿도록 StandHeight 만큼 아래로 offset 부여
 	MeshComponent = AddComponent<USkeletalMeshComponent>();
@@ -298,6 +312,7 @@ void AHorseCharacter::RebindComponents()
 	CollisionComponent = GetComponentByClass<UCapsuleComponent>();
 	MeshComponent = GetComponentByClass<USkeletalMeshComponent>();
 	MovementComponent = GetComponentByClass<UHorseMovementComponent>();
+	StepBlockComponent = GetComponentByClass<UBoxComponent>();
 	LocomotionComponent = GetComponentByClass<UHorseLocomotionComponent>();
 	BTAgentComponent = GetComponentByClass<UBTAgentComponent>();
 	BlackboardComponent = GetComponentByClass<UBlackboardComponent>();

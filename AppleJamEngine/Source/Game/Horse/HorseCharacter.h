@@ -7,6 +7,7 @@
 class USkeletalMeshComponent;
 class USceneComponent;
 class UCapsuleComponent;
+class UBoxComponent;
 class UHorseMovementComponent;
 class UHorseLocomotionComponent;
 class UBTAgentComponent;
@@ -46,6 +47,7 @@ protected:
 protected:
 	TWeakObjectPtr<USceneComponent> RootSceneComponent = nullptr;
 	TWeakObjectPtr<UCapsuleComponent> CollisionComponent = nullptr;
+	TWeakObjectPtr<UBoxComponent> StepBlockComponent = nullptr;
 	TWeakObjectPtr<USkeletalMeshComponent> MeshComponent = nullptr;
 	TWeakObjectPtr<UHorseMovementComponent> MovementComponent = nullptr;
 	TWeakObjectPtr<UHorseLocomotionComponent> LocomotionComponent = nullptr;
