@@ -1073,9 +1073,19 @@ void UHorseMovementComponent::StartJump()
 	bJumpRequested = true;
 }
 
+void UHorseMovementComponent::CancelPendingJump()
+{
+	if (MoveMode == EHorseMoveMode::Grounded && !bWantJump)
+	{
+		bJumpRequested = false;
+	}
+}
+
 void UHorseMovementComponent::OnJumpNotify()
 {
-	if (MoveMode != EHorseMoveMode::Grounded)
+	// 센서 조건이 wind-up 중 해제되어 요청이 취소됐다면, 이미 재생 중인 점프 클립의
+	// Notify가 뒤늦게 도착해도 실제 이륙으로 이어지지 않게 한다.
+	if (MoveMode != EHorseMoveMode::Grounded || !bJumpRequested)
 	{
 		return;   // Grounded에서만 점프 가능
 	}
