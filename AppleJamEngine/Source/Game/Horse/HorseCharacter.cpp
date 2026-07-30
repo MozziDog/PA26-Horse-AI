@@ -149,7 +149,7 @@ void AHorseCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 	if(ObstacleFanSensorComponent)
 	{
 		ObstacleFanSensorComponent->AttachToComponent(RootSceneComponent);
-		ObstacleFanSensorComponent->SetRelativeLocation(FVector(1.0f, 0.0f, -StandHeight + 1.2f));
+		ObstacleFanSensorComponent->SetRelativeLocation(FVector(1.0f, 0.0f, -StandHeight + 1.0f));
 	}
 	CliffFanSensorComponent = AddComponent<UCliffFanSensorComponent>();
 	if(CliffFanSensorComponent)

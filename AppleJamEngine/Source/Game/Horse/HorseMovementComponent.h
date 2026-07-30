@@ -140,6 +140,9 @@ public:
 	// 현재 몸통에 적용 중인 지면 정렬 기울기(actor 로컬, yaw 제외). 카메라/IK 등이 참고 가능.
 	UFUNCTION(Pure, Category="HorseMovement")
 	FVector GetBodyUpVector() const { return BodyTilt.GetUpVector(); }
+	// 센서용 실제 world-space 지면 노멀. 몸통 자세와 달리 roll 제거/각도 clamp를 적용하지 않는다.
+	UFUNCTION(Pure, Category="HorseMovement")
+	FVector GetCurrentGroundNormal() const { return CurrentGroundNormal; }
 
 	// 점프 시작 요청
 	// 도움닫기 + 점프 애니메이션을 시작한다. 실제 이륙은 AnimNotify_HorseJump → NotifyJumpTakeoff() 가 담당
@@ -443,6 +446,7 @@ protected:
 
 	FVector        Velocity = FVector(0.0f, 0.0f, 0.0f);   // Z=중력/점프, XY=root motion 파생 관성(리포팅·이륙 관성)
 	EHorseMoveMode MoveMode = EHorseMoveMode::Falling;     // 시작 시 지면 잡아야 해서 낙하
+	FVector CurrentGroundNormal = FVector::UpVector;        // 마지막 유효 지면의 unclamped world-space normal
 
 	// ── AnimGraph 로 내보낼 상태 ──
 	float NormalizedSpeed = 0.0f;   // 이징된 현재 속도 스칼라([0,1]). 평행이동 중엔 종방향 입력[-1,1].

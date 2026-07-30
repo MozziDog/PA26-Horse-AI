@@ -422,6 +422,11 @@ bool UHorseMovementComponent::TrySnapToGround(const FHorseGroundSample& Sample, 
 
 void UHorseMovementComponent::UpdateGroundedState(float DeltaTime, const FHorseGroundSample& Sample)
 {
+	if (Sample.bCenterHit && !Sample.CenterNormal.IsNearlyZero())
+	{
+		CurrentGroundNormal = Sample.CenterNormal.Normalized();
+	}
+
 	// 경사 — 표본 평면의 종방향 기울기. 급격한 변화는 이징해서 anim 이 튀지 않게 한다.
 	const float TargetIncline = ComputeInclineAngle(Sample);
 	InclineAngle += (TargetIncline - InclineAngle) * DampAlpha(DeltaTime, BodyAlignSpeed);
@@ -489,6 +494,11 @@ void UHorseMovementComponent::TickFalling(float DeltaTime)
 
 void UHorseMovementComponent::Land(FVector Loc, float TargetZ, const FHorseGroundSample& Sample)
 {
+	if (Sample.bCenterHit && !Sample.CenterNormal.IsNearlyZero())
+	{
+		CurrentGroundNormal = Sample.CenterNormal.Normalized();
+	}
+
 	Loc.Z = TargetZ;
 	GetUpdatedComponent()->SetWorldLocation(Loc);
 	Velocity.Z  = 0.0f;
@@ -554,6 +564,7 @@ void UHorseMovementComponent::UpdateSlidingState(float DeltaTime, const FHitResu
 	InclineAngle += (TargetIncline - InclineAngle) * DampAlpha(DeltaTime, BodyAlignSpeed);
 
 	const FVector N = GroundNormal(Ground);
+	CurrentGroundNormal = N;
 
 	// 미끄러지는 중에도 몸통은 경사면을 따라 눕는다 — 표본이 없으니 지면 노멀 하나로 만든다.
 	FHorseGroundSample SlideSample;
