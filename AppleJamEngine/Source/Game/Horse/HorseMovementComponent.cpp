@@ -1,4 +1,4 @@
-﻿#include "HorseMovementComponent.h"
+#include "HorseMovementComponent.h"
 
 #include "Animation/AnimInstance.h"
 #include "Animation/Graph/AnimGraphInstance.h"
@@ -123,17 +123,18 @@ void UHorseMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType
 	UpdateMoveInput();
 
 	FVector WorldDelta(0.0f, 0.0f, 0.0f);
-	ConsumeRootMotion(WorldDelta);		// ConsumeRootMotion 안에서 Yaw 회전이 Actor transform에 적용됨
+	FQuat RootYawTwist = FQuat::Identity;
+	ConsumeRootMotion(WorldDelta, RootYawTwist);
 										// Pitch와 Roll은 RootMotion으로 처리하지 않고 애니메이션으로
 										// Translate는 밑에서 EHorseMoveMode 별로 처리
 
 	if (MoveMode == EHorseMoveMode::Grounded)
 	{
-		TickGrounded(DeltaTime, WorldDelta);
+		TickGrounded(DeltaTime, WorldDelta, RootYawTwist);
 	}
 	else if (MoveMode == EHorseMoveMode::Sliding)
 	{
-		TickSliding(DeltaTime);   // 입력/root motion 무시 — 물리로만.
+		TickSliding(DeltaTime, RootYawTwist); // 이동 root motion은 무시, yaw만 적용.
 	}
 	else
 	{
@@ -231,9 +232,10 @@ void UHorseMovementComponent::UpdateSteeringInput(const FVector& InDesired, cons
 	NormalizedSpeed = TargetSpeed;
 }
 
-void UHorseMovementComponent::ConsumeRootMotion(FVector& OutWorldDelta)
+void UHorseMovementComponent::ConsumeRootMotion(FVector& OutWorldDelta, FQuat& OutYawTwist)
 {
 	OutWorldDelta = FVector(0.0f, 0.0f, 0.0f);
+	OutYawTwist = FQuat::Identity;
 
 	USkeletalMeshComponent* MeshComp = Mesh.Get();
 	USceneComponent*        Updated  = GetUpdatedComponent();
@@ -257,28 +259,13 @@ void UHorseMovementComponent::ConsumeRootMotion(FVector& OutWorldDelta)
 	const FQuat   Basis = Updated->GetWorldRotation().ToQuaternion().GetNormalized();
 	OutWorldDelta = Basis.RotateVector(Delta.Location);
 
-	const FVector PivotToMesh = MeshComp->GetWorldLocation() - Updated->GetWorldLocation();
 
-	// Rotation — 방어적으로 up(+Z)축 yaw(twist)만 적분해 몸통 box 를 항상 세워 둔다
-	// (YawOnly 클립이면 delta 가 이미 순수 yaw 라 no-op, Full 클립이 섞여도 box 는 안 기움).
-	// NOTE: 지면 정렬(suspension)은 root 가 아니라 mesh 의 relative rotation 에만 얹으므로
-	//       (UpdateBodyTilt / ApplyBodyTilt) 여기의 yaw 적분과 축이 겹치지 않는다.
-	//       순서상으로도 root yaw 가 먼저 확정된 뒤 그 로컬 프레임에서 기울기를 계산한다.
 	FQuat Swing, YawTwist;
 	Delta.Rotation.GetNormalized().ToSwingTwist(FVector(0.0f, 0.0f, 1.0f), Swing, YawTwist);
-	if (std::fabs(YawTwist.Z) > 1.e-7f)
-	{
-		const FQuat NewBasis = (Basis * YawTwist).GetNormalized();
-		Updated->SetWorldRotation(NewBasis);
-
-		// 몸통 기울기(pitch/roll) 로직이 추가될 것을 고려해서 단순 yaw 차이로만 계산하지 않고 (NewBasis * Basis⁻¹)로 계산
-		const FQuat WorldRotDelta = (NewBasis * Basis.Inverse()).GetNormalized();
-		// actor pivot과 mesh pivot의 거리 + 회전으로 인해 발생한 호(arc) 형태의 오차 보정
-		OutWorldDelta -= WorldRotDelta.RotateVector(PivotToMesh) - PivotToMesh;
-	}
+	OutYawTwist = YawTwist;
 }
 
-void UHorseMovementComponent::TickGrounded(float DeltaTime, const FVector& WorldDelta)
+void UHorseMovementComponent::TickGrounded(float DeltaTime, const FVector& WorldDelta, const FQuat& RootYawTwist)
 {
 	USceneComponent* Updated = GetUpdatedComponent();
 
@@ -302,7 +289,9 @@ void UHorseMovementComponent::TickGrounded(float DeltaTime, const FVector& World
 		return;
 	}
 
-	FVector Loc = MoveTorsoXY(DeltaTime, Updated->GetWorldLocation(), MoveXY);
+	const TPair<FVector, FQuat> MoveResult = CalculateSafeMovement(DeltaTime, Updated->GetWorldLocation(), MoveXY, RootYawTwist);
+	FVector Loc = MoveResult.first;
+	Updated->SetWorldRotation(MoveResult.second);
 
 	FHorseGroundSample Sample;
 	const bool bSupported = !bJumpActive && SampleGround(Loc, Sample); // 지면 지지 여부
@@ -364,27 +353,40 @@ FVector UHorseMovementComponent::ConsumeGroundedMoveXY(float DeltaTime, const FV
 	return MoveXY;
 }
 
-FVector UHorseMovementComponent::MoveTorsoXY(float DeltaTime, FVector Loc, const FVector& MoveXY)
+TPair<FVector, FQuat> UHorseMovementComponent::CalculateSafeMovement(float DeltaTime, FVector Loc,
+	const FVector& MoveXY, const FQuat& RootYawTwist)
 {
-	// 전진 판단 — 앞부분 몸통 sweep 으로 MoveXY를 이동 가능한 만큼만 자름 → CCD 없이도 벽 관통 원천 차단
+	USceneComponent* Updated = GetUpdatedComponent();
+	const FQuat OldBasis = Updated->GetWorldRotation().ToQuaternion().GetNormalized();
+	FQuat FinalBasis = OldBasis;
+	const bool bHasYaw = std::fabs(RootYawTwist.Z) > 1.e-7f;
+	if (bHasYaw)
+	{
+		FinalBasis = (OldBasis * RootYawTwist).GetNormalized();
+		// Collision queries use the candidate yaw, but the transform is restored before returning.
+		Updated->SetWorldRotation(FinalBasis);
+	}
+
 	const FVector DeltaXY = ResolveLegBox(ResolveTorso(MoveXY));
 	Loc.X += DeltaXY.X;
 	Loc.Y += DeltaXY.Y;
-	// NOTE: Root motion Z는 버림.
-	// 걷는 중의 Bobbing 등은 루트 모션이 아닌 애니메이션으로 처리하고 점프는 PerformJump()에서 직접 처리
-
-	// 수평 속도 리포팅/관성 — root motion 이 만든 실제 이동에서 역산(이륙 시 momentum 으로 넘어감).
 	Velocity.X = DeltaXY.X / DeltaTime;
 	Velocity.Y = DeltaXY.Y / DeltaTime;
 
-	// 겹침 해소 — 제자리 회전이나 지형 자체의 움직임 등으로 몸통이 벽에 파고들면 MTD(최소이동거리)로 해소
-	// Velocity 에는 반영 X: 벽 밀기는 locomotion 속도가 아니므로 anim/rearing 을 오염시키면 안 됨.
-	FVector Push = DepenetrateTorso(DeltaXY);
-	// 하체 box도 겹침 해소: 이미 torso 겹침 해소를 수행한 후 후순위로 수행 (서로 어긋나지 않게)
+	bool bFullySolved = true;
+	FVector Push = DepenetrateTorso(DeltaXY, bFullySolved);
+	if (bHasYaw && !bFullySolved)
+	{
+		FinalBasis = OldBasis;
+		Updated->SetWorldRotation(FinalBasis);
+		Push = DepenetrateTorso(DeltaXY, bFullySolved);
+	}
 	Push += DepenetrateLegBox(DeltaXY + Push);
 	Loc.X += Push.X;
 	Loc.Y += Push.Y;
-	return Loc;
+
+	Updated->SetWorldRotation(OldBasis);
+	return TPair<FVector, FQuat>(Loc, FinalBasis);
 }
 
 bool UHorseMovementComponent::TrySnapToGround(const FHorseGroundSample& Sample, FVector& Loc)
@@ -515,9 +517,15 @@ void UHorseMovementComponent::Land(FVector Loc, float TargetZ, const FHorseGroun
 	bEdgeSlipping = !Sample.bFrontHit;   // 낭떠러지 턱에 착지했으면 곧바로 실족 밀기로 이어진다.
 }
 
-void UHorseMovementComponent::TickSliding(float DeltaTime)
+void UHorseMovementComponent::TickSliding(float DeltaTime, const FQuat& RootYawTwist)
 {
 	USceneComponent* Updated = GetUpdatedComponent();
+
+	// 회전 반영
+	if (std::fabs(RootYawTwist.Z) > 1.e-6f)
+	{
+		Updated->SetWorldRotation((Updated->GetWorldRotation().ToQuaternion() * RootYawTwist).GetNormalized());
+	}
 
 	FVector Loc = Updated->GetWorldLocation();
 
@@ -1423,9 +1431,10 @@ bool UHorseMovementComponent::SweepTorsoFront(const FHorseTorsoCapsule& Torso, c
 		ObjectTypeBit(ECollisionChannel::WorldStatic), Owner);
 }
 
-FVector UHorseMovementComponent::DepenetrateTorso(const FVector& PendingMoveXY)
+FVector UHorseMovementComponent::DepenetrateTorso(const FVector& PendingMoveXY, bool& bOutFullySolved)
 {
 	FVector Accum(0.0f, 0.0f, 0.0f);
+	bOutFullySolved = true;
 	// 끼임 탈출 중엔 밀어내기도 멈춘다 — 어차피 통과시켜서 빠져나오는 게 목적.
 	if (!bTorsoCollision || bEscapingStuck)
 	{
@@ -1453,6 +1462,8 @@ FVector UHorseMovementComponent::DepenetrateTorso(const FVector& PendingMoveXY)
 		Accum  += Step;
 	}
 
+	FVector RemainingStep;
+	bOutFullySolved = !SolvePenetrationXY(Shape, Center, Torso.Rotation, WalkableSlopeZ, RemainingStep);
 	// Z는 지면 스냅 혹은 낙하 판정에서 계산할거니 수평 성분만 반환
 	Accum.Z = 0.0f;
 	return Accum;
@@ -1500,7 +1511,7 @@ bool UHorseMovementComponent::SolvePenetrationXY(const FCollisionShape& Shape, c
 
 	FHitResult Hit;
 	// 미세 거리 sweep - (거의) 제자리에서 겹침 판정 수행
-	const FVector ProbeEnd = Center + FVector(DepenetrationSweepDist, 0.0f, 0.0f);
+	const FVector ProbeEnd = Center + Owner->GetActorForward() * DepenetrationSweepDist;
 	if (!World->PhysicsSweepByObjectTypes(Center, ProbeEnd, Rotation, Shape, Hit,
 			ObjectTypeBit(ECollisionChannel::WorldStatic), Owner))
 	{

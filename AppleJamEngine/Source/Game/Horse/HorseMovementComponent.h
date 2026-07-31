@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "Component/Movement/PawnMovementComponent.h"
 #include "Core/Types/CollisionTypes.h"
@@ -364,18 +364,18 @@ protected:
 	// Mesh 의 relative location 을 반영하므로 actor pivot은 임의 위치로 설정 가능
 	// NOTE: 클립의 pitch/roll(swing)·Z bobbing 은 root motion이 아니라 pose로 처리,
 	//       UAnimSequence의 옵션 (RootRotationLock, bExtractRootMotionZ) 참고
-	void ConsumeRootMotion(FVector& OutWorldDelta);
+	void ConsumeRootMotion(FVector& OutWorldDelta, FQuat& OutYawTwist);
 
 	// ── 모드별 tick ──────────────────────────────────────────────────────────
-	void TickGrounded(float DeltaTime, const FVector& WorldDelta);
-	void TickSliding(float DeltaTime);
+	void TickGrounded(float DeltaTime, const FVector& WorldDelta, const FQuat& RootYawTwist);
+	void TickSliding(float DeltaTime, const FQuat& RootYawTwist);
 	void TickFalling(float DeltaTime);	// 끼임 탈출도 Falling에서 처리함
 
 	// ── Grounded 세부 ────────────────────────────────────────────────────────
 	// 이번 frame 실제로 적용할 수평 이동량. root motion / skid 관성 중 하나를 고르고 실족 밀기를 얹는다.
 	FVector ConsumeGroundedMoveXY(float DeltaTime, const FVector& WorldDelta);
-	// 몸통 충돌(전진 sweep + 겹침 해소)을 거친 뒤의 위치. Velocity XY 리포팅도 여기서 한다.
-	FVector MoveTorsoXY(float DeltaTime, FVector Loc, const FVector& MoveXY);
+	// 몸통 충돌(전진 sweep + 겹침 해소)을 계산한 뒤 위치와 yaw를 반환
+	TPair<FVector, FQuat> CalculateSafeMovement(float DeltaTime, FVector Loc, const FVector& MoveXY, const FQuat& RootYawTwist);
 	// 표본 높이로 Z 스냅. step 범위를 벗어나면(낭떠러지) false — 호출자가 낙하로 넘긴다.
 	bool TrySnapToGround(const FHorseGroundSample& Sample, FVector& Loc);
 	// 접지 유지가 확정된 뒤의 상태 갱신 — 경사 이징, 몸통 기울기, 다음 frame 용 표식들.
@@ -428,7 +428,7 @@ protected:
 	// solve 횟수는 최대 MaxDenetrationIter까지만, 그 후에도 겹쳐있다면 겹쳐진대로 방치 (완전 분리 보장 X)
 	// PendingMoveXY = 이번 frame 전진분(ResolveTorso 결과). 캡슐은 아직 그만큼 안 움직였으므로
 	// 여기서 더해 '이동 후' 위치에서 겹침을 푼다 — 안 더하면 한 frame 전 위치를 푸는 셈이 된다.
-	FVector DepenetrateTorso(const FVector& PendingMoveXY);
+	FVector DepenetrateTorso(const FVector& PendingMoveXY, bool& bOutFullySolved);
 	// 하체 box 겹침 해소. 제자리 회전(root motion yaw)은 sweep 을 거치지 않아 상자가 단차에
 	// 파고들 수 있고, 겹친 뒤에는 MTD 노멀만으로 판단해야 해서 판정이 헐거워진다 → 매 frame 풀어 준다.
 	FVector DepenetrateLegBox(const FVector& PendingMoveXY);
