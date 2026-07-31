@@ -55,6 +55,21 @@ private:
 	UPROPERTY(Edit, Save, Category="AI|Sensor", DisplayName="Ground Bias Angle", Min=0.0f, Max=15.0f, Speed=0.1f)
 	float GroundBiasAngle = 5.0f; // deg — box 정렬은 유지하고 sweep 경로만 지면 접선보다 위로 든다.
 
+	UPROPERTY(Edit, Save, Category="AI|Sensor", DisplayName="Terrain Sample Spacing", Min=0.1f, Max=2.0f, Speed=0.05f)
+	float TerrainSampleSpacing = 0.5f; // m — sweep 충돌이 지형인지 확인할 수직 ray 간격.
+
+	UPROPERTY(Edit, Save, Category="AI|Sensor", DisplayName="Terrain Probe Up", Min=0.0f, Max=5.0f, Speed=0.05f)
+	float TerrainProbeUp = 1.0f;       // m — 직전 지면 높이에서 ray 시작점을 올리는 거리.
+
+	UPROPERTY(Edit, Save, Category="AI|Sensor", DisplayName="Terrain Probe Down", Min=0.0f, Max=10.0f, Speed=0.05f)
+	float TerrainProbeDown = 3.0f;     // m — 직전 지면 높이 아래까지 탐색하는 거리.
+
+	UPROPERTY(Edit, Save, Category="AI|Sensor", DisplayName="Max Terrain Step", Min=0.0f, Max=3.0f, Speed=0.02f)
+	float MaxTerrainStep = 0.5f;       // m — 인접 표본 사이에 허용할 최대 단차.
+
+	UPROPERTY(Edit, Save, Category="AI|Sensor", DisplayName="Walkable Terrain Normal Z", Min=0.0f, Max=1.0f, Speed=0.01f)
+	float WalkableTerrainNormalZ = 0.7f; // 각 표본의 지면 normal Z 하한.
+
 	UPROPERTY(Edit, Save, Category="AI|Sensor", DisplayName="Jump Probe Up", Min=0.0f, Max=3.0f, Speed=0.02f)
 	float JumpProbeUp = 1.0f;     // m — center 방향을 이만큼 올려 쏨. 그 위가 뚫려 있으면 장애물 윗변이 아래 → 점프 가능.
 
