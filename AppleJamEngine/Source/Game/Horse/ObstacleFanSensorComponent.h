@@ -107,6 +107,9 @@ private:
 	UPROPERTY(Edit, Save, Category="AI|Sensor", DisplayName="Draw Debug")
 	bool  bDrawDebug = true;
 
+	UPROPERTY(Edit, Save, Category = "AI|Sensor", DisplayName = "Draw Jump Debug")
+	bool  bDrawJumpDebug = true;
+
 	TWeakObjectPtr<UWorld> World;
 	TWeakObjectPtr<UBlackboardComponent> BlackboardComp;
 	TWeakObjectPtr<class UHorseMovementComponent> MovementComp;

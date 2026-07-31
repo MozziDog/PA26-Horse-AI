@@ -288,7 +288,7 @@ void UObstacleFanSensorComponent::TickComponent(float DeltaTime, ELevelTick Tick
 	BlackboardComp->GetBlackboard().SetFloat(HorseBBKeys::ObsFwdDist, LowClear);
 	BlackboardComp->GetBlackboard().SetBool(HorseBBKeys::ObsJumpable, bJumpable);
 
-	if (bDrawDebug)
+	if (bDrawJumpDebug)
 	{
 		// low ray: 초록=clear, 빨강=실제 장애물 후보, 파랑=지면/경사 전환으로 기각.
 		const FVector LowEnd = LowHit.bHit ? LowHit.WorldHitLocation : LowOrigin + Forward * ProbeRange;
