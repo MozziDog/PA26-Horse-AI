@@ -35,10 +35,10 @@ UHorseLocomotionComponent::UHorseLocomotionComponent()
 	PrimaryComponentTick.bCanEverTick = true;
 	PrimaryComponentTick.bTickEnabled = true;
 	PrimaryComponentTick.bStartWithTickEnabled = true;
-	// Movement(TG_PostPhysics)가 consume 하기 전에 이번 frame 입력을 실어주도록 앞 그룹에서 tick.
-	// 순서 어긋나면 최대 1프레임 지연 발생할 수 있음. (critical한 요소는 아님)
-	PrimaryComponentTick.SetTickGroup(TG_PrePhysics);
-	PrimaryComponentTick.SetEndTickGroup(TG_PrePhysics);
+	// 센서(기본 TG_PrePhysics)가 Blackboard를 갱신한 뒤, Movement(TG_PostPhysics)가 입력을
+	// 소비하기 전에 판단한다. 별도 prerequisite API가 없어 tick group으로 순서를 보장한다.
+	PrimaryComponentTick.SetTickGroup(TG_DuringPhysics);
+	PrimaryComponentTick.SetEndTickGroup(TG_DuringPhysics);
 }
 
 void UHorseLocomotionComponent::BeginPlay()
@@ -95,7 +95,7 @@ void UHorseLocomotionComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 
 	UpdateGait(DeltaTime);                                                  // BT 요청 + 쿨타임 반영
 	const FHorseSteeringInfluence Influence = GatherSteeringInfluences(*BB);     // UserInput/Road 소스
-	UpdateJumpGate(*BB);                                                    // 정면 장애물 점프 게이트
+	UpdateJumpGate(*BB, DeltaTime);                                         // 정면 장애물 점프 게이트
 	UpdateContextSteering(*BB, *Owner, Forward, Influence, DeltaTime);      // 회피 조향 + Movement 입력
 }
 
@@ -151,7 +151,7 @@ FHorseSteeringInfluence UHorseLocomotionComponent::GatherSteeringInfluences(FBla
 
 // ── 점프 게이트 ── 정면 장애물이 점프 가능(ObsJumpable)하고 트리거 거리 안이면 도약(heading 유지).
 // 이미 bJumpPerformed인 경우에는 다시 점프 안함. (제자리 혹은 점프 후 연속 점프 방지)
-void UHorseLocomotionComponent::UpdateJumpGate(FBlackboard& BB)
+void UHorseLocomotionComponent::UpdateJumpGate(FBlackboard& BB, float DeltaTime)
 {
 	bool  bJumpable = false;
 	float FwdDist   = 0.0f;
@@ -162,20 +162,30 @@ void UHorseLocomotionComponent::UpdateJumpGate(FBlackboard& BB)
 
 	const bool bJumpGateActive =
 		BB.TryGetBool(HorseBBKeys::ObsJumpable, bJumpable) && bJumpable
-		&& BB.TryGetFloat(HorseBBKeys::ObsFwdDist, FwdDist) && FwdDist < JumpTriggerDist;
+		&& BB.TryGetFloat(HorseBBKeys::ObsFwdDist, FwdDist) && FwdDist < JumpTriggerDist
+		&& Movement->GetForwardSpeed() >= MinJumpApproachSpeed;
 
 	if (Movement->IsFalling())   // Falling 상태에서는 점프 불가
 	{
+		JumpCandidateTime = 0.0f;
 		return;
 	}
 
-	if (bJumpGateActive && !bJumpPerformed)
+	if (bJumpGateActive)
 	{
-		Movement->StartJump();
-		bJumpPerformed = true;   // 이번 접근에 대한 점프 소진
+		JumpCandidateTime += std::max(0.0f, DeltaTime);
+		if (JumpCandidateTime >= JumpConfirmTime && !bJumpPerformed)
+		{
+			Movement->StartJump();
+			bJumpPerformed = true;   // 이번 접근에 대한 점프 소진
+		}
 	}
-	else if (!bJumpGateActive)
+	else
 	{
+		JumpCandidateTime = 0.0f;
+		// 애니메이션 wind-up 중 센서 조건이 사라지면 요청을 취소한다.
+		// OnJumpNotify도 bJumpRequested를 다시 확인하므로 이미 진입한 클립의 Notify가 와도 이륙하지 않는다.
+		Movement->CancelPendingJump();
 		bJumpPerformed = false;  // 장애물 벗어남 → 다음 장애물 상황을 위해 리셋
 	}
 }
@@ -583,6 +593,8 @@ void UHorseLocomotionComponent::Serialize(FArchive& Ar)
 	Ar << TrotJumpTriggerDist;
 	Ar << CanterJumpTriggerDist;
 	Ar << GallopJumpTriggerDist;
+	Ar << JumpConfirmTime;
+	Ar << MinJumpApproachSpeed;
 	Ar << bDrawSteeringDebug;
 	Ar << HardBlockDistance;
 	Ar << DangerWeight;

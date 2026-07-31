@@ -96,7 +96,7 @@ protected:
 	void  ClampGaitToEnvelope();
 	bool GetPlanarForward(const AActor& Owner, FVector& OutForward) const;   // 수평 forward, degenerate 면 false
 	FHorseSteeringInfluence GatherSteeringInfluences(FBlackboard& BB) const; // UserInput/Road 등 입력 수집
-	void UpdateJumpGate(FBlackboard& BB);
+	void UpdateJumpGate(FBlackboard& BB, float DeltaTime);
 	void UpdateContextSteering(FBlackboard& BB, const AActor& Owner, const FVector& Forward, const FHorseSteeringInfluence& Influence, float DeltaTime);
 	// UpdateContextSteering 하위 루틴
 	void BuildDangerField(FBlackboard& BB, const FVector& Forward, float DeltaTime, FSteerContext& Field);   // 슬롯 별 danger/hard-block 산출
@@ -188,6 +188,14 @@ protected:
 	UPROPERTY(Edit, Save, Category = "Locomotion|Jump", DisplayName = "Gallop Jump Trigger Dist", Min = 0.0f, Max = 20.0f, Speed = 0.05f)
 	float GallopJumpTriggerDist = 5.0f;
 
+	// 한 프레임짜리 센서 hit로 점프가 래치되지 않도록 후보가 유지되어야 하는 시간.
+	UPROPERTY(Edit, Save, Category = "Locomotion|Jump", DisplayName = "Jump Confirm Time", Min = 0.0f, Max = 1.0f, Speed = 0.01f)
+	float JumpConfirmTime = 0.05f;
+
+	// 정지/후진 중 스쳐 지나가는 hit로 점프하지 않도록 하는 최소 전진 속도.
+	UPROPERTY(Edit, Save, Category = "Locomotion|Jump", DisplayName = "Min Jump Approach Speed", Min = 0.0f, Max = 20.0f, Speed = 0.05f)
+	float MinJumpApproachSpeed = 0.5f;
+
 
 	// ── runtime states ──────────────────────────────────────────────────────────────────────────────────
 	EHorseGait Gait     = EHorseGait::Stop;
@@ -198,6 +206,7 @@ protected:
 	float      PrevDanger[HORSE_MAX_FAN_SLOTS] = {};   // slot 별 직전 프레임 danger(slow-release 감쇠용).
 	float      SteerAngle    = 0.0f;   // 현재 조향각(forward 기준 deg). 목표각으로 slew 되는 상태값.
 	bool       bJumpPerformed = false;   // 이번 점프 요청에 실제로 점프했는지 여부 (무한 점프 방지)
+	float      JumpCandidateTime = 0.0f; // 현재 점프 후보가 연속으로 유지된 시간.
 
 	// ── 평행이동(strafe) 상태 — SetStrafeMode 가 입력, UpdateStrafeMode 가 모드 전이 ──
 	bool  bStrafeMode        = false;  // 현재 평행이동 모드 여부.

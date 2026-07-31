@@ -119,6 +119,10 @@ public:
 	UFUNCTION(Pure, Category="HorseMovement")
 	float   GetForwardSpeed() const;
 	UFUNCTION(Pure, Category="HorseMovement")
+	float   GetJumpSpeed() const { return JumpSpeed; }
+	// 센서의 점프 궤적 예측용. 실제 TickFalling과 같은 world gravity를 반환한다.
+	FVector GetJumpPredictionGravity() const { return GetGravity(); }
+	UFUNCTION(Pure, Category="HorseMovement")
 	bool    IsFalling() const { return MoveMode == EHorseMoveMode::Falling; }
 	UFUNCTION(Pure, Category="HorseMovement")
 	bool    IsSliding() const { return MoveMode == EHorseMoveMode::Sliding; }
@@ -148,6 +152,10 @@ public:
 	// 도움닫기 + 점프 애니메이션을 시작한다. 실제 이륙은 AnimNotify_HorseJump → NotifyJumpTakeoff() 가 담당
 	UFUNCTION(Callable, Category="HorseMovement")
 	void    StartJump();
+	// wind-up 중 점프 조건이 사라졌을 때 pending 요청을 취소한다.
+	// 이미 이륙했거나 Notify가 실제 점프를 예약한 뒤에는 건드리지 않는다.
+	UFUNCTION(Callable, Category="HorseMovement")
+	void    CancelPendingJump();
 	// AnimNotify_HorseJump에 의해 콜백으로 호출
 	// bWantJump를 통해 간접적으로 점프하므로 중복 호출도 문제 없음
 	UFUNCTION(Callable, Category="HorseMovement")
