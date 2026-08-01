@@ -96,6 +96,91 @@ void UObstacleFanSensorComponent::BeginPlay()
 	MovementComp   = Owner->GetComponentByClass<UHorseMovementComponent>();
 }
 
+bool UObstacleFanSensorComponent::IsTraversableTerrain(IPhysicsScene& Physics, const FVector& Origin,
+	const FVector& PlanarDir, const FHitResult& SweepHit) const
+{
+	const float Spacing = std::max(TerrainSampleSpacing, 0.1f);
+	const int SampleCount = std::max(1, static_cast<int>(std::ceil(ProbeRange / Spacing)));
+	const float ContactDistance = std::clamp(
+		(SweepHit.WorldHitLocation - Origin).Dot(PlanarDir), 0.0f, ProbeRange);
+
+	bool bHasPrevious = false;
+	bool bGroundChangesAtContact = false;
+	float PreviousHeight = 0.0f;
+	float PreviousDistance = 0.0f;
+
+	for (int SampleIndex = 0; SampleIndex <= SampleCount; ++SampleIndex)
+	{
+		const float Distance = ProbeRange * static_cast<float>(SampleIndex) / static_cast<float>(SampleCount);
+		const FVector ProbePoint = Origin + PlanarDir * Distance;
+		const float RayStartZ = bHasPrevious
+			? PreviousHeight + TerrainProbeUp
+			: Origin.Z + TerrainProbeUp;
+		const FVector RayStart(ProbePoint.X, ProbePoint.Y, RayStartZ);
+		const float RayLength = bHasPrevious
+			? TerrainProbeUp + TerrainProbeDown
+			: TerrainProbeUp + TerrainProbeDown + BodyHalfHeight;
+
+		FHitResult GroundHit;
+		Physics.Raycast(RayStart, FVector::DownVector, RayLength, GroundHit,
+			ECollisionChannel::WorldStatic, Owner);
+
+		FVector Normal = GroundHit.ImpactNormal;
+		if (Normal.IsNearlyZero())
+		{
+			Normal = GroundHit.WorldNormal;
+		}
+		if (!GroundHit.bHit || Normal.IsNearlyZero() ||
+			Normal.Normalized().Z < WalkableTerrainNormalZ)
+		{
+			if (bDrawDebug)
+			{
+				DrawDebugLine(World, RayStart, RayStart + FVector::DownVector * RayLength, FColor::Red());
+			}
+			return false;
+		}
+
+		if (bHasPrevious)
+		{
+			const float HeightDelta = std::abs(GroundHit.WorldHitLocation.Z - PreviousHeight);
+			if (HeightDelta > MaxTerrainStep)
+			{
+				if (bDrawDebug)
+				{
+					DrawDebugLine(World, RayStart, GroundHit.WorldHitLocation, FColor::Red());
+				}
+				return false;
+			}
+
+			if (PreviousDistance <= ContactDistance + Spacing &&
+				Distance >= ContactDistance - Spacing &&
+				HeightDelta > 1.e-2f)
+			{
+				bGroundChangesAtContact = true;
+			}
+		}
+
+		if (bDrawDebug)
+		{
+			DrawDebugLine(World, RayStart, GroundHit.WorldHitLocation, FColor(0, 200, 255));
+		}
+		PreviousHeight = GroundHit.WorldHitLocation.Z;
+		PreviousDistance = Distance;
+		bHasPrevious = true;
+	}
+
+	FVector ContactNormal = SweepHit.ImpactNormal;
+	if (ContactNormal.IsNearlyZero())
+	{
+		ContactNormal = SweepHit.WorldNormal;
+	}
+	const bool bGroundFacingContact = !ContactNormal.IsNearlyZero() &&
+		ContactNormal.Normalized().Z >= WalkableTerrainNormalZ;
+
+	// 평평한 지면 접촉이거나, steep edge가 실제 허용 단차와 일치할 때만 지형으로 무시한다.
+	return bGroundFacingContact || bGroundChangesAtContact;
+}
+
 void UObstacleFanSensorComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction& ThisTickFunction)
 {
 	(void)DeltaTime; (void)TickType; (void)ThisTickFunction;
@@ -126,92 +211,6 @@ void UObstacleFanSensorComponent::TickComponent(float DeltaTime, ELevelTick Tick
 		GroundUp = MovementComp->GetCurrentGroundNormal();
 	}
 
-	// sweep이 지면을 장애물로 맞힌 경우에만 경로의 지면을 연속 표본화한다.
-	// 모든 표본이 보행 가능한 경사이고 인접 높이 차가 허용 단차 이내면 지형으로 본다.
-	const auto IsTraversableTerrain = [&](const FVector& PlanarDir, const FHitResult& SweepHit)
-	{
-		const float Spacing = std::max(TerrainSampleSpacing, 0.1f);
-		const int SampleCount = std::max(1, static_cast<int>(std::ceil(ProbeRange / Spacing)));
-		const float ContactDistance = std::clamp(
-			(SweepHit.WorldHitLocation - Origin).Dot(PlanarDir), 0.0f, ProbeRange);
-
-		bool bHasPrevious = false;
-		bool bGroundChangesAtContact = false;
-		float PreviousHeight = 0.0f;
-		float PreviousDistance = 0.0f;
-
-		for (int SampleIndex = 0; SampleIndex <= SampleCount; ++SampleIndex)
-		{
-			const float Distance = ProbeRange * static_cast<float>(SampleIndex) / static_cast<float>(SampleCount);
-			const FVector ProbePoint = Origin + PlanarDir * Distance;
-			const float RayStartZ = bHasPrevious
-				? PreviousHeight + TerrainProbeUp
-				: Origin.Z + TerrainProbeUp;
-			const FVector RayStart(ProbePoint.X, ProbePoint.Y, RayStartZ);
-			const float RayLength = bHasPrevious
-				? TerrainProbeUp + TerrainProbeDown
-				: TerrainProbeUp + TerrainProbeDown + BodyHalfHeight;
-
-			FHitResult GroundHit;
-			Physics->Raycast(RayStart, FVector::DownVector, RayLength, GroundHit,
-				ECollisionChannel::WorldStatic, Owner);
-
-			FVector Normal = GroundHit.ImpactNormal;
-			if (Normal.IsNearlyZero())
-			{
-				Normal = GroundHit.WorldNormal;
-			}
-			if (!GroundHit.bHit || Normal.IsNearlyZero() ||
-				Normal.Normalized().Z < WalkableTerrainNormalZ)
-			{
-				if (bDrawDebug)
-				{
-					DrawDebugLine(World, RayStart, RayStart + FVector::DownVector * RayLength, FColor::Red());
-				}
-				return false;
-			}
-
-			if (bHasPrevious)
-			{
-				const float HeightDelta = std::abs(GroundHit.WorldHitLocation.Z - PreviousHeight);
-				if (HeightDelta > MaxTerrainStep)
-				{
-					if (bDrawDebug)
-					{
-						DrawDebugLine(World, RayStart, GroundHit.WorldHitLocation, FColor::Red());
-					}
-					return false;
-				}
-
-				if (PreviousDistance <= ContactDistance + Spacing &&
-					Distance >= ContactDistance - Spacing &&
-					HeightDelta > 1.e-2f)
-				{
-					bGroundChangesAtContact = true;
-				}
-			}
-
-			if (bDrawDebug)
-			{
-				DrawDebugLine(World, RayStart, GroundHit.WorldHitLocation, FColor(0, 200, 255));
-			}
-			PreviousHeight = GroundHit.WorldHitLocation.Z;
-			PreviousDistance = Distance;
-			bHasPrevious = true;
-		}
-
-		FVector ContactNormal = SweepHit.ImpactNormal;
-		if (ContactNormal.IsNearlyZero())
-		{
-			ContactNormal = SweepHit.WorldNormal;
-		}
-		const bool bGroundFacingContact = !ContactNormal.IsNearlyZero() &&
-			ContactNormal.Normalized().Z >= WalkableTerrainNormalZ;
-
-		// 평평한 지면 접촉이거나, steep edge가 실제 허용 단차와 일치할 때만 지형으로 무시한다.
-		return bGroundFacingContact || bGroundChangesAtContact;
-	};
-
 	// ── 부채꼴 clearance ── 
 	const FVector BodyExtent(BodyRadius, BodyRadius, BodyHalfHeight);
 	const FCollisionShape BodyShape = FCollisionShape::MakeBox(BodyExtent);
@@ -231,7 +230,7 @@ void UObstacleFanSensorComponent::TickComponent(float DeltaTime, ELevelTick Tick
 
 		FHitResult Hit;
 		Physics->Sweep(Origin, End, BoxRotation, BodyShape, Hit, ECollisionChannel::WorldStatic, Owner);   // 자기 몸통 box 제외.
-		const bool bTerrain = Hit.bHit && IsTraversableTerrain(PlanarDir, Hit);
+		const bool bTerrain = Hit.bHit && IsTraversableTerrain(*Physics, Origin, PlanarDir, Hit);
 		const float Clear = Hit.bHit && !bTerrain ? Hit.Distance : ProbeRange;
 		if (std::abs(HorseBBKeys::ObsFanAngles[i]) < 1.e-3f)
 		{

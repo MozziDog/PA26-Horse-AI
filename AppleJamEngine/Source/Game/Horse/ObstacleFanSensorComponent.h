@@ -5,6 +5,9 @@
 
 #include "Source/Game/Horse/ObstacleFanSensorComponent.generated.h"
 
+class IPhysicsScene;
+struct FHitResult;
+
 // 1)
 // 전방 부채꼴 box sweep 으로 장애물 회피용 clearance map 을 Blackboard 에 기록(HorseBBKeys::ObsClear)
 // 부채꼴 각도는 HorseBBKeys::ObsFanAngles 상수값 사용
@@ -43,6 +46,9 @@ protected:
 	void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction& ThisTickFunction) override;
 
 private:
+	bool IsTraversableTerrain(IPhysicsScene& Physics, const FVector& Origin,
+		const FVector& PlanarDir, const FHitResult& SweepHit) const;
+
 	UPROPERTY(Edit, Save, Category="AI|Sensor", DisplayName="Probe Range", Min=0.0f, Max=50.0f, Speed=0.1f)
 	float ProbeRange = 6.0f;      // m — 각 sweep 최대 이동거리. 미탐지 시 clearance 로 기록되는 값.
 
