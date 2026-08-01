@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "Component/Movement/PawnMovementComponent.h"
 #include "Core/Types/CollisionTypes.h"
@@ -239,13 +239,10 @@ public:
 	UPROPERTY(Edit, Save, Category="HorseMovement|Ground", DisplayName="Rear Foot Back", Min=0.0f, Max=5.0f, Speed=0.01f)
 	float RearFootBack = 0.65f;        // m — actor pivot 기준 뒷발 후방 offset
 
-	// 무게중심은 지면 위인데 앞발 probe 가 허공인 상태 = 낭떠러지에 앞발을 걸친 자세.
-	// 이때 전방으로 천천히 밀어 결국 무게중심까지 넘어가 떨어지게 만든다(실족).
-	// 접지를 즉시 끊지 않는 이유: 무게중심 sphere 는 아직 지면을 잡고 있어서, 끊으면 착지 판정이
-	// 곧바로 접지를 되살려 Grounded/Falling 이 매 frame 발진한다.
-	// 0 이면 앞발이 허공이어도 그 자리에 계속 걸쳐 있는다.
+	// 무게중심은 지면 위인데 앞발 probe가 공중일 경우 실족 유도하도록 미는 속도
+	// NOTE: 조작으로 탈출 여지를 주려면 보행 속도보다 충분히 느리게 세팅, 탈출 안되게 하려면 크게 설정
 	UPROPERTY(Edit, Save, Category="HorseMovement|Ground", DisplayName="Edge Slip Speed", Min=0.0f, Max=5.0f, Speed=0.01f)
-	float EdgeSlipSpeed = 0.5f;        // m/s — 조작으로 물러설 여지를 주려면 보행 속도보다 충분히 느려야 한다.
+	float EdgeSlipSpeed = 1.0f;        // m/s 
 
 	// ── 몸통 기울기(지면 정렬) ──
 	UPROPERTY(Edit, Save, Category="HorseMovement|BodyTilt", DisplayName="Align Body To Ground")
