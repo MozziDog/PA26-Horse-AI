@@ -3,6 +3,7 @@
 
 #include "Game/Horse/HorseConstants.h"
 #include "HorseLocomotionComponent.h"
+#include "HorseMovementComponent.h"
 #include "Debug/DrawDebugHelpers.h"
 #include "GameFramework/AActor.h"
 #include "GameFramework/World.h"
@@ -21,6 +22,15 @@ namespace
 		const float S = std::sin(Rad);
 		return FVector(V.X * C - V.Y * S, V.X * S + V.Y * C, V.Z);
 	}
+
+	FVector ProjectDirectionOntoGround(const FVector& PlanarDir, const FVector& GroundNormal)
+	{
+		const FVector GroundUp = GroundNormal.IsNearlyZero()
+			? FVector::UpVector
+			: GroundNormal.Normalized();
+		const FVector GroundDir = PlanarDir - GroundUp * PlanarDir.Dot(GroundUp);
+		return GroundDir.IsNearlyZero() ? PlanarDir : GroundDir.Normalized();
+	}
 }
 
 void UCliffFanSensorComponent::BeginPlay()
@@ -29,6 +39,7 @@ void UCliffFanSensorComponent::BeginPlay()
 	World = GetWorld();
 	BlackboardComp = Owner->GetComponentByClass<UBlackboardComponent>();
 	LocomotionComp = Owner->GetComponentByClass<UHorseLocomotionComponent>();
+	MovementComp = Owner->GetComponentByClass<UHorseMovementComponent>();
 }
 
 float UCliffFanSensorComponent::GetProbeDistance() const
@@ -73,12 +84,16 @@ void UCliffFanSensorComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 	const float   ProbeDist   = GetProbeDistance();
 	const FVector Down        = FVector::DownVector;	// 컴포넌트의 회전과 상관없이 World down 방향 사용
 	const float   RayLen      = ProbeUpDist + ProbeDownDist;
+	const FVector GroundNormal = MovementComp.IsValid()
+		? MovementComp->GetCurrentGroundNormal()
+		: FVector::UpVector;
 
 	// slot 별 지면 유무 판정
 	for (int i = 0; i < HorseBBKeys::ObsFanCount; ++i)
 	{
-		const FVector Dir        = RotateAroundZ(Forward, HorseBBKeys::ObsFanAngles[i]);
-		const FVector ProbePoint = Origin + Dir * ProbeDist;
+		const FVector PlanarDir  = RotateAroundZ(Forward, HorseBBKeys::ObsFanAngles[i]);
+		const FVector GroundDir  = ProjectDirectionOntoGround(PlanarDir, GroundNormal);
+		const FVector ProbePoint = Origin + GroundDir * ProbeDist;
 		const FVector RayStart   = ProbePoint + FVector(0.0f, 0.0f, ProbeUpDist);
 
 		FHitResult Hit;
@@ -114,10 +129,17 @@ void UCliffFanSensorComponent::ContributeSelectedVisuals(FScene& Scene) const
 	const FVector Origin = GetWorldLocation();
 	const FVector Down   = FVector(0.0f, 0.0f, -1.0f);
 	const float   RayLen = ProbeUpDist + ProbeDownDist;
+	const UHorseMovementComponent* Movement = Owner
+		? Owner->GetComponentByClass<UHorseMovementComponent>()
+		: nullptr;
+	const FVector GroundNormal = Movement
+		? Movement->GetCurrentGroundNormal()
+		: FVector::UpVector;
 	for (int i = 0; i < HorseBBKeys::ObsFanCount; ++i)
 	{
-		const FVector Dir      = RotateAroundZ(Forward, HorseBBKeys::ObsFanAngles[i]);
-		const FVector RayStart = Origin + Dir * WalkProbeDistance + FVector(0.0f, 0.0f, ProbeUpDist);
+		const FVector PlanarDir = RotateAroundZ(Forward, HorseBBKeys::ObsFanAngles[i]);
+		const FVector GroundDir = ProjectDirectionOntoGround(PlanarDir, GroundNormal);
+		const FVector RayStart = Origin + GroundDir * WalkProbeDistance + FVector(0.0f, 0.0f, ProbeUpDist);
 		Scene.AddDebugLine(RayStart, RayStart + Down * RayLen, FColor(0, 200, 255));
 	}
 }

@@ -6,6 +6,7 @@
 #include "Source/Game/Horse/CliffFanSensorComponent.generated.h"
 
 class UHorseLocomotionComponent;
+class UHorseMovementComponent;
 
 // 전방 부채꼴 각 slot 진행지점 아래로 raycast, 밟을 지면이 있는지 검사
 // 방향은 HorseBBKeys::ObsFanAngles에 정의된 것 사용 (ObstacleFanSensor와 동일)
@@ -52,4 +53,5 @@ private:
 	TWeakObjectPtr<UWorld> World;
 	TWeakObjectPtr<UBlackboardComponent> BlackboardComp;
 	TWeakObjectPtr<UHorseLocomotionComponent> LocomotionComp;
+	TWeakObjectPtr<UHorseMovementComponent> MovementComp;
 };
