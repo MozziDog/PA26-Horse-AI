@@ -1,4 +1,4 @@
-#include "HorseMovementComponent.h"
+﻿#include "HorseMovementComponent.h"
 
 #include "Animation/AnimInstance.h"
 #include "Animation/Graph/AnimGraphInstance.h"
@@ -58,6 +58,11 @@ namespace
 			return 1.0f;
 		}
 		return std::clamp(1.0f - std::exp(-Speed * DeltaTime), 0.0f, 1.0f);
+	}
+
+	float NormalZFromSlopeDeg(float SlopeDeg)
+	{
+		return std::cos(std::clamp(SlopeDeg, 0.0f, 90.0f) * DEG_TO_RAD);
 	}
 
 	// +Z 를 Up 으로 보내는 최소 회전(swing). twist(yaw) 성분이 생기지 않아 몸통 방향을 오염시키지 않는다.
@@ -473,7 +478,7 @@ void UHorseMovementComponent::TickFalling(float DeltaTime)
 	// 착지 판정은 TickGrounded 의 접지 유지 판정과 반드시 같은 기준(SampleGround)이어야 한다.
 	// 중심 ray 하나로 착지를 인정하면 무게중심 sphere 와 모양·위치·탐색범위가 달라서, 둘의 결과가
 	// 엇갈리는 자리에서 Grounded/Falling 이 매 frame 뒤집힌다.
-	// 탐침 범위(ProbeUp/Down)가 발 평면 위아래를 넉넉히 덮으므로 한 frame 에 발이 지면을
+	// 탐침 범위(GroundProbeUp/Down)가 발 평면 위아래를 넉넉히 덮으므로 한 frame 에 발이 지면을
 	// 지나쳐 버려도 잡힌다.
 	FHorseGroundSample Sample;
 	const bool bSupported = SampleGround(Loc, Sample);
@@ -584,7 +589,7 @@ void UHorseMovementComponent::UpdateSlidingState(float DeltaTime, const FHitResu
 	Velocity = Velocity - N * Velocity.Dot(N);
 
 	// 완경사/평지 도달 → 보행 복귀.
-	if (N.Z >= WalkableSlopeZ)
+	if (N.Z >= NormalZFromSlopeDeg(WalkableSlopeDeg))
 	{
 		Velocity.Z   = 0.0f;
 		MoveMode     = EHorseMoveMode::Grounded;
@@ -611,15 +616,15 @@ bool UHorseMovementComponent::ProbeCenterOfMass(const FVector& PivotLoc, FHitRes
 	GetPlanarBasis(Forward, Right);
 
 	const float Radius = std::max(SupportSphereRadius, 0.01f);
-	const float Up     = std::max(ProbeUp, 0.0f);
-	const float Down   = std::max(ProbeDown, 0.0f);
+	const float Up     = std::max(GroundProbeUp, 0.0f);
+	const float Down   = std::max(GroundProbeDown, 0.0f);
 	if (Up + Down <= 1.e-4f)
 	{
 		return false;
 	}
 
 	// sphere '중심' 을 훑지만 접지 판정 기준은 sphere 의 바닥이라 시작/끝 높이에 Radius 를 더한다.
-	// 즉 접점이 [FootZ - ProbeDown, FootZ + ProbeUp] 안에 있으면 지면으로 본다 — 앞다리 ray 와 같은 범위.
+	// 즉 접점이 [FootZ - GroundProbeDown, FootZ + GroundProbeUp] 안에 있으면 지면으로 본다 — 앞다리 ray 와 같은 범위.
 	const float   FootZ  = PivotLoc.Z - StandHeight;
 	const FVector XY     = FVector(PivotLoc.X, PivotLoc.Y, 0.0f) + Forward * SupportSphereForward;
 	const FVector Start(XY.X, XY.Y, FootZ + Up + Radius);
@@ -647,7 +652,7 @@ bool UHorseMovementComponent::ProbeCenterOfMass(const FVector& PivotLoc, FHitRes
 bool UHorseMovementComponent::IsWalkableSlope(const FHorseGroundSample& Sample) const
 {
 	// 기준은 앞뒤 probe 가 만든 지지선의 노멀(LocalUp). MaxBodyPitch 클램프 전 값이라 실제 지형 각도다.
-	return Sample.LocalUp.Z >= WalkableSlopeZ;
+	return Sample.LocalUp.Z >= NormalZFromSlopeDeg(WalkableSlopeDeg);
 }
 
 FVector UHorseMovementComponent::LocalizeGroundNormal(const FVector& WorldNormal) const
@@ -719,8 +724,8 @@ void UHorseMovementComponent::ProbeGroundContacts(const FHorseLocalFrame& Frame,
 
 	FHitResult FrontHit;
 	FHitResult RearHit;
-	OutSample.bFrontHit = TraceGroundAt(FrontXY, Frame.FootZ, ProbeUp, ProbeDown, FrontHit);
-	OutSample.bRearHit  = TraceGroundAt(RearXY,  Frame.FootZ, ProbeUp, ProbeDown, RearHit);
+	OutSample.bFrontHit = TraceGroundAt(FrontXY, Frame.FootZ, GroundProbeUp, GroundProbeDown, FrontHit);
+	OutSample.bRearHit  = TraceGroundAt(RearXY,  Frame.FootZ, GroundProbeUp, GroundProbeDown, RearHit);
 	if (OutSample.bFrontHit)
 	{
 		OutSample.FrontPoint = FrontHit.WorldHitLocation;
@@ -888,7 +893,7 @@ void UHorseMovementComponent::ApplyBodyTilt()
 	// 벽으로 오판된다. 기울이면 판정 띠가 '지금 몸이 정렬한 지면 위 0.5~0.6m' 를 유지하므로,
 	// 경사면에 놓인 단차도 그 지면 기준 높이로 판정된다.
 	// NOTE: 기울기는 MaxBodyPitch 로 잘리고 BodyAlignSpeed 로 늦게 따라오므로 완벽히 정렬되진 않는다 —
-	//       남는 오차는 StepBlockWallZ(벽만 막는 기준)가 흡수한다.
+	//       남는 오차는 StepBlockWallDeg(벽만 막는 기준)가 흡수한다.
 	if (bLegBoxBaseCached)
 	{
 		TiltComponent(LegCollider.Get(), LegBoxBaseRotation, LegBoxBaseLocation, Pivot);
@@ -925,7 +930,7 @@ void UHorseMovementComponent::EvaluateDismountRules(float DeltaTime)
 		return;
 	}
 	// 작은 턱을 넘거나 잠깐 접지를 놓치는 정도로는 판정하지 않는다.
-	if (AirTime < PhysicsGraceTime)
+	if (AirTime < FallingGraceTime)
 	{
 		return;
 	}
@@ -1133,7 +1138,7 @@ void UHorseMovementComponent::SetStrafeInput(bool bEnabled, float Longitudinal, 
 
 float UHorseMovementComponent::ComputeInclineAngle(const FHorseGroundSample& Sample) const
 {
-	const float MaxAngle = std::acos(std::clamp(WalkableSlopeZ, 0.0f, 1.0f));
+	const float MaxAngle = std::clamp(WalkableSlopeDeg, 0.0f, 90.0f) * DEG_TO_RAD;
 	if (MaxAngle <= 1.e-4f)
 	{
 		return 0.0f;
@@ -1155,7 +1160,7 @@ float UHorseMovementComponent::ComputeInclineAngle(const FHitResult& Ground) con
 	const FVector N = GroundNormal(Ground);
 
 	const float SlopeAngle = std::acos(std::clamp(N.Z, -1.0f, 1.0f));
-	const float MaxAngle   = std::acos(std::clamp(WalkableSlopeZ, 0.0f, 1.0f));
+	const float MaxAngle   = std::clamp(WalkableSlopeDeg, 0.0f, 90.0f) * DEG_TO_RAD;
 	if (MaxAngle <= 1.e-4f)
 	{
 		return 0.0f;
@@ -1339,7 +1344,7 @@ FVector UHorseMovementComponent::ResolveTorso(const FVector& DeltaXY)
 	}
 
 	// walkable 면(램프 등)은 무시 — 지면 스냅이 처리. 급경사/벽만 차단.
-	if (GroundNormal(Hit).Z >= WalkableSlopeZ)
+	if (GroundNormal(Hit).Z >= NormalZFromSlopeDeg(WalkableSlopeDeg))
 	{
 		return DeltaXY;
 	}
@@ -1374,12 +1379,12 @@ FVector UHorseMovementComponent::ResolveLegBox(const FVector& DeltaXY)
 	}
 
 	// 오르막은 '일단 진행' 시킨다 — 경사면을 막아버리면 몸통 pitch 도, 급경사 미끄러짐 이행도
-	// 시작되지 않아서 제자리 뜀박질이 된다. 여기서 막는 건 벽에 가까운 면(StepBlockWallZ)뿐이고,
+	// 시작되지 않아서 제자리 뜀박질이 된다. 여기서 막는 건 벽에 가까운 면(StepBlockWallDeg)뿐이고,
 	// 보행 가능/불가 판단은 지면 표본(IsWalkableSlope → Sliding)이 계속 담당한다.
 	// NOTE: 겹친 상태에서는 이 노멀이 MTD 방향이라, 상자가 단차 '윗면' 을 품고 있으면 +Z 가 나와서
 	//       벽을 오르막으로 오판한다. 상자 높이 규약(EnsureStepBlockComponent 주석) 이 그걸 막는 전제다.
 	const FVector N = GroundNormal(Hit);
-	if (N.Z >= StepBlockWallZ)
+	if (N.Z >= NormalZFromSlopeDeg(StepBlockWallDeg))
 	{
 		return DeltaXY;
 	}
@@ -1464,7 +1469,7 @@ FVector UHorseMovementComponent::DepenetrateTorso(const FVector& PendingMoveXY, 
 	for (int Iter = 0; Iter < MaxDenetrationIter; ++Iter)
 	{
 		FVector Step;
-		if (!SolvePenetrationXY(Shape, Center, Torso.Rotation, WalkableSlopeZ, Step))
+		if (!SolvePenetrationXY(Shape, Center, Torso.Rotation, NormalZFromSlopeDeg(WalkableSlopeDeg), Step))
 		{
 			break;
 		}
@@ -1473,7 +1478,8 @@ FVector UHorseMovementComponent::DepenetrateTorso(const FVector& PendingMoveXY, 
 	}
 
 	FVector RemainingStep;
-	bOutFullySolved = !SolvePenetrationXY(Shape, Center, Torso.Rotation, WalkableSlopeZ, RemainingStep);
+	bOutFullySolved = !SolvePenetrationXY(
+		Shape, Center, Torso.Rotation, NormalZFromSlopeDeg(WalkableSlopeDeg), RemainingStep);
 	// Z는 지면 스냅 혹은 낙하 판정에서 계산할거니 수평 성분만 반환
 	Accum.Z = 0.0f;
 	return Accum;
@@ -1498,7 +1504,7 @@ FVector UHorseMovementComponent::DepenetrateLegBox(const FVector& PendingMoveXY)
 	{
 		FVector Step;
 		// 오르막을 밀어내면 등판이 막힌다 — 벽에 가까운 면만 해소 대상이다(ResolveLegBox 와 같은 기준).
-		if (!SolvePenetrationXY(Shape, Center, Rotation, StepBlockWallZ, Step))
+		if (!SolvePenetrationXY(Shape, Center, Rotation, NormalZFromSlopeDeg(StepBlockWallDeg), Step))
 		{
 			break;
 		}
@@ -1569,8 +1575,8 @@ void UHorseMovementComponent::DrawProbeDebug(const FHorseLocalFrame& Frame, cons
 	UWorld* World = GetWorld();
 	const FColor Green = FColor::Green();
 	const FColor Red   = FColor::Red();
-	const float  Up    = std::max(ProbeUp, 0.0f);
-	const float  Down  = std::max(ProbeDown, 0.0f);
+	const float  Up    = std::max(GroundProbeUp, 0.0f);
+	const float  Down  = std::max(GroundProbeDown, 0.0f);
 
 	// (1) 무게중심 sphere — 훑는 구간의 시작/끝과 최종 접점.
 	const FVector ComXY  = FVector(Frame.Origin.X, Frame.Origin.Y, 0.0f) + Frame.Forward * SupportSphereForward;
@@ -1659,38 +1665,43 @@ float UHorseMovementComponent::GetForwardSpeed() const
 void UHorseMovementComponent::Serialize(FArchive& Ar)
 {
 	Super::Serialize(Ar);
+	// ── 속도, 주행가능 각도, 점프력 등 ──
 	Ar << MaxSpeed;
 	Ar << GroundSnapMaxDown;
 	Ar << GroundSnapMaxUp;
 	Ar << StandHeight;
-	Ar << WalkableSlopeZ;
+	Ar << WalkableSlopeDeg;
+	Ar << StepBlockWallDeg;
 	Ar << SlideFriction;
-	Ar << bTorsoCollision;
-	Ar << TorsoSkin;
+	Ar << EdgeSlipSpeed;
 	Ar << JumpSpeed;
+	Ar << YawAlignTime;
+	Ar << MaxTurnRate;
+	// ── Collision 관련 ──
+	Ar << bTorsoCollision;
+	Ar << bLegCollision;
+	Ar << TorsoSkin;
+	// ── Rearing 관련 ──
 	Ar << RearMinSpeed;
 	Ar << SkidFriction;
 	Ar << SkidStopSpeed;
-	Ar << YawAlignTime;
-	Ar << MaxTurnRate;
-	// ── 접지 probe ──
+	// ── 접지 판정 ──
 	Ar << SupportSphereRadius;
 	Ar << SupportSphereForward;
 	Ar << FrontProbeForward;
 	Ar << FrontProbeHalfWidth;
-	Ar << ProbeUp;
-	Ar << ProbeDown;
+	Ar << GroundProbeUp;
+	Ar << GroundProbeDown;
 	Ar << RearFootBack;
-	Ar << EdgeSlipSpeed;
 	// ── 몸통 기울기 ──
 	Ar << bAlignBodyToGround;
 	Ar << MaxBodyPitch;
 	Ar << BodyAlignSpeed;
 	Ar << TiltPivotForward;
 	Ar << TiltPivotHeight;
-	// ── 물리 기반 이동 ──
+	// ── Falling 시의 추가 처리 관련 (낙마, 끼임 탈출등) ──
 	Ar << ForcedDismountSpeed;
-	Ar << PhysicsGraceTime;
+	Ar << FallingGraceTime;
 	Ar << bDismountDuringJump;
 	Ar << StuckDetectTime;
 	Ar << StuckAlongSpeed;

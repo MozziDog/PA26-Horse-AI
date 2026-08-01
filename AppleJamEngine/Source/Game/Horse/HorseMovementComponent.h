@@ -182,25 +182,33 @@ public:
 									   // (스카이림식 암벽 등반 방지)
 	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Root Stand Height", Min=0.0f, Max=5.0f, Speed=0.01f)
 	float StandHeight = 0.0f;		   // Actor pivot이 가지는 지면 대비 높이
-	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Walkable Slope Z", Min=0.0f, Max=1.0f, Speed=0.01f)
-	float WalkableSlopeZ = 0.7f;       // 지면 노멀 Z 가 이 값 미만이면 보행 불가 → Sliding. InclineAngle 정규화 한계이기도.
+	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Walkable Slope Deg", Min=0.0f, Max=90.0f, Speed=0.5f)
+	float WalkableSlopeDeg = 35.0f;    // 이 각도보다 가파른 지면은 보행 불가 → '미끄러짐'으로 이행
+	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Step Block Wall Slope Deg", Min=0.0f, Max=90.0f, Speed=0.5f)
+	float StepBlockWallDeg = 70.0f;    // 이 각도보다 가파른 지면은 하체 box가 장애물로 본다 → 아예 진입 불가
+									   // NOTE: WalkableSlopeDeg보다 크게 설정해야 경사면에 일단 올라가지고, 이후 미끄러진다
 	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Slide Friction", Min=0.0f, Max=10.0f, Speed=0.05f)
-	float SlideFriction = 1.5f;        // 1/s — 미끄러질 때 속도 감쇠율
+	float SlideFriction = 1.5f;        // 1/s — 미끄러질 때 속도 감쇠율 
+	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Edge Slip Speed", Min=0.0f, Max=5.0f, Speed=0.01f)
+	float EdgeSlipSpeed = 1.0f;        // m/s - 무게중심은 지면 위인데 앞발 probe가 공중일 경우 실족 유도하도록 미는 속도
+									   // NOTE: 조작으로 탈출 여지를 주려면 보행 속도보다 충분히 느리게 세팅, 탈출 안되게 하려면 크게 설정
+	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Jump Speed", Min=0.0f, Max=30.0f, Speed=0.1f)
+	float JumpSpeed = 5.8f;            // m/s — 점프 시 초기 상향 속도. (5.8m/s → 약 1.7m 점프)
+	UPROPERTY(Edit, Save, Category="HorseMovement|Steering", DisplayName = "Turn Smooth Time", Min=0.05f, Max=5.0f, Speed=0.01f)
+	float YawAlignTime = 0.4f;         // 초 — 진행 방향을 heading으로 수렴시키는 시간, 작을수록 민첩
+	UPROPERTY(Edit, Save, Category="HorseMovement|Steering", DisplayName = "Max Turn Rate", Min=0.0f, Max=720.0f, Speed=1.0f)
+	float MaxTurnRate = 205.0f;        // deg/s — 선회율 상한 ( NOTE: Turn 계통의 애니메이션과 맞춰야 함 )
 
-	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Torso Collision")
+
+	UPROPERTY(Edit, Save, Category="HorseMovement|Collision", DisplayName="Torso Collision")
 	bool  bTorsoCollision = true;      // 몸통 Capsule sweep 으로 벽/절벽 관통·비비기 차단
-	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Torso Skin", Min=0.0f, Max=1.0f, Speed=0.001f)
-	float TorsoSkin = 0.05f;           // Torso box에 여유 줘서 벽 근처에서 지형과 캐릭터 메시 교차 방지
+	UPROPERTY(Edit, Save, Category="HorseMovement|Collision", DisplayName="Leg Collision")
 	bool  bLegCollision = true;  // 무릎 높이에서 추가적인 Box sweep으로 
 									   // '올라서기엔 높고 몸통 캡슐에 걸리기엔 낮은' 애매한 단차 관통 차단. 
 									   // Grounded 이동에서만 동작.
-	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Step Block Wall Normal Z", Min=0.0f, Max=1.0f, Speed=0.01f)
-	float StepBlockWallZ = 0.35f;      // 하체 box가 '오르막길'이 아니라 '장애물'로 보는 노멀 Z 상한(0.35 ≈ 70°).
-	                                   // 이보다 완만한 면은 오르막으로 보고 통과시킨다
-									   // NOTE: WalkableSlopeZ보다 작게 설정해야 경사면에 일단 올라가지고, 이후 미끄러짐
+	UPROPERTY(Edit, Save, Category="HorseMovement|Collision", DisplayName="Torso Skin", Min=0.0f, Max=1.0f, Speed=0.001f)
+	float TorsoSkin = 0.05f;           // Torso box에 여유 줘서 벽 근처에서 지형과 캐릭터 메시 교차 방지
 
-	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Jump Speed", Min=0.0f, Max=30.0f, Speed=0.1f)
-	float JumpSpeed = 5.8f;            // m/s — 점프 시 초기 상향 속도. h≈v²/2g (5.8m/s → 약 1.7m)
 
 	UPROPERTY(Edit, Save, Category="HorseMovement|Rearing", DisplayName="Rear Min Speed", Min=0.0f, Max=1.0f, Speed=0.01f)
 	float RearMinSpeed = 0.25f;        // 급정지 Rearing 발동 최소 정규화 속도. 이 미만으로 느리게 접근해 멈추면 뒷발서기 생략.
@@ -208,11 +216,6 @@ public:
 	float SkidFriction = 3.0f;         // 1/s — 뒷발서기 진입 시 관성 미끄러짐 감쇠율. 총 skid 거리 ≈ v0/SkidFriction.
 	UPROPERTY(Edit, Save, Category="HorseMovement|Rearing", DisplayName="Skid Stop Speed", Min=0.0f, Max=5.0f, Speed=0.01f)
 	float SkidStopSpeed = 0.3f;        // m/s — skid 관성이 이 속도 밑으로 떨어지면 미끄러짐 종료.
-
-	UPROPERTY(Edit, Save, Category="HorseMovement|Steering", DisplayName="Yaw Align Time", Min=0.05f, Max=5.0f, Speed=0.01f)
-	float YawAlignTime = 0.4f;         // 초 — 진행 방향을 heading으로 수렴시키는 시간, 작을수록 민첩
-	UPROPERTY(Edit, Save, Category="HorseMovement|Steering", DisplayName="Max Turn Rate", Min=0.0f, Max=720.0f, Speed=1.0f)
-	float MaxTurnRate = 205.0f;        // deg/s — 선회율 상한 ( NOTE: Turn 계통의 애니메이션과 맞춰야 함 )
 
 	// ── 접지 판정 ────────────────────────────────────────────────────────────
 	UPROPERTY(Edit, Save, Category="HorseMovement|Ground", DisplayName="Support Sphere Radius", Min=0.05f, Max=3.0f, Speed=0.01f)
@@ -224,25 +227,20 @@ public:
 	float FrontProbeForward = 0.45f;   // m — 앞발 raycast 지점의 전방 offset(actor pivot 기준). 좌우 중앙 1개뿐.
 	UPROPERTY(Edit, Save, Category="HorseMovement|Ground", DisplayName="Front Probe Half Width", Min=0.0f, Max=2.0f, Speed=0.01f)
 	float FrontProbeHalfWidth = 0.15f; // m — 좌/우 발 간격의 절반. probe 는 중앙 1줄만 쏘므로(roll 미계산)
-	                                   // 지금은 디버그 드로우 폭에만 쓰인다. 다리 IK 가 붙으면 타겟 간격이 될 값.
+	                                   // NOTE: Roll 계산을 따로 하지 않으므로 지금은 디버그 드로우에만 쓰인다. 
+									   //       다리 IK 가 붙을 경우를 대비해 남겨둠.
 
-	// 세 probe 가 공유하는 수직 탐색 범위(발 평면 기준).
+	// 접지 판정 수직 탐색 범위 (발 평면 기준, 3개 probe 공유)
 	UPROPERTY(Edit, Save, Category="HorseMovement|Ground", DisplayName="Probe Up", Min=0.0f, Max=5.0f, Speed=0.01f)
-	float ProbeUp = 1.20f;             // m — 발 높이 위로 이만큼에서 아래로 쏜다.
-	                                   // tan(보행가능 최대경사) * FrontProbeForward 보다 커야 급경사 오르막에서
-	                                   // ray/sweep 시작점이 지형 속에 들어가지 않는다.
+	float GroundProbeUp = 1.20f;             // m — 발 높이 위로 이만큼에서 아래로 쏜다.
+	                                   // tan(보행가능 최대경사) * FrontProbeForward 보다 커야 급경사에서 오탐 없음
 	UPROPERTY(Edit, Save, Category="HorseMovement|Ground", DisplayName="Probe Down", Min=0.0f, Max=5.0f, Speed=0.01f)
-	float ProbeDown = 1.00f;           // m — 발 높이 아래로 지면을 찾는 최대 깊이. 이보다 깊으면 '비었다'.
+	float GroundProbeDown = 1.00f;           // m — 발 높이 아래로 지면을 찾는 최대 깊이.
 
 	// 뒷발 probe 위치. 앞발(FrontProbeForward)과 짝을 이뤄 몸통 pitch 를 만든다.
 	// 접지 판정에는 관여하지 않는다 — 앞뒤 발이 다 떠도 무게중심만 지면 위면 접지 유지.
 	UPROPERTY(Edit, Save, Category="HorseMovement|Ground", DisplayName="Rear Foot Back", Min=0.0f, Max=5.0f, Speed=0.01f)
 	float RearFootBack = 0.65f;        // m — actor pivot 기준 뒷발 후방 offset
-
-	// 무게중심은 지면 위인데 앞발 probe가 공중일 경우 실족 유도하도록 미는 속도
-	// NOTE: 조작으로 탈출 여지를 주려면 보행 속도보다 충분히 느리게 세팅, 탈출 안되게 하려면 크게 설정
-	UPROPERTY(Edit, Save, Category="HorseMovement|Ground", DisplayName="Edge Slip Speed", Min=0.0f, Max=5.0f, Speed=0.01f)
-	float EdgeSlipSpeed = 1.0f;        // m/s 
 
 	// ── 몸통 기울기(지면 정렬) ──
 	UPROPERTY(Edit, Save, Category="HorseMovement|BodyTilt", DisplayName="Align Body To Ground")
@@ -257,7 +255,7 @@ public:
 	// pivot 이 지면보다 h 만큼 위에 있으면 기울기가 Δθ 바뀔 때 발이 수평으로 h·Δθ 만큼 쓸린다(미끄러짐).
 	// 지면 높이에 두면 수평 이동이 d·(1-cosθ) 의 2차 항으로 떨어져 사실상 안 미끄러진다.
 	UPROPERTY(Edit, Save, Category="HorseMovement|BodyTilt", DisplayName="Tilt Pivot Forward", Min=-3.0f, Max=3.0f, Speed=0.01f)
-	float TiltPivotForward = 0.30f;    // m — 접지면 중앙의 전방 offset. 앞발/뒷발 접지점의 중간.
+	float TiltPivotForward = 0.0f;     // m — 접지면 중앙의 전방 offset. 앞발/뒷발 접지점의 중간.
 	                                   // 기본값은 무게중심 probe(SupportSphereForward)와 같게 둔다 —
 	                                   // 두 값이 같으면 Z 스냅이 무게중심 접점 그대로라 평면 외삽 오차가 0 이다.
 	                                   // 어긋나게 두면 그 거리만큼 추정 평면을 외삽해서 높이를 잡는다.
@@ -265,24 +263,24 @@ public:
 	float TiltPivotHeight = 0.0f;      // m — 발 평면(= actor pivot - StandHeight) 기준 추가 높이. 0 이 정답이고,
 	                                   // 일부러 위로 올려 미끄러짐이 생기는지 비교해볼 때만 건드린다.
 
-	// ── Falling 관련 ───────────────────────────────────────────────────────
-	UPROPERTY(Edit, Save, Category="HorseMovement|Physics", DisplayName="Forced Dismount Speed", Min=0.0f, Max=60.0f, Speed=0.1f)
+	// ── Falling 시의 추가 처리 (낙마, 끼임 탈출 등) ────────────────────────────────────────────────
+	UPROPERTY(Edit, Save, Category="HorseMovement|Falling", DisplayName="Forced Dismount Speed", Min=0.0f, Max=60.0f, Speed=0.1f)
 	float ForcedDismountSpeed = 14.0f; // m/s — 물리 이동 중 이 속력을 넘으면 강제 낙마 + 래그돌
-	UPROPERTY(Edit, Save, Category="HorseMovement|Physics", DisplayName="Physics Grace Time", Min=0.0f, Max=3.0f, Speed=0.01f)
-	float PhysicsGraceTime = 0.35f;    // 초 — 진입 직후 이 시간 동안은 낙마/끼임 판정을 하지 않는다(작은 턱 넘기 보호)
-	UPROPERTY(Edit, Save, Category="HorseMovement|Physics", DisplayName="Dismount During Jump")
+	UPROPERTY(Edit, Save, Category="HorseMovement|Falling", DisplayName="Physics Grace Time", Min=0.0f, Max=3.0f, Speed=0.01f)
+	float FallingGraceTime = 0.35f;    // sec — 진입 직후 이 시간 동안은 낙마/끼임 판정을 하지 않는다(작은 턱 넘기 보호)
+	UPROPERTY(Edit, Save, Category="HorseMovement|Falling", DisplayName="Dismount During Jump")
 	bool  bDismountDuringJump = false; // 의도한 점프(bJumpActive) 중에도 낙마 판정을 돌릴지
 
-	UPROPERTY(Edit, Save, Category="HorseMovement|Physics", DisplayName="Stuck Detect Time", Min=0.0f, Max=5.0f, Speed=0.01f)
-	float StuckDetectTime = 0.5f;      // 초 — '끼임' 조건이 이만큼 연속 유지되면 끼인 것으로 확정
-	UPROPERTY(Edit, Save, Category="HorseMovement|Physics", DisplayName="Stuck Along Speed", Min=0.0f, Max=5.0f, Speed=0.01f)
+	UPROPERTY(Edit, Save, Category="HorseMovement|Falling", DisplayName="Stuck Detect Time", Min=0.0f, Max=5.0f, Speed=0.01f)
+	float StuckDetectTime = 0.5f;      // sec — '끼임' 조건이 이만큼 연속 유지되면 끼인 것으로 확정
+	UPROPERTY(Edit, Save, Category="HorseMovement|Falling", DisplayName="Stuck Along Speed", Min=0.0f, Max=5.0f, Speed=0.01f)
 	float StuckAlongSpeed = 0.05f;     // m/s — 마지막 조작 방향 속도가 이 이하면 '앞으로 못 나감'
-	UPROPERTY(Edit, Save, Category="HorseMovement|Physics", DisplayName="Stuck Max Speed", Min=0.0f, Max=10.0f, Speed=0.01f)
+	UPROPERTY(Edit, Save, Category="HorseMovement|Falling", DisplayName="Stuck Max Speed", Min=0.0f, Max=10.0f, Speed=0.01f)
 	float StuckMaxSpeed = 1.0f;        // m/s — 전체 속력이 이보다 크면 자유낙하/미끄러짐 중으로 보고 끼임 판정 제외
 	                                   // (원안에는 없는 가드. 없으면 수직 자유낙하가 끼임으로 오판된다)
-	UPROPERTY(Edit, Save, Category="HorseMovement|Physics", DisplayName="Stuck Escape Time", Min=0.0f, Max=5.0f, Speed=0.01f)
-	float StuckEscapeTime = 1.0f;      // 초 — 끼임 확정 후 몸통 충돌을 꺼두는 시간
-	UPROPERTY(Edit, Save, Category="HorseMovement|Physics", DisplayName="Stuck Escape Speed", Min=0.0f, Max=10.0f, Speed=0.01f)
+	UPROPERTY(Edit, Save, Category="HorseMovement|Falling", DisplayName="Stuck Escape Time", Min=0.0f, Max=5.0f, Speed=0.01f)
+	float StuckEscapeTime = 1.0f;      // sec — 끼임 확정 후 몸통 충돌을 꺼두는 시간
+	UPROPERTY(Edit, Save, Category="HorseMovement|Falling", DisplayName="Stuck Escape Speed", Min=0.0f, Max=10.0f, Speed=0.01f)
 	float StuckEscapeSpeed = 2.0f;     // m/s — 탈출 시 마지막 조작 방향으로 밀어주는 속도
 
 	UPROPERTY(Edit, Category="HorseMovement|Debug", DisplayName="Draw Ground Probes")

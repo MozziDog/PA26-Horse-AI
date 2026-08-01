@@ -74,10 +74,15 @@ namespace
 		return FVector::ZeroVector;
 	}
 
-	bool IsWalkableGroundHit(const FHitResult& Hit, float MinNormalZ)
+	float NormalZFromSlopeDeg(float SlopeDeg)
+	{
+		return std::cos(std::clamp(SlopeDeg, 0.0f, 90.0f) * DEG_TO_RAD);
+	}
+
+	bool IsWalkableGroundHit(const FHitResult& Hit, float MaxSlopeDeg)
 	{
 		const FVector Normal = GetQueryNormal(Hit);
-		return Hit.bHit && !Normal.IsNearlyZero() && Normal.Z >= MinNormalZ;
+		return Hit.bHit && !Normal.IsNearlyZero() && Normal.Z >= NormalZFromSlopeDeg(MaxSlopeDeg);
 	}
 }
 
@@ -131,7 +136,7 @@ bool UObstacleFanSensorComponent::IsTraversableTerrain(IPhysicsScene& Physics, c
 			Normal = GroundHit.WorldNormal;
 		}
 		if (!GroundHit.bHit || Normal.IsNearlyZero() ||
-			Normal.Normalized().Z < WalkableTerrainNormalZ)
+			Normal.Normalized().Z < NormalZFromSlopeDeg(WalkableTerrainDeg))
 		{
 			if (bDrawDebug)
 			{
@@ -175,7 +180,7 @@ bool UObstacleFanSensorComponent::IsTraversableTerrain(IPhysicsScene& Physics, c
 		ContactNormal = SweepHit.WorldNormal;
 	}
 	const bool bGroundFacingContact = !ContactNormal.IsNearlyZero() &&
-		ContactNormal.Normalized().Z >= WalkableTerrainNormalZ;
+		ContactNormal.Normalized().Z >= NormalZFromSlopeDeg(WalkableTerrainDeg);
 
 	// 평평한 지면 접촉이거나, steep edge가 실제 허용 단차와 일치할 때만 지형으로 무시한다.
 	return bGroundFacingContact || bGroundChangesAtContact;
@@ -284,8 +289,8 @@ void UObstacleFanSensorComponent::TickComponent(float DeltaTime, ELevelTick Tick
 			ECollisionChannel::WorldStatic, Owner);
 
 		const bool bWalkableOnBothSides =
-			IsWalkableGroundHit(GroundBeforeHit, MinWalkableGroundNormalZ)
-			&& IsWalkableGroundHit(GroundAfterHit, MinWalkableGroundNormalZ);
+			IsWalkableGroundHit(GroundBeforeHit, MaxWalkableGroundDeg)
+			&& IsWalkableGroundHit(GroundAfterHit, MaxWalkableGroundDeg);
 		const bool bLowHitBelongsToGround =
 			LowHit.HitComponent != nullptr
 			&& (LowHit.HitComponent == GroundBeforeHit.HitComponent
