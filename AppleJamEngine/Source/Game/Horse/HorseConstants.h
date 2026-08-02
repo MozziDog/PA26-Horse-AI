@@ -25,7 +25,7 @@ namespace HorseBBKeys
 	};
 
 	// 점프 관련
-	inline const FName ObsFwdDist  = FName("Obs.FwdDist");   // float, 정면(center) 장애물 거리(m). 미탐지 = Probe Range.
+	inline const FName ObsFwdDist  = FName("Obs.FwdDist");   // float, 정면(center) 장애물 거리(m). 미탐지 = Jump Probe Range.
 	inline const FName ObsJumpable = FName("Obs.Jumpable");  // bool, 정면 장애물 윗변이 점프 높이 이하 → 넘을 수 있음.
 
 	// 도로 추종 관련

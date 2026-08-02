@@ -19,6 +19,7 @@
 #include "HorseMovementComponent.h"
 #include "HorseLocomotionComponent.h"
 #include "ObstacleFanSensorComponent.h"
+#include "JumpObstacleSensorComponent.h"
 #include "CliffFanSensorComponent.h"
 #include "Game/Horse/HorseConstants.h"
 #include "Mesh/MeshManager.h"
@@ -150,6 +151,12 @@ void AHorseCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 	{
 		ObstacleFanSensorComponent->AttachToComponent(RootSceneComponent);
 		ObstacleFanSensorComponent->SetRelativeLocation(FVector(1.0f, 0.0f, -StandHeight + 1.0f));
+	}
+	JumpObstacleSensorComponent = AddComponent<UJumpObstacleSensorComponent>();
+	if (JumpObstacleSensorComponent)
+	{
+		JumpObstacleSensorComponent->AttachToComponent(RootSceneComponent);
+		JumpObstacleSensorComponent->SetRelativeLocation(FVector(1.0f, 0.0f, -StandHeight + 1.0f));
 	}
 	CliffFanSensorComponent = AddComponent<UCliffFanSensorComponent>();
 	if(CliffFanSensorComponent)
@@ -316,6 +323,10 @@ void AHorseCharacter::RebindComponents()
 	LocomotionComponent = GetComponentByClass<UHorseLocomotionComponent>();
 	BTAgentComponent = GetComponentByClass<UBTAgentComponent>();
 	BlackboardComponent = GetComponentByClass<UBlackboardComponent>();
+	ObstacleFanSensorComponent = GetComponentByClass<UObstacleFanSensorComponent>();
+	JumpObstacleSensorComponent = GetComponentByClass<UJumpObstacleSensorComponent>();
+	CliffFanSensorComponent = GetComponentByClass<UCliffFanSensorComponent>();
+	RoadSensorComponent = GetComponentByClass<URoadSensorComponent>();
 	SpringArmComponent = GetComponentByClass<USpringArmComponent>();
 	CameraComponent = GetComponentByClass<UCameraComponent>();
 }

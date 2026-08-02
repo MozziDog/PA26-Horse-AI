@@ -2213,6 +2213,9 @@
     <ClCompile Include="Source\Game\Horse\HorseRagdollTestComponent.cpp">
       <Filter>Source\Game\Horse</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Game\Horse\JumpObstacleSensorComponent.cpp">
+      <Filter>Source\Game\Horse</Filter>
+    </ClCompile>
     <ClCompile Include="Source\Game\Horse\ObstacleFanSensorComponent.cpp">
       <Filter>Source\Game\Horse</Filter>
     </ClCompile>
@@ -3960,6 +3963,9 @@
       <Filter>Source\Game\Horse</Filter>
     </ClInclude>
     <ClInclude Include="Source\Game\Horse\HorseRagdollTestComponent.h">
+      <Filter>Source\Game\Horse</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Game\Horse\JumpObstacleSensorComponent.h">
       <Filter>Source\Game\Horse</Filter>
     </ClInclude>
     <ClInclude Include="Source\Game\Horse\ObstacleFanSensorComponent.h">

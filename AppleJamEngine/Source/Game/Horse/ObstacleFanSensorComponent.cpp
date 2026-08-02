@@ -61,28 +61,9 @@ namespace
 			Color);
 	}
 
-	FVector GetQueryNormal(const FHitResult& Hit)
-	{
-		if (!Hit.ImpactNormal.IsNearlyZero())
-		{
-			return Hit.ImpactNormal.Normalized();
-		}
-		if (!Hit.WorldNormal.IsNearlyZero())
-		{
-			return Hit.WorldNormal.Normalized();
-		}
-		return FVector::ZeroVector;
-	}
-
 	float NormalZFromSlopeDeg(float SlopeDeg)
 	{
 		return std::cos(std::clamp(SlopeDeg, 0.0f, 90.0f) * DEG_TO_RAD);
-	}
-
-	bool IsWalkableGroundHit(const FHitResult& Hit, float MaxSlopeDeg)
-	{
-		const FVector Normal = GetQueryNormal(Hit);
-		return Hit.bHit && !Normal.IsNearlyZero() && Normal.Z >= NormalZFromSlopeDeg(MaxSlopeDeg);
 	}
 }
 
@@ -217,9 +198,8 @@ void UObstacleFanSensorComponent::TickComponent(float DeltaTime, ELevelTick Tick
 	}
 
 	// ── 부채꼴 clearance ── 
-	const FVector BodyExtent(BodyRadius, BodyRadius, BodyHalfHeight);
+	const FVector BodyExtent(BodyHalfWidth, BodyHalfWidth, BodyHalfHeight);
 	const FCollisionShape BodyShape = FCollisionShape::MakeBox(BodyExtent);
-	bool bForwardHitIsTerrain = false;
 	for (int i = 0; i < HorseBBKeys::ObsFanCount; ++i)
 	{
 		const FVector PlanarDir = RotateAroundZ(Forward, HorseBBKeys::ObsFanAngles[i]);
@@ -237,11 +217,6 @@ void UObstacleFanSensorComponent::TickComponent(float DeltaTime, ELevelTick Tick
 		Physics->Sweep(Origin, End, BoxRotation, BodyShape, Hit, ECollisionChannel::WorldStatic, Owner);   // 자기 몸통 box 제외.
 		const bool bTerrain = Hit.bHit && IsTraversableTerrain(*Physics, Origin, PlanarDir, Hit);
 		const float Clear = Hit.bHit && !bTerrain ? Hit.Distance : ProbeRange;
-		if (std::abs(HorseBBKeys::ObsFanAngles[i]) < 1.e-3f)
-		{
-			bForwardHitIsTerrain = bTerrain;
-		}
-
 		BlackboardComp->GetBlackboard().SetFloat(HorseBBKeys::ObsClear[i], Clear);
 
 		if (bDrawDebug)
@@ -252,197 +227,6 @@ void UObstacleFanSensorComponent::TickComponent(float DeltaTime, ELevelTick Tick
 			DrawOrientedBox(World, StopCenter, BodyExtent, Dir, Right, Up,
 				bObstacle ? FColor::Red() : FColor::Green());
 		}
-	}
-
-	// ── 점프 가능 판정 ── 
-	const FVector LowOrigin = Origin - FVector(0.0f, 0.0f, JumpProbeDown);
-	FHitResult LowHit;
-	Physics->Raycast(LowOrigin, Forward, ProbeRange, LowHit, ECollisionChannel::WorldStatic, Owner);   // 자기 몸통 box 제외.
-	const float LowClear = LowHit.bHit && !bForwardHitIsTerrain ? LowHit.Distance : ProbeRange;
-
-	const FVector HighOrigin = Origin + FVector(0.0f, 0.0f, JumpProbeUp);
-	FHitResult HighHit;
-	Physics->Raycast(HighOrigin, Forward, ProbeRange, HighHit, ECollisionChannel::WorldStatic, Owner);   // 자기 몸통 box 제외.
-	const float HighClear = HighHit.bHit ? HighHit.Distance : ProbeRange;
-
-	// 단순 low hit는 오르막/도로 이음매도 장애물로 오인한다. 먼저 진행 방향을 실제로 막는
-	// face인지 검사하고, hit 전후로 동일한 walkable ground가 이어지면 지면 전환으로 제외한다.
-	const FVector LowNormal = GetQueryNormal(LowHit);
-	const float ObstacleFacing = LowNormal.IsNearlyZero() ? 1.0f : -LowNormal.Dot(Forward);
-	const bool bWallLikeHit = LowHit.bHit && ObstacleFacing >= MinObstacleFacing;
-
-	FHitResult GroundBeforeHit;
-	FHitResult GroundAfterHit;
-	bool bGroundTransition = false;
-	if (bWallLikeHit)
-	{
-		const FVector Down = FVector::DownVector;
-		const float GroundProbeLength = GroundTransitionProbeUp + GroundTransitionProbeDown;
-		const FVector BeforePoint = LowHit.WorldHitLocation - Forward * GroundTransitionProbeOffset;
-		const FVector AfterPoint = LowHit.WorldHitLocation + Forward * GroundTransitionProbeOffset;
-		const FVector BeforeStart = BeforePoint + FVector::UpVector * GroundTransitionProbeUp;
-		const FVector AfterStart = AfterPoint + FVector::UpVector * GroundTransitionProbeUp;
-
-		Physics->Raycast(BeforeStart, Down, GroundProbeLength, GroundBeforeHit,
-			ECollisionChannel::WorldStatic, Owner);
-		Physics->Raycast(AfterStart, Down, GroundProbeLength, GroundAfterHit,
-			ECollisionChannel::WorldStatic, Owner);
-
-		const bool bWalkableOnBothSides =
-			IsWalkableGroundHit(GroundBeforeHit, MaxWalkableGroundDeg)
-			&& IsWalkableGroundHit(GroundAfterHit, MaxWalkableGroundDeg);
-		const bool bLowHitBelongsToGround =
-			LowHit.HitComponent != nullptr
-			&& (LowHit.HitComponent == GroundBeforeHit.HitComponent
-				|| LowHit.HitComponent == GroundAfterHit.HitComponent);
-		const float GroundHeightDelta =
-			std::abs(GroundAfterHit.WorldHitLocation.Z - GroundBeforeHit.WorldHitLocation.Z);
-
-		bGroundTransition =
-			bWalkableOnBothSides
-			&& bLowHitBelongsToGround
-			&& GroundHeightDelta <= MaxGroundTransitionHeight;
-	}
-
-	const float MinJumpUpSpace = 0.3f;	// NOTE: 적당히 고른 임시값. 튜닝 필요
-	const bool bHasUpperSpace = HighClear > LowClear + MinJumpUpSpace;
-
-	EJumpProbeResult JumpProbeResult = EJumpProbeResult::NoObstacle;
-	if (LowHit.bHit)
-	{
-		JumpProbeResult =
-			!bWallLikeHit ? EJumpProbeResult::SurfaceNotFacing :
-			bGroundTransition ? EJumpProbeResult::GroundTransition :
-			!bHasUpperSpace ? EJumpProbeResult::InsufficientUpperSpace :
-			EJumpProbeResult::Jumpable;
-	}
-
-	bool bJumpPassageTested = false;
-	FVector JumpPassageStart = Origin;
-	FVector JumpPassageEnd = Origin;
-	const float JumpPassagePadding = std::max(0.0f, JumpPathBoxPadding);
-	FVector JumpPassageExtent(
-		BodyRadius + JumpPassagePadding,
-		BodyRadius + JumpPassagePadding,
-		BodyHalfHeight + JumpPassagePadding);
-	FHitResult JumpPathHit;
-	if (JumpProbeResult == EJumpProbeResult::Jumpable && bCheckJumpTrajectory)
-	{
-		// 실제 JumpSpeed를 수직 성분으로 쓰되, 수평 성분은 고정 발사각으로 역산한다.
-		// 궤적 전체가 아니라 장애물 앞~뒤 통과 구간만 넉넉한 box 한 번으로 근사한다.
-		if (!MovementComp.IsValid())
-		{
-			JumpProbeResult = EJumpProbeResult::PathBlocked;
-		}
-		else
-		{
-			const float AngleRad =
-				std::clamp(JumpTrajectoryAngle, 5.0f, 85.0f) * DEG_TO_RAD;
-			const float TanAngle = std::tan(AngleRad);
-			const float VerticalSpeed = MovementComp->GetJumpSpeed();
-			const float HorizontalSpeed =
-				TanAngle > 1.e-3f ? VerticalSpeed / TanAngle : 0.0f;
-			const float PassageStartDistance =
-				std::max(0.0f, LowClear - std::max(0.0f, JumpPathBeforeObstacle));
-			const float PassageEndDistance =
-				std::min(ProbeRange, LowClear + std::max(0.0f, JumpPathBeyondObstacle));
-
-			if (VerticalSpeed <= 1.e-3f || HorizontalSpeed <= 1.e-3f
-				|| PassageEndDistance <= PassageStartDistance)
-			{
-				JumpProbeResult = EJumpProbeResult::PathBlocked;
-			}
-			else
-			{
-				const float GravityZ = MovementComp->GetJumpPredictionGravity().Z;
-				auto GetTrajectoryCenter = [&](float HorizontalDistance)
-				{
-					const float Time = HorizontalDistance / HorizontalSpeed;
-					const float VerticalOffset =
-						VerticalSpeed * Time + 0.5f * GravityZ * Time * Time;
-					return Origin + Forward * HorizontalDistance
-						+ FVector::UpVector * VerticalOffset;
-				};
-
-				JumpPassageStart = GetTrajectoryCenter(PassageStartDistance);
-				JumpPassageEnd = GetTrajectoryCenter(PassageEndDistance);
-				bJumpPassageTested = true;
-
-				const FCollisionShape JumpBodyShape =
-					FCollisionShape::MakeBox(JumpPassageExtent);
-				if (Physics->Sweep(JumpPassageStart, JumpPassageEnd, FQuat::Identity,
-					JumpBodyShape, JumpPathHit, ECollisionChannel::WorldStatic, Owner))
-				{
-					JumpProbeResult = EJumpProbeResult::PathBlocked;
-				}
-			}
-		}
-	}
-
-	LastJumpProbeResult = JumpProbeResult;
-	const bool bJumpable = JumpProbeResult == EJumpProbeResult::Jumpable;
-
-	BlackboardComp->GetBlackboard().SetFloat(HorseBBKeys::ObsFwdDist, LowClear);
-	BlackboardComp->GetBlackboard().SetBool(HorseBBKeys::ObsJumpable, bJumpable);
-
-	if (bDrawJumpDebug)
-	{
-		// low ray: 초록=clear, 빨강=실제 장애물 후보, 파랑=지면/경사 전환으로 기각.
-		const FVector LowEnd = LowHit.bHit ? LowHit.WorldHitLocation : LowOrigin + Forward * ProbeRange;
-		const FColor LowColor =
-			JumpProbeResult == EJumpProbeResult::NoObstacle ? FColor::Green() :
-			JumpProbeResult == EJumpProbeResult::SurfaceNotFacing
-				|| JumpProbeResult == EJumpProbeResult::GroundTransition
-				? FColor::Blue() : FColor::Red();
-		DrawDebugLine(World, LowOrigin, LowEnd, LowColor,
-			LowHit.bHit ? JumpDebugHitDuration : 0.0f);
-		if (LowHit.bHit)
-		{
-			DrawDebugPoint(World, LowHit.WorldHitLocation, 0.12f, LowColor, JumpDebugHitDuration);
-			if (!LowNormal.IsNearlyZero())
-			{
-				DrawDebugLine(World, LowHit.WorldHitLocation,
-					LowHit.WorldHitLocation + LowNormal * 0.6f,
-					LowColor, JumpDebugHitDuration);
-			}
-		}
-
-		if (bWallLikeHit)
-		{
-			const FVector BeforeStart =
-				LowHit.WorldHitLocation - Forward * GroundTransitionProbeOffset
-				+ FVector::UpVector * GroundTransitionProbeUp;
-			const FVector AfterStart =
-				LowHit.WorldHitLocation + Forward * GroundTransitionProbeOffset
-				+ FVector::UpVector * GroundTransitionProbeUp;
-			const FVector BeforeEnd = GroundBeforeHit.bHit
-				? GroundBeforeHit.WorldHitLocation
-				: BeforeStart + FVector::DownVector * (GroundTransitionProbeUp + GroundTransitionProbeDown);
-			const FVector AfterEnd = GroundAfterHit.bHit
-				? GroundAfterHit.WorldHitLocation
-				: AfterStart + FVector::DownVector * (GroundTransitionProbeUp + GroundTransitionProbeDown);
-			DrawDebugLine(World, BeforeStart, BeforeEnd,
-				bGroundTransition ? FColor::Blue() : FColor::Gray(), JumpDebugHitDuration);
-			DrawDebugLine(World, AfterStart, AfterEnd,
-				bGroundTransition ? FColor::Blue() : FColor::Gray(), JumpDebugHitDuration);
-		}
-
-		if (bJumpPassageTested)
-		{
-			const FColor PassageColor = JumpPathHit.bHit ? FColor::Red() : FColor::Yellow();
-			DrawDebugLine(World, JumpPassageStart, JumpPassageEnd, PassageColor);
-			DrawDebugBox(World, JumpPassageStart, JumpPassageExtent, PassageColor);
-			DrawDebugBox(World, JumpPassageEnd, JumpPassageExtent, PassageColor);
-			if (JumpPathHit.bHit)
-			{
-				DrawDebugPoint(World, JumpPathHit.WorldHitLocation, 0.18f,
-					FColor::Red(), JumpDebugHitDuration);
-			}
-		}
-
-		const FVector End = HighHit.bHit ? HighHit.WorldHitLocation : HighOrigin + Forward * ProbeRange;
-		// 점프 가능하면 노란색(넘어라), 아니면 회색.
-		DrawDebugLine(World, HighOrigin, End, bJumpable ? FColor::Yellow() : FColor::Gray());
 	}
 }
 
@@ -480,8 +264,8 @@ void UObstacleFanSensorComponent::ContributeSelectedVisuals(FScene& Scene) const
 		const FVector RayEnd = RayOrigin + SweepDir * ProbeRange;
 		Scene.AddDebugLine(RayOrigin, RayEnd, FColor::Green());
 
-		const FVector X = Dir   * BodyRadius;
-		const FVector Y = Right * BodyRadius;
+		const FVector X = Dir   * BodyHalfWidth;
+		const FVector Y = Right * BodyHalfWidth;
 		const FVector Z = Up    * BodyHalfHeight;
 		const FVector P[8] =
 		{
@@ -501,8 +285,4 @@ void UObstacleFanSensorComponent::ContributeSelectedVisuals(FScene& Scene) const
 		Scene.AddDebugLine(P[2], P[6], FColor::Green());
 		Scene.AddDebugLine(P[3], P[7], FColor::Green());
 	}
-	// ── 점프 가능 판정 센서 ──
-	FVector RayStart = RayOrigin + FVector(0.0f, 0.0f, JumpProbeUp);
-	FVector RayEnd = RayStart + Owner->GetActorForward() * ProbeRange;
-	Scene.AddDebugLine(RayStart, RayEnd, FColor::Yellow());
 }
