@@ -13,9 +13,8 @@
 
 // ── AnimGraphTypes operator<< ──
 //
-// 주의 — FAnimGraphPin / FAnimGraphTransition 은 멤버가 모두 trivially_copyable
-// (FName 2*uint32 / enum class / float / uint32) → struct 자체도 trivially_copyable.
-// 그래서 TArray<T> 의 generic operator<< 가 sizeof(T) raw memcpy 분기 (Archive.h:75) 로 빠지고
+// 주의 — FAnimGraphPin 및 leaf transition rule은 멤버가 모두 trivially_copyable이라
+// TArray<T> 의 generic operator<< 가 sizeof(T) raw memcpy 분기 (Archive.h:75) 로 빠질 수 있고,
 // 우리 element-wise operator<< 가 호출되지 않는다 — FName 의 풀 인덱스가 raw bytes 로 저장되어
 // 다음 세션의 풀 build 결과와 mismatch → "From/To 사라짐" 류 버그.
 //
@@ -25,6 +24,7 @@
 
 FArchive& operator<<(FArchive& Ar, FAnimGraphPin&            Pin);
 FArchive& operator<<(FArchive& Ar, FAnimGraphTransitionRule& R);
+FArchive& operator<<(FArchive& Ar, FAnimGraphTransitionRuleGroup& Group);
 FArchive& operator<<(FArchive& Ar, FAnimGraphTransition&     T);
 FArchive& operator<<(FArchive& Ar, FAnimGraphVariable&       Var);
 FArchive& operator<<(FArchive& Ar, FBlendSample&             Sample);
@@ -36,8 +36,9 @@ namespace
 	// v3 adds AnimGraph-owned variables.
 	// v4 adds BlendSpace node samples + axis ranges. 
 	// v5 adds StateMachine editor node positions (state/entry/anystate). 
-	// v6 replaces a transition's single inline rule with an AND-combined FAnimGraphTransitionRule array. 
-	constexpr uint32 kAnimGraphAssetVersion = 6u;          
+	// v6 replaces a transition's single inline rule with an AND-combined FAnimGraphTransitionRule array.
+	// v7 replaces that array with OR-combined groups whose rules remain AND-combined.
+	constexpr uint32 kAnimGraphAssetVersion = 7u;
 	thread_local bool g_LoadLegacyTransitionFormat = false;
 
 	// 로드 중인 자산의 버전 — FAnimGraphNode::operator<< 가 신규(v4) 필드 존재 여부를 판단하는 데 사용.
@@ -91,6 +92,15 @@ inline FArchive& operator<<(FArchive& Ar, TArray<FAnimGraphTransition>& Array)
 // FAnimGraphTransitionRule 도 멤버가 모두 trivially_copyable(enum/FName/enum/float)이라서
 // FAnimGraphTransition 같이 raw-memcpy 문제 발생 가능 → 명시적 overload 로 고정.
 inline FArchive& operator<<(FArchive& Ar, TArray<FAnimGraphTransitionRule>& Array)
+{
+	uint32 N = static_cast<uint32>(Array.size());
+	Ar << N;
+	if (Ar.IsLoading()) Array.resize(N);
+	for (auto& Item : Array) Ar << Item;
+	return Ar;
+}
+
+inline FArchive& operator<<(FArchive& Ar, TArray<FAnimGraphTransitionRuleGroup>& Array)
 {
 	uint32 N = static_cast<uint32>(Array.size());
 	Ar << N;
@@ -183,6 +193,12 @@ FArchive& operator<<(FArchive& Ar, FAnimGraphTransitionRule& R)
 	return Ar;
 }
 
+FArchive& operator<<(FArchive& Ar, FAnimGraphTransitionRuleGroup& Group)
+{
+	Ar << Group.Rules;
+	return Ar;
+}
+
 FArchive& operator<<(FArchive& Ar, FAnimGraphTransition& T)
 {
 	Ar << T.FromStateName;
@@ -191,7 +207,7 @@ FArchive& operator<<(FArchive& Ar, FAnimGraphTransition& T)
 	if (Ar.IsLoading() && g_AnimGraphLoadVersion < 6)
 	{
 		// 구버전(~v5) 마이그레이션
-		// transition 당 단일 규칙 -> Rules[0]으로 매핑
+		// transition 당 단일 규칙 -> RuleGroups[0].Rules[0]으로 매핑
 		FAnimGraphTransitionRule R;
 		Ar << R.VariableName;
 		Ar << R.Op;
@@ -206,14 +222,30 @@ FArchive& operator<<(FArchive& Ar, FAnimGraphTransition& T)
 		{
 			Ar << R.RuleKind;
 		}
-		T.Rules.clear();
-		T.Rules.push_back(R);
+		T.RuleGroups.clear();
+		FAnimGraphTransitionRuleGroup Group;
+		Group.Rules.push_back(R);
+		T.RuleGroups.push_back(std::move(Group));
+	}
+	else if (Ar.IsLoading() && g_AnimGraphLoadVersion == 6)
+	{
+		// v6 마이그레이션: 기존 AND 규칙 배열 전체를 OR 그룹 하나로 승격한다.
+		Ar << T.BlendTime;
+		TArray<FAnimGraphTransitionRule> LegacyRules;
+		Ar << LegacyRules;
+		T.RuleGroups.clear();
+		if (!LegacyRules.empty())
+		{
+			FAnimGraphTransitionRuleGroup Group;
+			Group.Rules = std::move(LegacyRules);
+			T.RuleGroups.push_back(std::move(Group));
+		}
 	}
 	else
 	{
-		// v6+ : BlendTime + AND 로 결합되는 규칙 배열.
+		// v7+ : BlendTime + OR로 결합되는 조건 그룹(각 그룹 내부는 AND).
 		Ar << T.BlendTime;
-		Ar << T.Rules;
+		Ar << T.RuleGroups;
 	}
 	return Ar;
 }
@@ -294,9 +326,12 @@ bool UAnimGraphAsset::RemoveVariable(const FName& Name)
 		if (Node.VariableName == Name) Node.VariableName = FName::None;
 		for (FAnimGraphTransition& T : Node.Transitions)
 		{
-			for (FAnimGraphTransitionRule& R : T.Rules)
+			for (FAnimGraphTransitionRuleGroup& Group : T.RuleGroups)
 			{
-				if (R.VariableName == Name) R.VariableName = FName::None;
+				for (FAnimGraphTransitionRule& R : Group.Rules)
+				{
+					if (R.VariableName == Name) R.VariableName = FName::None;
+				}
 			}
 		}
 	}
@@ -318,9 +353,12 @@ bool UAnimGraphAsset::RenameVariable(const FName& OldName, const FName& NewName)
 		if (Node.VariableName == OldName) Node.VariableName = NewName;
 		for (FAnimGraphTransition& T : Node.Transitions)
 		{
-			for (FAnimGraphTransitionRule& R : T.Rules)
+			for (FAnimGraphTransitionRuleGroup& Group : T.RuleGroups)
 			{
-				if (R.VariableName == OldName) R.VariableName = NewName;
+				for (FAnimGraphTransitionRule& R : Group.Rules)
+				{
+					if (R.VariableName == OldName) R.VariableName = NewName;
+				}
 			}
 		}
 	}

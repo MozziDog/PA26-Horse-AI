@@ -1106,8 +1106,8 @@ namespace
 		ImGui::Dummy(ImVec2(Width, Height));
 	}
 
-	// 규칙 그래프 스타일 뷰. 각 leaf 규칙을 작은 노드로 그려 AND 결합을 보여주고, "Add Rule Node"
-	// 팔레트로 규칙을 추가한 뒤 아래 목록 편집기(RenderTransitionRuleCompactEditor)로 상세 편집한다.
+	// 규칙 그래프 스타일 뷰. 그룹 내부 leaf 규칙은 AND, 그룹 사이는 OR 결합으로 보여준다.
+	// 팔레트에서 추가한 규칙은 마지막 그룹에 들어가며, 아래 목록 편집기에서 그룹을 추가/편집한다.
 	bool RenderTransitionRuleGraph(FAnimGraphTransition& T, UAnimGraphAsset* Asset, UClass* OwnerCls, int32 Index)
 	{
 		ImGui::PushID(Index + 100000);
@@ -1119,7 +1119,7 @@ namespace
 		{
 			ImGui::OpenPopup("TransitionRuleActionPalette");
 		}
-		ImGui::TextDisabled("All rule nodes are AND-combined into Can Enter Transition.");
+		ImGui::TextDisabled("Rules are AND-combined inside a group; groups are OR-combined.");
 
 		if (ImGui::BeginPopup("TransitionRuleActionPalette"))
 		{
@@ -1138,7 +1138,8 @@ namespace
 					FAnimGraphTransitionRule R;
 					R.RuleKind = Kind;
 					if (Kind == ETransitionRuleKind::BoolProperty) R.Threshold = 1.0f;
-					T.Rules.push_back(R);
+					if (T.RuleGroups.empty()) T.RuleGroups.push_back(FAnimGraphTransitionRuleGroup{});
+					T.RuleGroups.back().Rules.push_back(R);
 					bChanged = true;
 					ImGui::CloseCurrentPopup();
 				}
@@ -1165,17 +1166,27 @@ namespace
 		}
 
 		const float NodeWidth = std::max(150.0f, (ImGui::GetContentRegionAvail().x - 26.0f) * 0.50f);
-		if (T.Rules.empty())
+		if (T.RuleGroups.empty())
 		{
 			DrawSmallRuleNode("No Rules", "Never (add a rule)", ImVec4(0.55f, 0.55f, 0.55f, 1.0f), NodeWidth);
 		}
 		else
 		{
-			for (int32 i = 0; i < static_cast<int32>(T.Rules.size()); ++i)
+			for (int32 GroupIndex = 0; GroupIndex < static_cast<int32>(T.RuleGroups.size()); ++GroupIndex)
 			{
-				if (i > 0) ImGui::TextColored(ImVec4(0.70f, 0.85f, 0.55f, 1.0f), "AND");
-				DrawSmallRuleNode(RuleKindNodeTitle(T.Rules[i].RuleKind), FormatSingleRuleSummary(T.Rules[i]).c_str(),
-					ImVec4(0.30f, 0.85f, 0.30f, 1.0f), NodeWidth);
+				if (GroupIndex > 0) ImGui::TextColored(ImVec4(0.95f, 0.65f, 0.25f, 1.0f), "OR");
+				const FAnimGraphTransitionRuleGroup& Group = T.RuleGroups[GroupIndex];
+				if (Group.Rules.empty())
+				{
+					DrawSmallRuleNode("Empty Group", "False (add a rule)", ImVec4(0.55f, 0.55f, 0.55f, 1.0f), NodeWidth);
+					continue;
+				}
+				for (int32 RuleIndex = 0; RuleIndex < static_cast<int32>(Group.Rules.size()); ++RuleIndex)
+				{
+					if (RuleIndex > 0) ImGui::TextColored(ImVec4(0.70f, 0.85f, 0.55f, 1.0f), "AND");
+					DrawSmallRuleNode(RuleKindNodeTitle(Group.Rules[RuleIndex].RuleKind), FormatSingleRuleSummary(Group.Rules[RuleIndex]).c_str(),
+						ImVec4(0.30f, 0.85f, 0.30f, 1.0f), NodeWidth);
+				}
 			}
 		}
 		ImGui::SameLine();
@@ -1264,50 +1275,82 @@ namespace
 		return bChanged;
 	}
 
-	// Transition 의 규칙 목록 편집기. 모든 규칙은 AND 로 결합된다(모두 참이어야 전환). 규칙을
-	// 추가/삭제하고, float param 범위 이내(A<X<B) 같은 복합 조건을 GUI 로 구성할 수 있다.
+	// Transition 규칙 목록 편집기. 그룹 내부는 AND, 그룹 사이는 OR로 결합한다.
 	bool RenderTransitionRuleCompactEditor(FAnimGraphTransition& T, UAnimGraphAsset* Asset, UClass* OwnerCls)
 	{
 		bool bChanged = false;
 
-		ImGui::TextColored(ImVec4(0.70f, 0.85f, 0.55f, 1.0f), "Rules (AND)");
+		ImGui::TextColored(ImVec4(0.70f, 0.85f, 0.55f, 1.0f), "Condition Groups (OR)");
 		ImGui::SameLine();
-		ImGui::TextDisabled("모든 규칙이 참일 때 전환");
+		ImGui::TextDisabled("그룹 내부 규칙은 AND");
 
-		if (T.Rules.empty())
+		if (T.RuleGroups.empty())
 		{
-			ImGui::TextDisabled("규칙 없음 — 전환하지 않습니다. 아래에서 규칙을 추가하세요.");
+			ImGui::TextDisabled("조건 그룹 없음 — 전환하지 않습니다.");
 		}
 
-		int32 RemoveIndex = -1;
-		for (int32 i = 0; i < static_cast<int32>(T.Rules.size()); ++i)
+		int32 RemoveGroupIndex = -1;
+		int32 RemoveRuleGroupIndex = -1;
+		int32 RemoveRuleIndex = -1;
+		for (int32 GroupIndex = 0; GroupIndex < static_cast<int32>(T.RuleGroups.size()); ++GroupIndex)
 		{
-			ImGui::PushID(i);
-			if (i > 0)
+			ImGui::PushID(GroupIndex);
+			if (GroupIndex > 0)
 			{
 				ImGui::Spacing();
-				ImGui::TextColored(ImVec4(0.70f, 0.85f, 0.55f, 1.0f), "AND");
+				ImGui::TextColored(ImVec4(0.95f, 0.65f, 0.25f, 1.0f), "OR");
 			}
-			ImGui::BeginGroup();
-			bChanged |= RenderSingleRuleBody(T.Rules[i], Asset, OwnerCls);
-			if (ImGui::SmallButton("Remove Rule"))
+
+			FAnimGraphTransitionRuleGroup& Group = T.RuleGroups[GroupIndex];
+			ImGui::Text("Group %d", GroupIndex + 1);
+			ImGui::SameLine();
+			if (ImGui::SmallButton("Remove Group")) RemoveGroupIndex = GroupIndex;
+			if (Group.Rules.empty()) ImGui::TextDisabled("Empty group will be evaluated as FALSE");
+
+			for (int32 RuleIndex = 0; RuleIndex < static_cast<int32>(Group.Rules.size()); ++RuleIndex)
 			{
-				RemoveIndex = i;
+				ImGui::PushID(RuleIndex);
+				if (RuleIndex > 0) ImGui::TextColored(ImVec4(0.70f, 0.85f, 0.55f, 1.0f), "AND");
+				ImGui::BeginGroup();
+				bChanged |= RenderSingleRuleBody(Group.Rules[RuleIndex], Asset, OwnerCls);
+				if (ImGui::SmallButton("Remove Rule"))
+				{
+					RemoveRuleGroupIndex = GroupIndex;
+					RemoveRuleIndex = RuleIndex;
+				}
+				ImGui::EndGroup();
+				ImGui::Separator();
+				ImGui::PopID();
 			}
-			ImGui::EndGroup();
+			if (ImGui::SmallButton("+ Add Rule (AND)"))
+			{
+				Group.Rules.push_back(FAnimGraphTransitionRule{});
+				bChanged = true;
+			}
 			ImGui::Separator();
 			ImGui::PopID();
 		}
 
-		if (RemoveIndex >= 0)
+		if (RemoveRuleGroupIndex >= 0 && RemoveRuleGroupIndex < static_cast<int32>(T.RuleGroups.size()))
 		{
-			T.Rules.erase(T.Rules.begin() + RemoveIndex);
+			FAnimGraphTransitionRuleGroup& Group = T.RuleGroups[RemoveRuleGroupIndex];
+			if (RemoveRuleIndex >= 0 && RemoveRuleIndex < static_cast<int32>(Group.Rules.size()))
+			{
+				Group.Rules.erase(Group.Rules.begin() + RemoveRuleIndex);
+				bChanged = true;
+			}
+		}
+		if (RemoveGroupIndex >= 0 && RemoveGroupIndex < static_cast<int32>(T.RuleGroups.size()))
+		{
+			T.RuleGroups.erase(T.RuleGroups.begin() + RemoveGroupIndex);
 			bChanged = true;
 		}
 
-		if (ImGui::Button("+ Add Rule (AND)"))
+		if (ImGui::Button("+ Add Condition Group (OR)"))
 		{
-			T.Rules.push_back(FAnimGraphTransitionRule{}); // 기본 FloatCompare
+			FAnimGraphTransitionRuleGroup Group;
+			Group.Rules.push_back(FAnimGraphTransitionRule{});
+			T.RuleGroups.push_back(std::move(Group));
 			bChanged = true;
 		}
 
@@ -1324,8 +1367,10 @@ namespace
 				R.VariableName = Var;
 				R.Op = Op;
 				R.Threshold = Threshold;
-				T.Rules.clear();
-				T.Rules.push_back(R);
+				T.RuleGroups.clear();
+				FAnimGraphTransitionRuleGroup Group;
+				Group.Rules.push_back(R);
+				T.RuleGroups.push_back(std::move(Group));
 				bChanged = true;
 			};
 
@@ -1335,9 +1380,11 @@ namespace
 				EnsureGraphVariable(Asset, FName("GroundSpeed"), EAnimGraphPinType::Float);
 				FAnimGraphTransitionRule Lo; Lo.RuleKind = ETransitionRuleKind::FloatCompare; Lo.VariableName = FName("GroundSpeed"); Lo.Op = ETransitionOp::Greater; Lo.Threshold = 5.0f;
 				FAnimGraphTransitionRule Hi; Hi.RuleKind = ETransitionRuleKind::FloatCompare; Hi.VariableName = FName("GroundSpeed"); Hi.Op = ETransitionOp::Less;    Hi.Threshold = 20.0f;
-				T.Rules.clear();
-				T.Rules.push_back(Lo);
-				T.Rules.push_back(Hi);
+				T.RuleGroups.clear();
+				FAnimGraphTransitionRuleGroup Group;
+				Group.Rules.push_back(Lo);
+				Group.Rules.push_back(Hi);
+				T.RuleGroups.push_back(std::move(Group));
 				bChanged = true;
 			}
 			if (ImGui::Button("GroundSpeed > 10"))
@@ -2300,16 +2347,28 @@ namespace
 		char BlendBuf[48];
 		std::snprintf(BlendBuf, sizeof(BlendBuf), "  |  Blend %.2fs", T.BlendTime);
 
-		if (T.Rules.empty())
+		if (T.RuleGroups.empty())
 		{
 			return FString("No rules (never)") + BlendBuf;
 		}
 
 		FString Joined;
-		for (int32 i = 0; i < static_cast<int32>(T.Rules.size()); ++i)
+		for (int32 GroupIndex = 0; GroupIndex < static_cast<int32>(T.RuleGroups.size()); ++GroupIndex)
 		{
-			if (i > 0) Joined += " AND ";
-			Joined += FormatSingleRuleSummary(T.Rules[i]);
+			if (GroupIndex > 0) Joined += " OR ";
+			const FAnimGraphTransitionRuleGroup& Group = T.RuleGroups[GroupIndex];
+			if (Group.Rules.empty())
+			{
+				Joined += "(false)";
+				continue;
+			}
+			Joined += "(";
+			for (int32 RuleIndex = 0; RuleIndex < static_cast<int32>(Group.Rules.size()); ++RuleIndex)
+			{
+				if (RuleIndex > 0) Joined += " AND ";
+				Joined += FormatSingleRuleSummary(Group.Rules[RuleIndex]);
+			}
+			Joined += ")";
 		}
 		return Joined + BlendBuf;
 	}
@@ -2332,10 +2391,13 @@ namespace
 
 	FString FormatTransitionRuleNodeTitle(const FAnimGraphTransition& T)
 	{
-		if (T.Rules.empty()) return "No Rules";
-		if (T.Rules.size() == 1) return RuleKindNodeTitle(T.Rules[0].RuleKind);
+		if (T.RuleGroups.empty()) return "No Rules";
+		if (T.RuleGroups.size() == 1 && T.RuleGroups[0].Rules.size() == 1)
+		{
+			return RuleKindNodeTitle(T.RuleGroups[0].Rules[0].RuleKind);
+		}
 		char Buf[48];
-		std::snprintf(Buf, sizeof(Buf), "%zu Rules (AND)", T.Rules.size());
+		std::snprintf(Buf, sizeof(Buf), "%zu Groups (OR)", T.RuleGroups.size());
 		return Buf;
 	}
 
@@ -2421,30 +2483,33 @@ namespace
 		Reverse.FromStateName = Source.ToStateName;
 		Reverse.ToStateName   = Source.FromStateName;
 
-		// 편의용 best-effort 반전 — 규칙별로 뒤집는다. (AND 배열의 엄밀한 논리 부정은 De Morgan 상
-		// OR 가 되어 단일 transition 으로 표현 불가하므로, 각 rule 을 개별 반전하는 기존 방침을 유지.)
+		// 편의용 best-effort 반전 — 규칙별로 뒤집되 기존 AND/OR 구조는 유지한다. 전체 식의 엄밀한
+		// 논리 부정은 De Morgan 변환과 그룹 재구성이 필요하므로 자동 생성에서는 기존 방침을 유지한다.
 		// FloatCompare 는 Op 반전, Bool 은 기대값 반전, 시간/Always 류는 반전 불가 → 해당 rule 을
 		// AlwaysFalse 로 두어 사용자가 직접 작성하게 한다.
-		for (FAnimGraphTransitionRule& R : Reverse.Rules)
+		for (FAnimGraphTransitionRuleGroup& Group : Reverse.RuleGroups)
 		{
-			switch (R.RuleKind)
+			for (FAnimGraphTransitionRule& R : Group.Rules)
 			{
-				case ETransitionRuleKind::FloatCompare:
-					R.Op = InvertTransitionOp(R.Op);
-					break;
-				case ETransitionRuleKind::BoolProperty:
-					R.Threshold = R.Threshold >= 0.5f ? 0.0f : 1.0f;
-					break;
-				case ETransitionRuleKind::AlwaysTrue:
-				case ETransitionRuleKind::AlwaysFalse:
-				case ETransitionRuleKind::TimeRemaining:
-				case ETransitionRuleKind::TimeRemainingRatio:
-				case ETransitionRuleKind::TimeElapsed:
-				case ETransitionRuleKind::AutomaticSequenceEnd:
-					R.RuleKind = ETransitionRuleKind::AlwaysFalse;
-					R.VariableName = FName::None;
-					R.Threshold = 0.0f;
-					break;
+				switch (R.RuleKind)
+				{
+					case ETransitionRuleKind::FloatCompare:
+						R.Op = InvertTransitionOp(R.Op);
+						break;
+					case ETransitionRuleKind::BoolProperty:
+						R.Threshold = R.Threshold >= 0.5f ? 0.0f : 1.0f;
+						break;
+					case ETransitionRuleKind::AlwaysTrue:
+					case ETransitionRuleKind::AlwaysFalse:
+					case ETransitionRuleKind::TimeRemaining:
+					case ETransitionRuleKind::TimeRemainingRatio:
+					case ETransitionRuleKind::TimeElapsed:
+					case ETransitionRuleKind::AutomaticSequenceEnd:
+						R.RuleKind = ETransitionRuleKind::AlwaysFalse;
+						R.VariableName = FName::None;
+						R.Threshold = 0.0f;
+						break;
+				}
 			}
 		}
 		return Reverse;
@@ -3467,37 +3532,45 @@ void FAnimGraphEditorWidget::ValidateGraph(UAnimGraphAsset* Asset)
 						AddValidationMessage(LastValidationMessages, bLastValidationOk,
 							NodeTitleForDisplay(Node) + " has a transition with a missing source state.", true);
 					}
-					if (T.Rules.empty())
+					if (T.RuleGroups.empty())
 					{
 						AddValidationMessage(LastValidationMessages, bLastValidationOk,
-							NodeTitleForDisplay(Node) + " has a transition with no rules (it will never fire).", false);
+							NodeTitleForDisplay(Node) + " has a transition with no condition groups (it will never fire).", false);
 					}
-					for (const FAnimGraphTransitionRule& R : T.Rules)
+					for (const FAnimGraphTransitionRuleGroup& Group : T.RuleGroups)
 					{
-						const bool bPropertyRule = (R.RuleKind == ETransitionRuleKind::FloatCompare || R.RuleKind == ETransitionRuleKind::BoolProperty);
-						if (bPropertyRule && R.VariableName == FName::None)
+						if (Group.Rules.empty())
 						{
 							AddValidationMessage(LastValidationMessages, bLastValidationOk,
-								NodeTitleForDisplay(Node) + " has a property-based transition rule without a selected variable.", true);
+								NodeTitleForDisplay(Node) + " has an empty condition group (that group is always false).", false);
 						}
-						else if (bPropertyRule && !IsVariableResolvable(Asset, OwnerCls, R.VariableName))
+						for (const FAnimGraphTransitionRule& R : Group.Rules)
 						{
-							AddValidationMessage(LastValidationMessages, bLastValidationOk,
-								NodeTitleForDisplay(Node) + " has a transition rule referencing an unknown variable: " + R.VariableName.ToString(), true);
-						}
-						else if (bPropertyRule)
-						{
-							EAnimGraphPinType VarType = EAnimGraphPinType::Float;
-							if (TryResolveVariableType(Asset, OwnerCls, R.VariableName, VarType) && !VariableTypeMatchesRule(R.RuleKind, VarType))
+							const bool bPropertyRule = (R.RuleKind == ETransitionRuleKind::FloatCompare || R.RuleKind == ETransitionRuleKind::BoolProperty);
+							if (bPropertyRule && R.VariableName == FName::None)
 							{
 								AddValidationMessage(LastValidationMessages, bLastValidationOk,
-									NodeTitleForDisplay(Node) + " has a transition rule with a mismatched variable type: " + R.VariableName.ToString(), true);
+									NodeTitleForDisplay(Node) + " has a property-based transition rule without a selected variable.", true);
 							}
-						}
-						if (R.RuleKind == ETransitionRuleKind::AlwaysTrue)
-						{
-							AddValidationMessage(LastValidationMessages, bLastValidationOk,
-								NodeTitleForDisplay(Node) + " has an explicit Always True transition rule.", false);
+							else if (bPropertyRule && !IsVariableResolvable(Asset, OwnerCls, R.VariableName))
+							{
+								AddValidationMessage(LastValidationMessages, bLastValidationOk,
+									NodeTitleForDisplay(Node) + " has a transition rule referencing an unknown variable: " + R.VariableName.ToString(), true);
+							}
+							else if (bPropertyRule)
+							{
+								EAnimGraphPinType VarType = EAnimGraphPinType::Float;
+								if (TryResolveVariableType(Asset, OwnerCls, R.VariableName, VarType) && !VariableTypeMatchesRule(R.RuleKind, VarType))
+								{
+									AddValidationMessage(LastValidationMessages, bLastValidationOk,
+										NodeTitleForDisplay(Node) + " has a transition rule with a mismatched variable type: " + R.VariableName.ToString(), true);
+								}
+							}
+							if (R.RuleKind == ETransitionRuleKind::AlwaysTrue)
+							{
+								AddValidationMessage(LastValidationMessages, bLastValidationOk,
+									NodeTitleForDisplay(Node) + " has an explicit Always True transition rule.", false);
+							}
 						}
 					}
 				}
@@ -3857,8 +3930,9 @@ void FAnimGraphEditorWidget::RenderTransitionRuleEditor(UAnimGraphAsset& Asset, 
 	RuleProxy.Type = EAnimGraphNodeType::VariableGet;
 	ed::BeginNode(ToNodeId(RuleNodeId));
 	{
+		const bool bSingleRule = T.RuleGroups.size() == 1 && T.RuleGroups[0].Rules.size() == 1;
 		DrawNodeHeaderBlock(RuleProxy, 270.0f, 44.0f, FormatTransitionRuleNodeTitle(T),
-			T.Rules.size() == 1 ? TransitionRuleKindLabel(T.Rules[0].RuleKind) : "AND rules");
+			bSingleRule ? TransitionRuleKindLabel(T.RuleGroups[0].Rules[0].RuleKind) : "OR groups / AND rules");
 		ImGui::Dummy(ImVec2(270.0f, 4.0f));
 		TextClippedWithTooltip(FormatTransitionSummary(T), 258.0f);
 		ed::BeginPin(ToPinId(RuleOutPinId), ed::PinKind::Output);
@@ -3979,7 +4053,7 @@ void FAnimGraphEditorWidget::RenderStateMachineEditor(UAnimGraphAsset& Asset, FA
 			T.FromStateName = StateMachineNode.States[i].StateName;
 			T.ToStateName   = StateMachineNode.States[i + 1].StateName;
 			T.BlendTime     = 0.2f;
-			// Rules 를 비워 둔다(= 전환 안 함). 사용자가 규칙을 추가해 활성화한다.
+			// RuleGroups를 비워 둔다(= 전환 안 함). 사용자가 조건 그룹을 추가해 활성화한다.
 			StateMachineNode.Transitions.push_back(T);
 		}
 		Asset.BumpVersion();
@@ -4259,7 +4333,7 @@ void FAnimGraphEditorWidget::RenderStateMachineEditor(UAnimGraphAsset& Asset, FA
 							FAnimGraphTransition NewT;
 							NewT.FromStateName = FName::None;
 							NewT.ToStateName   = StateMachineNode.States[ToStateIdx].StateName;
-							NewT.BlendTime     = 0.2f; // Rules 비어 있음(= 전환 안 함) — 사용자가 규칙 추가
+							NewT.BlendTime     = 0.2f; // RuleGroups 비어 있음(= 전환 안 함) — 사용자가 조건 추가
 							if (AddTransitionIfMissing(StateMachineNode, NewT))
 							{
 								Asset.BumpVersion();
@@ -4273,7 +4347,7 @@ void FAnimGraphEditorWidget::RenderStateMachineEditor(UAnimGraphAsset& Asset, FA
 							FAnimGraphTransition NewT;
 							NewT.FromStateName = StateMachineNode.States[FromStateIdx].StateName;
 							NewT.ToStateName   = StateMachineNode.States[ToStateIdx].StateName;
-							NewT.BlendTime     = 0.2f; // Rules 비어 있음(= 전환 안 함) — 사용자가 규칙 추가
+							NewT.BlendTime     = 0.2f; // RuleGroups 비어 있음(= 전환 안 함) — 사용자가 조건 추가
 							bool bAdded = AddTransitionIfMissing(StateMachineNode, NewT);
 							if (bAdded && (bCreateReverseTransitionOnDrag || ImGui::GetIO().KeyShift))
 							{
@@ -4319,7 +4393,7 @@ void FAnimGraphEditorWidget::RenderStateMachineEditor(UAnimGraphAsset& Asset, FA
 					FAnimGraphTransition T;
 					T.FromStateName = bFromAny ? FName::None : StateMachineNode.States[FromStateIdx].StateName;
 					T.ToStateName   = NewStateName;
-					T.BlendTime     = 0.2f; // Rules 비어 있음(= 전환 안 함) — 사용자가 규칙 추가
+					T.BlendTime     = 0.2f; // RuleGroups 비어 있음(= 전환 안 함) — 사용자가 조건 추가
 					const bool bAdded = AddTransitionIfMissing(StateMachineNode, T);
 					if (bAdded && bFromState && (bCreateReverseTransitionOnDrag || ImGui::GetIO().KeyShift))
 					{

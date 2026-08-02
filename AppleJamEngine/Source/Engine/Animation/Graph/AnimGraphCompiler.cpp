@@ -208,8 +208,8 @@ namespace
 
 	// Transition rule — UE 의 Transition Rule Graph 에서 가장 많이 쓰는 노드들을 데이터 기반으로 평가.
 	// 전체 Blueprint VM 은 아니지만, bool/float property access 와 current state time 함수류는 런타임 반영된다.
-	// T.Rules 의 모든 규칙을 AND 로 결합한다(예: Speed>a AND Speed<b → 범위 이내). 규칙이 하나도
-	// 없으면 전환하지 않음(false) — AlwaysFalse placeholder 와 동일 취급.
+	// 각 그룹의 규칙은 AND, 그룹 사이는 OR로 결합한다. 비어 있는 그룹은 false이며, 유효한
+	// 규칙 그룹이 하나도 없으면 전환하지 않는다.
 	TFunction<bool(UAnimInstance*)> MakeTransitionCondition(const FAnimGraphTransition& T, const FAnimNode_StateMachine* SM)
 	{
 		struct FCompiledRule
@@ -218,21 +218,36 @@ namespace
 			TFunction<float(UAnimInstance*)> Reader;
 		};
 
-		TArray<FCompiledRule> CompiledRules;
-		CompiledRules.reserve(T.Rules.size());
-		for (const FAnimGraphTransitionRule& Rule : T.Rules)
+		TArray<TArray<FCompiledRule>> CompiledGroups;
+		CompiledGroups.reserve(T.RuleGroups.size());
+		for (const FAnimGraphTransitionRuleGroup& Group : T.RuleGroups)
 		{
-			CompiledRules.push_back({ Rule, MakeFloatReader(Rule.VariableName) });
+			TArray<FCompiledRule> CompiledRules;
+			CompiledRules.reserve(Group.Rules.size());
+			for (const FAnimGraphTransitionRule& Rule : Group.Rules)
+			{
+				CompiledRules.push_back({ Rule, MakeFloatReader(Rule.VariableName) });
+			}
+			CompiledGroups.push_back(std::move(CompiledRules));
 		}
 
-		return [Rules = std::move(CompiledRules), SM](UAnimInstance* AI) -> bool
+		return [Groups = std::move(CompiledGroups), SM](UAnimInstance* AI) -> bool
 		{
-			if (Rules.empty()) return false;
-			for (const FCompiledRule& CR : Rules)
+			for (const TArray<FCompiledRule>& Rules : Groups)
 			{
-				if (!EvaluateTransitionRule(CR.Rule, CR.Reader, AI, SM)) return false;
+				if (Rules.empty()) continue;
+				bool bAllRulesPass = true;
+				for (const FCompiledRule& CR : Rules)
+				{
+					if (!EvaluateTransitionRule(CR.Rule, CR.Reader, AI, SM))
+					{
+						bAllRulesPass = false;
+						break;
+					}
+				}
+				if (bAllRulesPass) return true;
 			}
-			return true;
+			return false;
 		};
 	}
 

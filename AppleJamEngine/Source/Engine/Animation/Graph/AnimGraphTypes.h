@@ -137,7 +137,7 @@ struct FAnimGraphState
 
 // 단일 leaf node 전환 규칙. 
 // RuleKind가 property 기반이 아닐 경우 변수/비교연산/임계값 등은 무시함.
-// FAnimGraphTransition::Rules 에 여러 개가 담겨 AND 조건으로 결합
+// FAnimGraphTransitionRuleGroup::Rules 에 여러 개가 담겨 AND 조건으로 결합
 // 필드 순서/타입은 구버전(단일 규칙) FAnimGraphTransition 과 동일하게 유지
 struct FAnimGraphTransitionRule
 {
@@ -149,16 +149,24 @@ struct FAnimGraphTransitionRule
 	friend FArchive& operator<<(FArchive& Ar, FAnimGraphTransitionRule& R);
 };
 
+// 한 조건 그룹 안의 leaf 규칙은 AND로 결합되고, transition의 여러 그룹은 OR로 결합된다.
+// 빈 그룹은 true가 아니라 false로 취급해 규칙이 없는 transition이 우발적으로 발동하지 않게 한다.
+struct FAnimGraphTransitionRuleGroup
+{
+	TArray<FAnimGraphTransitionRule> Rules;
+
+	friend FArchive& operator<<(FArchive& Ar, FAnimGraphTransitionRuleGroup& Group);
+};
+
 struct FAnimGraphTransition
 {
 	FName                 FromStateName; // FName::None == AnyState
 	FName                 ToStateName;
 	float                 BlendTime     = 0.2f;
 
-	// AND 로 결합되는 규칙들. 모두 true 여야 전환한다. 비어 있으면 전환하지 않음(AlwaysFalse 동등).
-	// float param 범위 이내(예: Speed>a AND Speed<b)를 여기서 표현한다. 범위 바깥(OR)은 후속
-	// Unity 식 중복 transition / condition graph 로 처리하며, 그때 각 rule 이 AND 항으로 재사용된다.
-	TArray<FAnimGraphTransitionRule> Rules;
+	// 그룹 내부 규칙은 AND, 그룹 사이는 OR로 결합한다. 그룹이 없거나 모든 그룹이 비어 있으면
+	// 전환하지 않음(AlwaysFalse 동등). 예: (TurnRate < -0.1) OR (TurnRate > 0.1).
+	TArray<FAnimGraphTransitionRuleGroup> RuleGroups;
 
 	friend FArchive& operator<<(FArchive& Ar, FAnimGraphTransition& T);
 };
