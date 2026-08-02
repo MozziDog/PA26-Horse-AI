@@ -457,7 +457,7 @@ void UHorseMovementComponent::EnterSliding()
 void UHorseMovementComponent::TickFalling(float DeltaTime)
 {
 	USceneComponent* Updated = GetUpdatedComponent();
-	Velocity.Z += GetGravity().Z * DeltaTime;   // 전역 중력(하향, Z<0)
+	Velocity.Z += GetGravity().Z * DeltaTime;
 	AirTime    += DeltaTime;
 
 	FVector Loc = Updated->GetWorldLocation();
@@ -1096,11 +1096,11 @@ void UHorseMovementComponent::CancelPendingJump()
 
 void UHorseMovementComponent::OnJumpNotify()
 {
-	// 센서 조건이 wind-up 중 해제되어 요청이 취소됐다면, 이미 재생 중인 점프 클립의
-	// Notify가 뒤늦게 도착해도 실제 이륙으로 이어지지 않게 한다.
-	if (MoveMode != EHorseMoveMode::Grounded || !bJumpRequested)
+	// Grounded에서만 점프 가능
+	if (MoveMode != EHorseMoveMode::Grounded)
 	{
-		return;   // Grounded에서만 점프 가능
+		UE_LOG("[UHorseMovementComponent] Jump cancelled since it's not grounded");
+		return;  
 	}
 	bWantJump = true;
 }
