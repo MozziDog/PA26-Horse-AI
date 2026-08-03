@@ -128,8 +128,9 @@ FHorseSteeringInfluence UHorseLocomotionComponent::GatherSteeringInfluences(FBla
 		else
 			Inf.UserMag = 0.0f;
 	}
-
-	if (BB.TryGetVector(HorseBBKeys::RoadDir, Temp) && !Temp.IsNearlyZero())
+	// 제자리 회전중에는 출발이 불가능함 → 제자리 회전을 유발하지 않게 멈춘 상태에서는 도로 추종 영향력 무시
+	if (Gait != EHorseGait::Stop
+		&& BB.TryGetVector(HorseBBKeys::RoadDir, Temp) && !Temp.IsNearlyZero())
 	{
 		Temp.Z = 0.0f;
 		if (!Temp.IsNearlyZero())
