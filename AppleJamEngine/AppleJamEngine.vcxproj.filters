@@ -1361,6 +1361,9 @@
     <ClCompile Include="Source\Engine\Component\Vehicle\VehicleWheelPoseComponent.cpp">
       <Filter>Source\Engine\Component\Vehicle</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Engine\Component\ParentConstraintComponent.cpp">
+      <Filter>Source\Engine\Component</Filter>
+    </ClCompile>
     <ClCompile Include="Source\Engine\Core\ProjectSettings.cpp">
       <Filter>Source\Engine\Core</Filter>
     </ClCompile>
@@ -2866,6 +2869,9 @@
     </ClInclude>
     <ClInclude Include="Source\Engine\Core\Common.h">
       <Filter>Source\Engine\Core</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Engine\Component\ParentConstraintComponent.h">
+      <Filter>Source\Engine\Component</Filter>
     </ClInclude>
     <ClInclude Include="Source\Engine\Core\Delegate.h">
       <Filter>Source\Engine\Core</Filter>
