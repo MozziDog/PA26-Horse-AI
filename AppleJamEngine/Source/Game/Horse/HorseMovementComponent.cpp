@@ -347,14 +347,14 @@ FVector UHorseMovementComponent::ConsumeGroundedMoveXY(float DeltaTime, const FV
 		MoveXY = FVector(WorldDelta.X, WorldDelta.Y, 0.0f);
 	}
 
-	// 앞발이 허공이면(직전 frame 표본) 전방으로 조금씩 밀어 결국 무게중심까지 넘겨 떨어뜨린다.
+	// 앞발이 허공이면 전방, 뒷발이 허공이면 후방으로 밀어 지지 영역 밖으로 실족시킨다.
 	// 조작으로 물러설 여지를 남기려고 root motion 을 덮어쓰지 않고 더하기만 한다 —
 	// 뒤로 걷는 속도가 EdgeSlipSpeed 보다 빠르면 그대로 빠져나올 수 있다.
-	if (bEdgeSlipping && EdgeSlipSpeed > 0.0f)
+	if (EdgeSlipDirection != 0.0f && EdgeSlipSpeed > 0.0f)
 	{
 		FVector Forward, Right;
 		GetPlanarBasis(Forward, Right);
-		MoveXY += Forward * (EdgeSlipSpeed * DeltaTime);
+		MoveXY += Forward * (EdgeSlipDirection * EdgeSlipSpeed * DeltaTime);
 	}
 	return MoveXY;
 }
@@ -443,8 +443,9 @@ void UHorseMovementComponent::UpdateGroundedState(float DeltaTime, const FHorseG
 
 	// 보행 불가 경사면 표식만 남긴다. 실제 Sliding 이행은 '다음 이동' frame 에서(TickGrounded 위쪽 가드).
 	bSteepGround = !IsWalkableSlope(Sample);
-	// 같은 규약으로 실족 표식도 남긴다 — 밀기는 다음 frame 이동에 얹힌다.
-	bEdgeSlipping = !Sample.bFrontHit;
+	// 낭떠러지에 발 걸쳤을 때 실족 유도 밀기도 다음 frame에 적용
+	// 앞발 뒷발 둘 다 공중이면 서로 상쇄 → 제자리 낙하
+	EdgeSlipDirection = (!Sample.bFrontHit ? 1.0f : 0.0f) + (!Sample.bRearHit ? -1.0f : 0.0f);
 }
 
 void UHorseMovementComponent::EnterSliding()
@@ -526,7 +527,7 @@ void UHorseMovementComponent::Land(FVector Loc, float TargetZ, const FHorseGroun
 		EnterSliding();
 	}
 	bSteepGround  = false;   // 착지 판정에서 이미 결론이 났다.
-	bEdgeSlipping = !Sample.bFrontHit;   // 낭떠러지 턱에 착지했으면 곧바로 실족 밀기로 이어진다.
+	EdgeSlipDirection = (!Sample.bFrontHit ? 1.0f : 0.0f) + (!Sample.bRearHit ? -1.0f : 0.0f);   // 낭떠러지 턱에 착지했으면 곧바로 실족 밀기로 이어진다.
 }
 
 void UHorseMovementComponent::TickSliding(float DeltaTime, const FQuat& RootYawTwist)
@@ -613,7 +614,7 @@ void UHorseMovementComponent::FinishSlidingToStop()
 	TurnRate          = 0.0f;
 	MoveMode          = EHorseMoveMode::Grounded;
 	bSteepGround      = false;
-	bEdgeSlipping     = false;
+	EdgeSlipDirection = 0.0f;
 	SlideElapsed      = 0.0f;
 
 	if (AActor* Owner = GetOwner())
@@ -724,11 +725,8 @@ bool UHorseMovementComponent::SampleGround(const FVector& PivotLoc, FHorseGround
 	ProbeGroundContacts(Frame, OutSample);
 	SolveGroundPitch(Frame, OutSample);
 
-	// ── 접지 유지 판정 ──
-	// 무게중심 sphere 하나로만 판단한다. 앞발이 허공인 건 접지 상실이 아니라 '실족' 이고,
-	// 호출자가 bFrontHit 를 보고 EdgeSlipSpeed 로 앞으로 밀어 무게중심까지 넘기는 방식으로 처리한다.
-	// 앞발 miss 를 여기서 접지 상실로 처리하면, 착지 판정은 여전히 무게중심을 잡으므로
-	// Grounded/Falling 이 매 frame 뒤집힌다.
+	// Grounded 여부는 무게중심 아래의 sphere 샘플 하나로만 결정
+	// 앞/뒷발이 허공이어도 바로 접지 상실로 이어지지 않고 대신 서서히 허공인 쪽으로 밀어서 자연스럽게 실족 유도
 	return OutSample.bCenterHit;
 }
 
@@ -940,7 +938,7 @@ void UHorseMovementComponent::EnterFalling(bool bFromJump)
 	AirTime       = 0.0f;
 	StuckTime     = 0.0f;
 	bSteepGround  = false;
-	bEdgeSlipping = false;   // 이미 떨어졌으니 실족 밀기는 끝.
+	EdgeSlipDirection = 0.0f;   // 이미 떨어졌으니 실족 밀기는 끝.
 	bSkidding     = false;   // skid 관성은 Velocity 로 넘겨져 ballistic 으로 이어진다.
 	bCollapseRequested = false;
 	if (!bFromJump)

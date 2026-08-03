@@ -47,8 +47,8 @@ enum class EHorseMoveMode : uint8
 struct FHorseGroundSample
 {
 	bool  bCenterHit = false;   // 무게중심 아래 sphere sweep 성공 = "밟을 게 있다" (= 접지 판정)
-	bool  bFrontHit  = false;   // 앞발 중앙. 빗나가면 = 앞이 낭떠러지 → 실족(EdgeSlipSpeed)
-	bool  bRearHit   = false;   // 뒷발 중앙
+	bool  bFrontHit  = false;   // 앞발 중앙. 빗나가면 = 발이 허공 → 실족(EdgeSlipSpeed)
+	bool  bRearHit   = false;   // 뒷발 중앙. 빗나가면 = 발이 허공 → 실족(EdgeSlipSpeed)
 
 	// 각 probe 의 접점(world). Front/Rear 를 잇는 선이 곧 몸통 기울기의 기준이다.
 	FVector CenterPoint = FVector(0.0f, 0.0f, 0.0f);
@@ -316,7 +316,7 @@ protected:
 	// ── 지면 샘플링 ────────────────────────────────────────────────────────────
 	// 무게중심 sphere sweep + 앞발/뒷발 raycast 를 모아 한 프레임의 지면 표본을 만든다.
 	// 반환값 = 이 샘플로 '접지 상태' 를 유지할 수 있는가 (= 무게중심 sphere 가 지면을 잡았는가).
-	// 앞발이 허공인지(Sample.bFrontHit)는 접지가 아니라 실족 처리로 이어진다.
+	// 앞/뒷발이 허공인지(Sample.bFrontHit/bRearHit)는 접지가 아니라 실족 처리로 이어진다.
 	bool SampleGround(const FVector& PivotLoc, FHorseGroundSample& OutSample) const;
 	// probe 3발을 쏴서 접점/노멀만 채운다(기울기 계산 전).
 	void ProbeGroundContacts(const FHorseLocalFrame& Frame, FHorseGroundSample& OutSample) const;
@@ -489,9 +489,9 @@ protected:
 	bool    bLegBoxBaseCached  = false;
 	// 직전 표본이 '보행 불가 경사' 였는지. 실제 Sliding 이행은 다음 이동이 발생하는 frame 에 한다.
 	bool    bSteepGround    = false;
-	// 직전 표본에서 앞발 probe 가 허공이었는지 = 낭떠러지에 앞발을 걸친 상태.
-	// bSteepGround 와 같은 규약으로, 실제 실족 밀기는 다음 frame 이동에 얹는다.
-	bool    bEdgeSlipping   = false;
+	// 직전 표본의 발 공중 상태에서 정한 실족 방향. 앞발 공중=+1(전방), 뒷발 공중=-1(후방).
+	// 양쪽이 모두 공중이면 두 힘은 상쇄된다. 실제 실족 밀기는 다음 frame 이동에 얹는다.
+	float   EdgeSlipDirection = 0.0f;
 	float   SlideElapsed    = 0.0f;   // 현재 Sliding 상태에 머문 시간(초).
 
 	// ── Falling 상태 관련 ──
