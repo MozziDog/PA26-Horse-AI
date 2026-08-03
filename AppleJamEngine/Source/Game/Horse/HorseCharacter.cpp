@@ -109,8 +109,8 @@ void AHorseCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 	// (완전한 방지는 안됨. 구현 상의 사각지대로 유지)
 	StepBlockComponent = AddComponent<UBoxComponent>();
 	StepBlockComponent->AttachToComponent(RootSceneComponent);
-	StepBlockComponent->SetRelativeLocation(FVector(0.0f, 0.0f, 0.55f));
-	StepBlockComponent->SetBoxExtent(FVector(0.8f, 0.3f, 0.1f));
+	StepBlockComponent->SetRelativeLocation(FVector(-0.05f, 0.0f, 0.55f));
+	StepBlockComponent->SetBoxExtent(FVector(0.7f, 0.2f, 0.1f));
 	StepBlockComponent->SetCollisionObjectType(ECollisionChannel::Pawn);
 	StepBlockComponent->SetKinematic(true);
 	StepBlockComponent->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
