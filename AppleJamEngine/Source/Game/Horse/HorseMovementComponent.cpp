@@ -1,4 +1,5 @@
 ﻿#include "HorseMovementComponent.h"
+#include "HorseLocomotionComponent.h"
 
 #include "Animation/AnimInstance.h"
 #include "Animation/Graph/AnimGraphInstance.h"
@@ -449,6 +450,7 @@ void UHorseMovementComponent::UpdateGroundedState(float DeltaTime, const FHorseG
 void UHorseMovementComponent::EnterSliding()
 {
 	MoveMode       = EHorseMoveMode::Sliding;
+	SlideElapsed   = 0.0f;
 	bJumpRequested = false;   // wind-up 중 미끄러짐 진입 → 점프 요청 취소.
 	bSkidding      = false;   // 경사 미끄러짐이 관성을 대체.
 	bSteepGround   = false;
@@ -515,9 +517,14 @@ void UHorseMovementComponent::Land(FVector Loc, float TargetZ, const FHorseGroun
 	bCollapseRequested = false;
 	// 급경사면에 착지하면 곧바로 미끄러짐. TickGrounded 의 bSteepGround 와 같은 기준이어야
 	// 착지 직후 판정이 엇갈리지 않는다.
-	MoveMode = IsWalkableSlope(Sample)
-		? EHorseMoveMode::Grounded
-		: EHorseMoveMode::Sliding;
+	if (IsWalkableSlope(Sample))
+	{
+		MoveMode = EHorseMoveMode::Grounded;
+	}
+	else
+	{
+		EnterSliding();
+	}
 	bSteepGround  = false;   // 착지 판정에서 이미 결론이 났다.
 	bEdgeSlipping = !Sample.bFrontHit;   // 낭떠러지 턱에 착지했으면 곧바로 실족 밀기로 이어진다.
 }
@@ -573,6 +580,7 @@ void UHorseMovementComponent::ApplySlideAcceleration(float DeltaTime, const FVec
 
 void UHorseMovementComponent::UpdateSlidingState(float DeltaTime, const FHitResult& Ground)
 {
+	SlideElapsed += DeltaTime;
 	const float TargetIncline = ComputeInclineAngle(Ground);
 	InclineAngle += (TargetIncline - InclineAngle) * DampAlpha(DeltaTime, BodyAlignSpeed);
 
@@ -588,12 +596,32 @@ void UHorseMovementComponent::UpdateSlidingState(float DeltaTime, const FHitResu
 	// 속도를 지면 접선으로 투영(수직 성분 제거) — 표면을 따라 미끄러지게 유지.
 	Velocity = Velocity - N * Velocity.Dot(N);
 
-	// 완경사/평지 도달 → 보행 복귀.
-	if (N.Z >= NormalZFromSlopeDeg(WalkableSlopeDeg))
+	// 평지에 도달했더라도 최소 시간은 미끄러짐을 유지한다
+	// (애매한 경사각에서 Sliding/Grounded 간에 매 frame 와리가리 방지)
+	if (SlideElapsed >= std::max(MinSlideDuration, 0.0f)
+		&& N.Z >= NormalZFromSlopeDeg(WalkableSlopeDeg))
 	{
-		Velocity.Z   = 0.0f;
-		MoveMode     = EHorseMoveMode::Grounded;
-		bSteepGround = false;
+		FinishSlidingToStop();
+	}
+}
+
+void UHorseMovementComponent::FinishSlidingToStop()
+{
+	Velocity          = FVector(0.0f, 0.0f, 0.0f);
+	NormalizedSpeed   = 0.0f;
+	LateralSpeed      = 0.0f;
+	TurnRate          = 0.0f;
+	MoveMode          = EHorseMoveMode::Grounded;
+	bSteepGround      = false;
+	bEdgeSlipping     = false;
+	SlideElapsed      = 0.0f;
+
+	if (AActor* Owner = GetOwner())
+	{
+		if (UHorseLocomotionComponent* Locomotion = Owner->GetComponentByClass<UHorseLocomotionComponent>())
+		{
+			Locomotion->RequestStop();
+		}
 	}
 }
 
@@ -1673,6 +1701,7 @@ void UHorseMovementComponent::Serialize(FArchive& Ar)
 	Ar << WalkableSlopeDeg;
 	Ar << StepBlockWallDeg;
 	Ar << SlideFriction;
+	Ar << MinSlideDuration;
 	Ar << EdgeSlipSpeed;
 	Ar << JumpSpeed;
 	Ar << YawAlignTime;

@@ -189,6 +189,8 @@ public:
 									   // NOTE: WalkableSlopeDeg보다 크게 설정해야 경사면에 일단 올라가지고, 이후 미끄러진다
 	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Slide Friction", Min=0.0f, Max=10.0f, Speed=0.05f)
 	float SlideFriction = 1.5f;        // 1/s — 미끄러질 때 속도 감쇠율 
+	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Minimum Slide Duration", Min=0.0f, Max=5.0f, Speed=0.01f)
+	float MinSlideDuration = 1.0f;     // sec — 경사 표본이 흔들려도 이 시간 동안 Sliding을 유지해 애니메이션 상태 왕복을 막는다.
 	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Edge Slip Speed", Min=0.0f, Max=5.0f, Speed=0.01f)
 	float EdgeSlipSpeed = 1.0f;        // m/s - 무게중심은 지면 위인데 앞발 probe가 공중일 경우 실족 유도하도록 미는 속도
 									   // NOTE: 조작으로 탈출 여지를 주려면 보행 속도보다 충분히 느리게 세팅, 탈출 안되게 하려면 크게 설정
@@ -391,6 +393,8 @@ protected:
 	void ApplySlideAcceleration(float DeltaTime, const FVector& GroundN);
 	// 미끄러짐 중의 경사/기울기 갱신 + 접선 투영 + 완경사 도달 시 보행 복귀.
 	void UpdateSlidingState(float DeltaTime, const FHitResult& Ground);
+	// 최소 지속 시간을 채운 미끄러짐 종료. 입력을 끊고 Locomotion gait도 Stop으로 맞춘다.
+	void FinishSlidingToStop();
 	// 접지 상실 → Physics 모드 진입. bFromJump 면 의도한 점프라 낙마 규칙을 유예한다.
 	void EnterFalling(bool bFromJump);
 	// 착지 확정 — Z 스냅 + 공중 상태 리셋 + 경사에 따라 Grounded/Sliding 결정.
@@ -488,6 +492,7 @@ protected:
 	// 직전 표본에서 앞발 probe 가 허공이었는지 = 낭떠러지에 앞발을 걸친 상태.
 	// bSteepGround 와 같은 규약으로, 실제 실족 밀기는 다음 frame 이동에 얹는다.
 	bool    bEdgeSlipping   = false;
+	float   SlideElapsed    = 0.0f;   // 현재 Sliding 상태에 머문 시간(초).
 
 	// ── Falling 상태 관련 ──
 	FVector LastInputDirXY  = FVector(0.0f, 0.0f, 0.0f);   // 마지막 유효 조작 방향(수평, 정규화)
