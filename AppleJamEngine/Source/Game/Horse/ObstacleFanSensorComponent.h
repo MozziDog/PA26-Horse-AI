@@ -29,8 +29,17 @@ protected:
 	void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction& ThisTickFunction) override;
 
 private:
-	bool IsTraversableTerrain(IPhysicsScene& Physics, const FVector& Origin,
-		const FVector& PlanarDir, const FHitResult& SweepHit) const;
+	// 단일 슬롯에 대해 1차 검사 결과를 기반으로 2차/3차 검사(Traversable check) 수행
+	bool IsTraversableTerrain(IPhysicsScene* Physics, const FVector& Origin, 
+						const FVector& PlanarDir, const FHitResult& SweepHit) const;
+	// 2차 검사: 만약 1차 검사점의 normal이 걸을 수 없는 각도라면, 그것이 허용할만한 단차인지 체크
+	bool IsClearTraversableStepAtContact(IPhysicsScene* Physics, const FVector& Origin,
+						const FVector& PlanarDir, float ContactDistance, float WalkableNormalZ) const;
+	// 3차 검사: 장애물은 없다고 판정되었을 때, 이제 지면이 걸을 수 있는 경사인지 체크.
+	bool HasTraversableTerrainProfile(IPhysicsScene* Physics, const FVector& Origin,
+						const FVector& PlanarDir, float WalkableNormalZ) const;
+	bool SampleWalkableGround(IPhysicsScene* Physics, const FVector& RayStart, float RayLength,
+						float WalkableNormalZ, FHitResult& OutGroundHit) const;
 
 	// ── 장애물 탐지 관련 ───────────────────────────────────
 	UPROPERTY(Edit, Save, Category="Sensor", DisplayName="Probe Range", Min=0.0f, Max=50.0f, Speed=0.1f)
@@ -57,6 +66,14 @@ private:
 	UPROPERTY(Edit, Save, Category="Sensor", DisplayName="Max Terrain Step", Min=0.0f, Max=3.0f, Speed=0.02f)
 	float MaxTerrainStep = 0.5f;       // m — 인접 표본 사이에 허용할 최대 단차.
 
+	UPROPERTY(Edit, Save, Category="Sensor", DisplayName="Contact Sample Half Span", Min=0.01f, Max=1.0f, Speed=0.01f)
+	float ContactSampleHalfSpan = 0.1f; // m - sweep contact point local terrain sample half span.
+
+	UPROPERTY(Edit, Save, Category="Sensor", DisplayName="Terrain Clearance Sweep Radius", Min=0.01f, Max=1.0f, Speed=0.01f)
+	float TerrainClearanceSweepRadius = 0.05f; // m - sphere radius for thin-wall validation.
+
+	UPROPERTY(Edit, Save, Category="Sensor", DisplayName="Terrain Clearance Margin", Min=0.0f, Max=0.5f, Speed=0.01f)
+	float TerrainClearanceMargin = 0.02f; // m - clearance above the higher local terrain sample.
 	UPROPERTY(Edit, Save, Category="Sensor", DisplayName="Walkable Terrain Deg", Min=0.0f, Max=90.0f, Speed=0.5f)
 	float WalkableTerrainDeg = 45.0f;  // deg — 각 표본에서 허용할 최대 지면 경사.
 									   // NOTE: 순간적인 경사 튐을 고려해서 walkableSlope보다 널널하게 설정

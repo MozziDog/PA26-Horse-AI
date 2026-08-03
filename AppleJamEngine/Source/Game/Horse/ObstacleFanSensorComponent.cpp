@@ -82,91 +82,6 @@ void UObstacleFanSensorComponent::BeginPlay()
 	MovementComp   = Owner->GetComponentByClass<UHorseMovementComponent>();
 }
 
-bool UObstacleFanSensorComponent::IsTraversableTerrain(IPhysicsScene& Physics, const FVector& Origin,
-	const FVector& PlanarDir, const FHitResult& SweepHit) const
-{
-	const float Spacing = std::max(TerrainSampleSpacing, 0.1f);
-	const int SampleCount = std::max(1, static_cast<int>(std::ceil(ProbeRange / Spacing)));
-	const float ContactDistance = std::clamp(
-		(SweepHit.WorldHitLocation - Origin).Dot(PlanarDir), 0.0f, ProbeRange);
-
-	bool bHasPrevious = false;
-	bool bGroundChangesAtContact = false;
-	float PreviousHeight = 0.0f;
-	float PreviousDistance = 0.0f;
-
-	for (int SampleIndex = 0; SampleIndex <= SampleCount; ++SampleIndex)
-	{
-		const float Distance = ProbeRange * static_cast<float>(SampleIndex) / static_cast<float>(SampleCount);
-		const FVector ProbePoint = Origin + PlanarDir * Distance;
-		const float RayStartZ = bHasPrevious
-			? PreviousHeight + TerrainProbeUp
-			: Origin.Z + TerrainProbeUp;
-		const FVector RayStart(ProbePoint.X, ProbePoint.Y, RayStartZ);
-		const float RayLength = bHasPrevious
-			? TerrainProbeUp + TerrainProbeDown
-			: TerrainProbeUp + TerrainProbeDown + BodyHalfHeight;
-
-		FHitResult GroundHit;
-		Physics.Raycast(RayStart, FVector::DownVector, RayLength, GroundHit,
-			ECollisionChannel::WorldStatic, Owner);
-
-		FVector Normal = GroundHit.ImpactNormal;
-		if (Normal.IsNearlyZero())
-		{
-			Normal = GroundHit.WorldNormal;
-		}
-		if (!GroundHit.bHit || Normal.IsNearlyZero() ||
-			Normal.Normalized().Z < NormalZFromSlopeDeg(WalkableTerrainDeg))
-		{
-			if (bDrawDebug)
-			{
-				DrawDebugLine(World, RayStart, RayStart + FVector::DownVector * RayLength, FColor::Red());
-			}
-			return false;
-		}
-
-		if (bHasPrevious)
-		{
-			const float HeightDelta = std::abs(GroundHit.WorldHitLocation.Z - PreviousHeight);
-			if (HeightDelta > MaxTerrainStep)
-			{
-				if (bDrawDebug)
-				{
-					DrawDebugLine(World, RayStart, GroundHit.WorldHitLocation, FColor::Red());
-				}
-				return false;
-			}
-
-			if (PreviousDistance <= ContactDistance + Spacing &&
-				Distance >= ContactDistance - Spacing &&
-				HeightDelta > 1.e-2f)
-			{
-				bGroundChangesAtContact = true;
-			}
-		}
-
-		if (bDrawDebug)
-		{
-			DrawDebugLine(World, RayStart, GroundHit.WorldHitLocation, FColor(0, 200, 255));
-		}
-		PreviousHeight = GroundHit.WorldHitLocation.Z;
-		PreviousDistance = Distance;
-		bHasPrevious = true;
-	}
-
-	FVector ContactNormal = SweepHit.ImpactNormal;
-	if (ContactNormal.IsNearlyZero())
-	{
-		ContactNormal = SweepHit.WorldNormal;
-	}
-	const bool bGroundFacingContact = !ContactNormal.IsNearlyZero() &&
-		ContactNormal.Normalized().Z >= NormalZFromSlopeDeg(WalkableTerrainDeg);
-
-	// 평평한 지면 접촉이거나, steep edge가 실제 허용 단차와 일치할 때만 지형으로 무시한다.
-	return bGroundFacingContact || bGroundChangesAtContact;
-}
-
 void UObstacleFanSensorComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction& ThisTickFunction)
 {
 	(void)DeltaTime; (void)TickType; (void)ThisTickFunction;
@@ -175,6 +90,7 @@ void UObstacleFanSensorComponent::TickComponent(float DeltaTime, ELevelTick Tick
 	{
 		return;
 	}
+
 	IPhysicsScene* Physics = World->GetPhysicsScene();
 	if (!Physics || !BlackboardComp.IsValid())
 	{
@@ -214,8 +130,10 @@ void UObstacleFanSensorComponent::TickComponent(float DeltaTime, ELevelTick Tick
 		const FVector End = Origin + SweepDir * ProbeRange;
 
 		FHitResult Hit;
-		Physics->Sweep(Origin, End, BoxRotation, BodyShape, Hit, ECollisionChannel::WorldStatic, Owner);   // 자기 몸통 box 제외.
-		const bool bTerrain = Hit.bHit && IsTraversableTerrain(*Physics, Origin, PlanarDir, Hit);
+		// 1차 검사: 뭐 걸리는 거 하나라도 있나 체크
+		Physics->Sweep(Origin, End, BoxRotation, BodyShape, Hit, ECollisionChannel::WorldStatic, Owner);   // 자신의 충돌판정은 제외
+		// 2차/3차 검사: 걸린 게 실제 장애물(벽 또는 지나갈 수 없는 경사의 지형)인지 체크
+		const bool bTerrain = Hit.bHit && IsTraversableTerrain(Physics, Origin, PlanarDir, Hit);
 		const float Clear = Hit.bHit && !bTerrain ? Hit.Distance : ProbeRange;
 		BlackboardComp->GetBlackboard().SetFloat(HorseBBKeys::ObsClear[i], Clear);
 
@@ -230,6 +148,147 @@ void UObstacleFanSensorComponent::TickComponent(float DeltaTime, ELevelTick Tick
 	}
 }
 
+bool UObstacleFanSensorComponent::IsTraversableTerrain(IPhysicsScene* Physics, const FVector& Origin,
+	const FVector& PlanarDir, const FHitResult& SweepHit) const
+{
+	FVector ContactNormal = SweepHit.ImpactNormal;
+	if (ContactNormal.IsNearlyZero())
+	{
+		ContactNormal = SweepHit.WorldNormal;
+	}
+
+	const float WalkableNormalZ = NormalZFromSlopeDeg(WalkableTerrainDeg);
+	const bool bGroundFacingContact = !ContactNormal.IsNearlyZero() &&
+		ContactNormal.Normalized().Z >= WalkableNormalZ;
+	const float ContactDistance = std::clamp(
+		(SweepHit.WorldHitLocation - Origin).Dot(PlanarDir), 0.0f, ProbeRange);
+
+	if (!bGroundFacingContact &&
+		!IsClearTraversableStepAtContact(Physics, Origin, PlanarDir, ContactDistance, WalkableNormalZ))
+	{
+		return false;
+	}
+
+	return HasTraversableTerrainProfile(Physics, Origin, PlanarDir, WalkableNormalZ);
+}
+
+bool UObstacleFanSensorComponent::SampleWalkableGround(IPhysicsScene* Physics, const FVector& RayStart,
+	float RayLength, float WalkableNormalZ, FHitResult& OutGroundHit) const
+{
+	Physics->Raycast(RayStart, FVector::DownVector, RayLength, OutGroundHit, ECollisionChannel::WorldStatic, Owner);
+
+	FVector Normal = OutGroundHit.ImpactNormal;
+	if (Normal.IsNearlyZero())
+	{
+		Normal = OutGroundHit.WorldNormal;
+	}
+	if (!OutGroundHit.bHit || Normal.IsNearlyZero() || Normal.Normalized().Z < WalkableNormalZ)
+	{
+		if (bDrawDebug)
+		{
+			DrawDebugLine(World, RayStart, RayStart + FVector::DownVector * RayLength, FColor::Red());
+		}
+		return false;
+	}
+
+	if (bDrawDebug)
+	{
+		DrawDebugLine(World, RayStart, OutGroundHit.WorldHitLocation, FColor(0, 200, 255));
+	}
+	return true;
+}
+
+bool UObstacleFanSensorComponent::IsClearTraversableStepAtContact(IPhysicsScene* Physics, const FVector& Origin,
+	const FVector& PlanarDir, float ContactDistance, float WalkableNormalZ) const
+{
+	const float ContactHalfSpan = std::max(ContactSampleHalfSpan, 0.01f);
+	const float BeforeDistance = ContactDistance - ContactHalfSpan;
+	const float AfterDistance = ContactDistance + ContactHalfSpan;
+	if (BeforeDistance < 0.0f || AfterDistance > ProbeRange)
+	{
+		return false;
+	}
+
+	const float RayStartZ = Origin.Z + BodyHalfHeight + TerrainProbeUp + MaxTerrainStep;
+	const float RayLength = TerrainProbeUp + TerrainProbeDown + 2.0f * (BodyHalfHeight + MaxTerrainStep);
+	auto SampleAtDistance = [&](float Distance, FHitResult& OutGroundHit)
+	{
+		const FVector ProbePoint = Origin + PlanarDir * Distance;
+		const FVector RayStart(ProbePoint.X, ProbePoint.Y, RayStartZ);
+		return SampleWalkableGround(Physics, RayStart, RayLength, WalkableNormalZ, OutGroundHit);
+	};
+
+	FHitResult BeforeGroundHit;
+	FHitResult AfterGroundHit;
+	if (!SampleAtDistance(BeforeDistance, BeforeGroundHit) ||
+		!SampleAtDistance(AfterDistance, AfterGroundHit))
+	{
+		return false;
+	}
+
+	const float HeightDelta = std::abs(AfterGroundHit.WorldHitLocation.Z - BeforeGroundHit.WorldHitLocation.Z);
+	if (HeightDelta <= 1.e-2f || HeightDelta > MaxTerrainStep)
+	{
+		return false;
+	}
+
+	const float HighGroundZ = std::max(BeforeGroundHit.WorldHitLocation.Z, AfterGroundHit.WorldHitLocation.Z);
+	const float SphereRadius = std::max(TerrainClearanceSweepRadius, 0.01f);
+	const float SweepCenterZ = HighGroundZ + SphereRadius + std::max(TerrainClearanceMargin, 0.0f);
+	const FVector ClearanceStart(BeforeGroundHit.WorldHitLocation.X, BeforeGroundHit.WorldHitLocation.Y, SweepCenterZ);
+	const FVector ClearanceEnd(AfterGroundHit.WorldHitLocation.X, AfterGroundHit.WorldHitLocation.Y, SweepCenterZ);
+
+	FHitResult ClearanceHit;
+	const bool bClearanceBlocked = Physics->Sweep(ClearanceStart, ClearanceEnd, FQuat::Identity,
+		FCollisionShape::MakeSphere(SphereRadius), ClearanceHit, ECollisionChannel::WorldStatic, Owner);
+	if (bDrawDebug)
+	{
+		const FColor Color = bClearanceBlocked ? FColor::Red() : FColor::Green();
+		DrawDebugSphere(World, ClearanceStart, SphereRadius, 12, Color);
+		DrawDebugSphere(World, ClearanceEnd, SphereRadius, 12, Color);
+		DrawDebugLine(World, ClearanceStart, bClearanceBlocked ? ClearanceHit.WorldHitLocation : ClearanceEnd, Color);
+	}
+	return !bClearanceBlocked;
+}
+
+bool UObstacleFanSensorComponent::HasTraversableTerrainProfile(IPhysicsScene* Physics, const FVector& Origin,
+	const FVector& PlanarDir, float WalkableNormalZ) const
+{
+	const float Spacing = std::max(TerrainSampleSpacing, 0.1f);
+	const int SampleCount = std::max(1, static_cast<int>(std::ceil(ProbeRange / Spacing)));
+
+	bool bHasPrevious = false;
+	float PreviousHeight = 0.0f;
+	for (int SampleIndex = 0; SampleIndex <= SampleCount; ++SampleIndex)
+	{
+		const float Distance = ProbeRange * static_cast<float>(SampleIndex) / static_cast<float>(SampleCount);
+		const FVector ProbePoint = Origin + PlanarDir * Distance;
+		const float RayStartZ = bHasPrevious ? PreviousHeight + TerrainProbeUp : Origin.Z + TerrainProbeUp;
+		const float RayLength = bHasPrevious
+			? TerrainProbeUp + TerrainProbeDown
+			: TerrainProbeUp + TerrainProbeDown + BodyHalfHeight;
+		const FVector RayStart(ProbePoint.X, ProbePoint.Y, RayStartZ);
+
+		FHitResult GroundHit;
+		if (!SampleWalkableGround(Physics, RayStart, RayLength, WalkableNormalZ, GroundHit))
+		{
+			return false;
+		}
+
+		if (bHasPrevious && std::abs(GroundHit.WorldHitLocation.Z - PreviousHeight) > MaxTerrainStep)
+		{
+			if (bDrawDebug)
+			{
+				DrawDebugLine(World, RayStart, GroundHit.WorldHitLocation, FColor::Red());
+			}
+			return false;
+		}
+
+		PreviousHeight = GroundHit.WorldHitLocation.Z;
+		bHasPrevious = true;
+	}
+	return true;
+}
 // 에디터 타임 중 센서 범위 프리뷰
 void UObstacleFanSensorComponent::ContributeSelectedVisuals(FScene& Scene) const
 {
