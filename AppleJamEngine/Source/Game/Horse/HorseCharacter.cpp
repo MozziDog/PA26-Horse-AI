@@ -197,122 +197,90 @@ void AHorseCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 void AHorseCharacter::SetupInputComponent()
 {
 	Super::SetupInputComponent();
+	if (!InputComponent) return;
 
-	if (!InputComponent)
-	{
-		return;
-	}
-
-	// 조향(아날로그): 좌우 축 → BB UserMoveDir 로 기록. Locomotion 이 직접 조종당하지 않고 arbiter 가
-	// 이를 하나의 interest 로 소비(간접 반영 원칙). 게임패드 좌스틱 X 도 함께.
 	InputComponent->AddAxisMapping("HorseSteering", "D", 1.0f);
 	InputComponent->AddAxisMapping("HorseSteering", "A", -1.0f);
 	InputComponent->AddGamepadAxisMapping("HorseSteering", EInputAxisSourceType::GamepadLeftStickX, 1.0f);
-	InputComponent->BindAxis("HorseSteering", [this](float Value)
-	{
-		LastSteeringInput = Value;
-		if (!BlackboardComponent)
-		{
-			return;
-		}
-		// 스칼라(±1, 좌우) → forward 에서 옆으로 최대 45° 편향된 world 목표 방향, 크기 = 입력 강도.
-		// 매 프레임 현재 forward 기준이라 말이 회전해도 "우측으로 계속 밀기" 가 유지된다. 무입력(0)이면
-		// 영벡터를 써 arbiter 가 유저 영향을 무시(도로/관성 자율 주행)한다.
-		FVector Move(0.0f, 0.0f, 0.0f);
-		const float Strength = std::clamp(std::abs(Value), 0.0f, 1.0f);
-		if (Strength > 1.e-3f)
-		{
-			FVector Forward = GetActorForward();
-			FVector Right   = GetActorRight();
-			Forward.Z = 0.0f;
-			Right.Z   = 0.0f;
-			const FVector Dir = Forward + Right * Value;
-			if (!Dir.IsNearlyZero())
-			{
-				Move = Dir.Normalized() * Strength;
-			}
-		}
-		BlackboardComponent->GetBlackboard().SetVector(HorseBBKeys::UserMoveDir, Move);
-		// 평행이동 모드 시의 입력 전달 (선회와 횡이동이 같은 입력 공유)
-		LocomotionComponent->SetStrafeHorizontalInput(std::clamp(LastSteeringInput, -1.0f, 1.0f));
-	});
+	InputComponent->BindAxis("HorseSteering", [this](float Value) { SetSteeringInput(Value); });
 
-	// 보법(gait) 변속: W=한 단계 가속(쿨타임 있음), S=한 단계 감속, X=정지.
-	// gait는 기어 변속 개념, 무입력 시 현재 gait 유지 => 순항
 	InputComponent->AddActionMapping("HorseGiddyup", "W");
 	InputComponent->AddActionMapping("HorseSlowDown", "S");
 	InputComponent->AddActionMapping("HorseStop", "X");
-	InputComponent->AddActionMapping("HorseGiddyup", "GamepadFaceButtonBottom");	// Xbox 패드 기준 A 버튼
-	InputComponent->AddActionMapping("HorseSlowDown", "GamepadFaceButtonRight");	// B 버튼
-	InputComponent->AddActionMapping("HorseStop", "GamepadFaceButtonLeft");			// X 버튼
-	InputComponent->BindAction("HorseGiddyup", EInputEvent::Pressed, [this]()
-	{
-		if (LocomotionComponent) LocomotionComponent->RequestGiddyup();
-	});
-	InputComponent->BindAction("HorseSlowDown", EInputEvent::Pressed, [this]()
-	{
-		if (LocomotionComponent) LocomotionComponent->RequestSlowDown();
-	});
-	InputComponent->BindAction("HorseStop", EInputEvent::Pressed, [this]()
-	{
-		if (LocomotionComponent) LocomotionComponent->RequestStop();
-	});
+	InputComponent->AddActionMapping("HorseGiddyup", "GamepadFaceButtonBottom");
+	InputComponent->AddActionMapping("HorseSlowDown", "GamepadFaceButtonRight");
+	InputComponent->AddActionMapping("HorseStop", "GamepadFaceButtonLeft");
+	InputComponent->BindAction("HorseGiddyup", EInputEvent::Pressed, [this]() { RequestGiddyup(); });
+	InputComponent->BindAction("HorseSlowDown", EInputEvent::Pressed, [this]() { RequestSlowDown(); });
+	InputComponent->BindAction("HorseStop", EInputEvent::Pressed, [this]() { RequestStop(); });
 
-	// 전방 주시(gaze) — 홀드하는 동안 평행이동 모드. 키보드 LShift / 게임패드 LT(야숨의 ZL과 동일)
-	// LT가 아날로그 트리거라 버튼 홀드 여부는 임계값으로 판정
 	InputComponent->AddAxisMapping("HorseGaze", "LeftShift", 1.0f);
 	InputComponent->AddGamepadAxisMapping("HorseGaze", EInputAxisSourceType::GamepadLeftTrigger, 1.0f);
-	InputComponent->BindAxis("HorseGaze", [this](float Value)
-	{
-		bGazeInput = Value > GamepadTriggerHoldThreshold;
-		LocomotionComponent->SetStrafeMode(bGazeInput);
-	});
+	InputComponent->BindAxis("HorseGaze", [this](float Value) { SetGazeInput(Value); });
 
-	// 종방향 축 — 평행이동 시 전/후진(+전진). W=+1 / S=-1 / 게임패드 좌스틱 Y(위=전진).
-	// NOTE: 키보드 조작에서 W/S 키는 보법 변속 '버튼'과 겹침. 평행이동 중 보법(gait)조작은 Locomotion에서 필터링함
 	InputComponent->AddAxisMapping("HorseStrafeForward", "W", 1.0f);
 	InputComponent->AddAxisMapping("HorseStrafeForward", "S", -1.0f);
 	InputComponent->AddGamepadAxisMapping("HorseStrafeForward", EInputAxisSourceType::GamepadLeftStickY, 1.0f);
-	InputComponent->BindAxis("HorseStrafeForward", [this](float Value)
-	{
-		LastForwardInput = Value;
-		LocomotionComponent->SetStrafeVerticalInput(std::clamp(LastForwardInput, -1.0f, 1.0f));
-	});
+	InputComponent->BindAxis("HorseStrafeForward", [this](float Value) { SetStrafeForwardInput(Value); });
 
 	if (bAutoInputCamera)
 	{
 		InputComponent->AddMouseAxisMapping("HorseCameraHorizontal", EInputAxisSourceType::MouseX, MouseSensitivity);
 		InputComponent->AddMouseAxisMapping("HorseCameraVertical", EInputAxisSourceType::MouseY, MouseSensitivity);
-
-		InputComponent->BindAxis("HorseCameraHorizontal", [this](float Value)
-		{
-			if (std::abs(Value) <= 0.0001f)
-			{
-				return;
-			}
-
-			CameraTimeSinceLookInput = 0.0f;
-			bCameraLookInputThisFrame = true;
-			CameraYawOffset = ClampCameraYawOffset(CameraYawOffset + Value, MaxCameraYawOffset);
-			UpdateCameraControlRotation();
-		});
-
-		InputComponent->BindAxis("HorseCameraVertical", [this](float Value)
-		{
-			if (std::abs(Value) <= 0.0001f)
-			{
-				return;
-			}
-
-			CameraTimeSinceLookInput = 0.0f;
-			bCameraLookInputThisFrame = true;
-			const float Direction = bInvertMouseY ? -1.0f : 1.0f;
-			CameraPitch = ClampCameraPitch(CameraPitch + Value * Direction, MinCameraPitch, MaxCameraPitch);
-			UpdateCameraControlRotation();
-		});
+		InputComponent->BindAxis("HorseCameraHorizontal", [this](float Value) { AddCameraHorizontalInput(Value); });
+		InputComponent->BindAxis("HorseCameraVertical", [this](float Value) { AddCameraVerticalInput(Value); });
 	}
 }
 
+void AHorseCharacter::SetSteeringInput(float Value)
+{
+	LastSteeringInput = Value;
+	FVector Move = FVector::ZeroVector;
+	const float Strength = std::clamp(std::abs(Value), 0.0f, 1.0f);
+	if (Strength > 1.e-3f)
+	{
+		FVector Forward = GetActorForward(); Forward.Z = 0.0f;
+		FVector Right = GetActorRight(); Right.Z = 0.0f;
+		const FVector Direction = Forward + Right * Value;
+		if (!Direction.IsNearlyZero()) Move = Direction.Normalized() * Strength;
+	}
+	if (BlackboardComponent) BlackboardComponent->GetBlackboard().SetVector(HorseBBKeys::UserMoveDir, Move);
+	if (LocomotionComponent) LocomotionComponent->SetStrafeHorizontalInput(std::clamp(Value, -1.0f, 1.0f));
+}
+
+void AHorseCharacter::RequestGiddyup() { if (LocomotionComponent) LocomotionComponent->RequestGiddyup(); }
+void AHorseCharacter::RequestSlowDown() { if (LocomotionComponent) LocomotionComponent->RequestSlowDown(); }
+void AHorseCharacter::RequestStop() { if (LocomotionComponent) LocomotionComponent->RequestStop(); }
+
+void AHorseCharacter::SetGazeInput(float Value)
+{
+	bGazeInput = Value > GamepadTriggerHoldThreshold;
+	if (LocomotionComponent) LocomotionComponent->SetStrafeMode(bGazeInput);
+}
+
+void AHorseCharacter::SetStrafeForwardInput(float Value)
+{
+	LastForwardInput = Value;
+	if (LocomotionComponent) LocomotionComponent->SetStrafeVerticalInput(std::clamp(Value, -1.0f, 1.0f));
+}
+
+void AHorseCharacter::AddCameraHorizontalInput(float Value)
+{
+	if (std::abs(Value) <= 0.0001f) return;
+	CameraTimeSinceLookInput = 0.0f;
+	bCameraLookInputThisFrame = true;
+	CameraYawOffset = ClampCameraYawOffset(CameraYawOffset + Value, MaxCameraYawOffset);
+	UpdateCameraControlRotation();
+}
+
+void AHorseCharacter::AddCameraVerticalInput(float Value)
+{
+	if (std::abs(Value) <= 0.0001f) return;
+	CameraTimeSinceLookInput = 0.0f;
+	bCameraLookInputThisFrame = true;
+	CameraPitch = ClampCameraPitch(CameraPitch + Value * (bInvertMouseY ? -1.0f : 1.0f), MinCameraPitch, MaxCameraPitch);
+	UpdateCameraControlRotation();
+}
 void AHorseCharacter::RebindComponents()
 {
 	RootSceneComponent = GetRootComponent();

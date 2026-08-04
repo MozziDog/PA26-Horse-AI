@@ -35,6 +35,24 @@ public:
 	UFUNCTION(Pure, Catergory="Character|Components")
 	UHorseMovementComponent* GetHorseMovement() const { return MovementComponent; }
 
+	// 플레이어 입력 전달 관련
+	// Possess된 경우 스스로 호출, 그 외에는 public api로 외부(탑승자 측)에서 호출
+	UFUNCTION(Callable, Category = "Horse|Command") 
+	void SetSteeringInput(float Value);
+	UFUNCTION(Callable, Category = "Horse|Command") 
+	void RequestGiddyup();
+	UFUNCTION(Callable, Category = "Horse|Command") 
+	void RequestSlowDown();
+	UFUNCTION(Callable, Category = "Horse|Command") 
+	void RequestStop();
+	UFUNCTION(Callable, Category = "Horse|Command") 
+	void SetGazeInput(float Value);
+	UFUNCTION(Callable, Category = "Horse|Command") 
+	void SetStrafeForwardInput(float Value);
+	UFUNCTION(Callable, Category = "Horse|Command") 
+	void AddCameraHorizontalInput(float Value);
+	UFUNCTION(Callable, Category = "Horse|Command") 
+	void AddCameraVerticalInput(float Value);
 protected:
 	void OnPostLoad(FArchive& Ar) override; // Re-Initialize after save & load
 
