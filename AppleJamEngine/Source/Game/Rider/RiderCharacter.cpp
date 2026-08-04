@@ -120,6 +120,7 @@ bool ARiderCharacter::Mount()
 	}
 
 	ParentConstraintComponent->SetRelativeOffset(MountLocationOffset, MountRotationOffset);
+	Horse->SetRiderMounted(true);
 	MountedHorse = Horse;
 
 	// 탑승 중에는 말의 카메라를 사용
@@ -142,6 +143,7 @@ bool ARiderCharacter::Unmount()
 		return false;
 	}
 
+	Horse->SetRiderMounted(false);
 	Horse->SetSteeringInput(0.0f);
 	Horse->SetStrafeForwardInput(0.0f);
 	Horse->SetGazeInput(0.0f);

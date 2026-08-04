@@ -35,6 +35,11 @@ public:
 	UFUNCTION(Pure, Catergory="Character|Components")
 	UHorseMovementComponent* GetHorseMovement() const { return MovementComponent; }
 
+    UFUNCTION(Callable, Category = "Horse|Rider")
+    void SetRiderMounted(bool bInRiderMounted) { bRiderMounted = bInRiderMounted; }
+    UFUNCTION(Pure, Category = "Horse|Rider")
+    bool IsRiderMounted() const { return bRiderMounted; }
+
 	// 플레이어 입력 전달 관련
 	// Possess된 경우 스스로 호출, 그 외에는 public api로 외부(탑승자 측)에서 호출
 	UFUNCTION(Callable, Category = "Horse|Command") 
@@ -126,6 +131,8 @@ protected:
 	// 통상 주행 중 조향은 입력 이벤트 콜백에서 UserMoveDir 계산으로 처리하고 LastSteeringInput은 사용하지 않음
 	// (SetupInputComponent() 참고)
 	float LastSteeringInput = 0.0f;
+
+	bool bRiderMounted = false;
 
 	static constexpr float GamepadTriggerHoldThreshold = 0.5f;	// 게임패드 트리거는 아날로그 입력, 버튼처럼 쓰려면 기준값 필요
 };

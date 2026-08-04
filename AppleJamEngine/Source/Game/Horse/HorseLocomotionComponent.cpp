@@ -1,6 +1,7 @@
 ﻿#include "HorseLocomotionComponent.h"
 
 #include "HorseMovementComponent.h"
+#include "HorseCharacter.h"
 #include "Game/Horse/HorseConstants.h"
 #include "Component/AI/BlackboardComponent.h"
 #include "Core/TickFunction.h"
@@ -117,6 +118,14 @@ bool UHorseLocomotionComponent::GetPlanarForward(const AActor& Owner, FVector& O
 FHorseSteeringInfluence UHorseLocomotionComponent::GatherSteeringInfluences(FBlackboard& BB) const
 {
 	FHorseSteeringInfluence Inf;
+
+	// 기수가 탑승중이지 않을 때에는 유저입력/도로추종하지 않음
+	// NOTE: possessed 또는 mounted가 아니라면 애초에 유저 조작 안들어오긴 하지만 방어적으로 영향력 배제
+	const AHorseCharacter* Horse = Cast<AHorseCharacter>(GetOwner());
+	if (!Horse || !Horse->IsRiderMounted())
+	{
+		return Inf;
+	}
 
 	FVector Temp;
 	if (BB.TryGetVector(HorseBBKeys::UserMoveDir, Temp) && !Temp.IsNearlyZero())
