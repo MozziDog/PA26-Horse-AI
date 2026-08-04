@@ -154,7 +154,9 @@ bool ARiderCharacter::Unmount()
 	ParentConstraintComponent->Detach();
 	MountedHorse.Reset();
 
-	SetActorLocation(Horse->GetActorLocation() + Horse->GetActorRight());
+	// 임시 구현) 무조건 말 오른쪽으로 내리도록 
+	SetActorLocation(Horse->GetActorLocation() + Horse->GetActorRight() 
+						+ FVector::UpVector * CapsuleComponent->GetScaledCapsuleHalfHeight());
 	SetActorRotation(Horse->GetActorRotation());
 
 	// 하차 시에 라이더의 카메라로 복귀
