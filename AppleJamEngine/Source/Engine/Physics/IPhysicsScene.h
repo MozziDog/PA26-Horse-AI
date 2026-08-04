@@ -109,6 +109,12 @@ public:
         uint32 ObjectTypeMask,
         const AActor* IgnoreActor = nullptr) = 0;
 
+    // ObjectType 기반 shape overlap — 주어진 pose에서 하나 이상의 대상 shape와 겹치면 true.
+    // Trigger shape는 다른 scene query와 동일하게 제외한다.
+    virtual bool OverlapAnyByObjectTypes(const FVector& Location, const FQuat& Rotation, const FCollisionShape& Shape,
+        uint32 ObjectTypeMask,
+        const AActor* IgnoreActor = nullptr) = 0;
+
     virtual uint32 GetComponentGeneration_GameThread(uint32 /*ComponentId*/) const
     {
         return 0;

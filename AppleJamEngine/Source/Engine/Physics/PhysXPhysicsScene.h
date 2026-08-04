@@ -124,6 +124,14 @@ public:
         const AActor*          IgnoreActor = nullptr
     ) override;
 
+    bool OverlapAnyByObjectTypes(
+        const FVector&         Location,
+        const FQuat&           Rotation,
+        const FCollisionShape& Shape,
+        uint32                 ObjectTypeMask,
+        const AActor*          IgnoreActor = nullptr
+    ) override;
+
     IPhysicsRuntime* GetRuntime() override
     {
         return &Runtime;
@@ -156,8 +164,10 @@ private:
     bool                      ExecuteRaycastByObjectTypes_PhysicsThread(const FVector& Start, const FVector& Dir, float MaxDist, uint32 ObjectTypeMask, uint32 IgnoreActorId, FPhysicsRaycastResult& OutResult) const;
     bool                      ExecuteSweep_PhysicsThread(const FVector& Start, const FVector& Dir, float MaxDist, const FQuat& Rotation, const FCollisionShape& Shape, ECollisionChannel TraceChannel, uint32 IgnoreActorId, FPhysicsSweepResult& OutResult) const;
     bool                      ExecuteSweepByObjectTypes_PhysicsThread(const FVector& Start, const FVector& Dir, float MaxDist, const FQuat& Rotation, const FCollisionShape& Shape, uint32 ObjectTypeMask, uint32 IgnoreActorId, FPhysicsSweepResult& OutResult) const;
+    bool                      ExecuteOverlapAnyByObjectTypes_PhysicsThread(const FVector& Location, const FQuat& Rotation, const FCollisionShape& Shape, uint32 ObjectTypeMask, uint32 IgnoreActorId) const;
     bool                      SubmitRaycastQuery_GameThread(bool bObjectTypes, const FVector& Start, const FVector& Dir, float MaxDist, ECollisionChannel TraceChannel, uint32 ObjectTypeMask, uint32 IgnoreActorId, FPhysicsRaycastResult& OutResult);
     bool                      SubmitSweepQuery_GameThread(bool bObjectTypes, const FVector& Start, const FVector& Dir, float MaxDist, const FQuat& Rotation, const FCollisionShape& Shape, ECollisionChannel TraceChannel, uint32 ObjectTypeMask, uint32 IgnoreActorId, FPhysicsSweepResult& OutResult);
+    bool                      SubmitOverlapQuery_GameThread(const FVector& Location, const FQuat& Rotation, const FCollisionShape& Shape, uint32 ObjectTypeMask, uint32 IgnoreActorId);
 
     void StartPhysicsThread();
     void StopPhysicsThreadAndJoin();
@@ -200,6 +210,7 @@ private:
     mutable bool                  bPhysicsQueryCompleted   = false;
     mutable bool                  bPendingQueryObjectTypes = false;
     mutable bool                  bPendingQuerySweep       = false;
+    mutable bool                  bPendingQueryOverlap     = false;
     mutable FVector               PendingQueryStart;
     mutable FVector               PendingQueryDir;
     mutable float                 PendingQueryMaxDist        = 0.0f;

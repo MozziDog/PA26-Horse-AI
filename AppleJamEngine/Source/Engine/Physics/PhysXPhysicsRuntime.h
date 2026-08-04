@@ -149,6 +149,7 @@ public:
     void ResetVehicle(FVehicleHandle Vehicle, const FTransform& WorldTransform);
 
     void RecordRaycastQuery();
+    void RecordOverlapQuery();
     void SetEventStats(int32 NumContactPairs, int32 NumTriggerPairs, float DispatchEventMs);
 
     FPhysicsStats GetStats() const override;
@@ -287,6 +288,7 @@ private:
 
     mutable std::mutex ExternalStatsMutex;
     mutable int32      PendingRaycastQueries = 0;
+    mutable int32      PendingOverlapQueries = 0;
     mutable int32      LastContactPairs      = 0;
     mutable int32      LastTriggerPairs      = 0;
     mutable float      LastDispatchEventMs   = 0.0f;

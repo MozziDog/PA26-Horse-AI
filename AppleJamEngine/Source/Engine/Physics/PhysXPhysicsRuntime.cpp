@@ -1915,6 +1915,18 @@ void FPhysXPhysicsRuntime::RecordRaycastQuery()
     }
 }
 
+void FPhysXPhysicsRuntime::RecordOverlapQuery()
+{
+    {
+        std::lock_guard<std::mutex> Lock(ExternalStatsMutex);
+        ++PendingOverlapQueries;
+    }
+    {
+        std::lock_guard<std::mutex> Lock(DebugSnapshotMutex);
+        ++DebugSnapshot.Stats.NumOverlapQueries;
+    }
+}
+
 void FPhysXPhysicsRuntime::SetEventStats(int32 NumContactPairs, int32 NumTriggerPairs, float DispatchEventMs)
 {
     {
@@ -2446,12 +2458,14 @@ void FPhysXPhysicsRuntime::UpdateStats()
 
     {
         std::lock_guard<std::mutex> Lock(ExternalStatsMutex);
-        Stats.NumRaycasts     = PendingRaycastQueries;
-        Stats.NumContactPairs = LastContactPairs;
-        Stats.NumTriggerPairs = LastTriggerPairs;
-        Stats.DispatchEventMs = LastDispatchEventMs;
+        Stats.NumRaycasts       = PendingRaycastQueries;
+        Stats.NumOverlapQueries = PendingOverlapQueries;
+        Stats.NumContactPairs   = LastContactPairs;
+        Stats.NumTriggerPairs   = LastTriggerPairs;
+        Stats.DispatchEventMs   = LastDispatchEventMs;
 
         PendingRaycastQueries = 0;
+        PendingOverlapQueries = 0;
     }
 
     for (const auto& BodyPtr : Bodies)

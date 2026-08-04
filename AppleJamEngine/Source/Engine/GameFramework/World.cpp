@@ -494,6 +494,14 @@ bool UWorld::PhysicsSweepByObjectTypes(const FVector& Start, const FVector& End,
     return false;
 }
 
+bool UWorld::PhysicsOverlapAnyByObjectTypes(const FVector& Location, const FQuat& Rotation, const FCollisionShape& Shape,
+    uint32 ObjectTypeMask, const AActor* IgnoreActor) const
+{
+    if (PhysicsScene)
+        return PhysicsScene->OverlapAnyByObjectTypes(Location, Rotation, Shape, ObjectTypeMask, IgnoreActor);
+    return false;
+}
+
 
 void UWorld::InsertActorToOctree(AActor* Actor)
 {

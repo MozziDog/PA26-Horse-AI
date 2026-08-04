@@ -220,6 +220,11 @@ public:
         uint32 ObjectTypeMask,
         const AActor* IgnoreActor = nullptr) const;
 
+    // ObjectType 기반 overlap convenience — delegates to IPhysicsScene::OverlapAnyByObjectTypes.
+    bool PhysicsOverlapAnyByObjectTypes(const FVector& Location, const FQuat& Rotation, const FCollisionShape& Shape,
+        uint32 ObjectTypeMask,
+        const AActor* IgnoreActor = nullptr) const;
+
 	// --- Game flow ---
 	// BeginPlay 이전에 호출. WorldType이 Editor면 무시된다.
 	void SetGameModeClass(UClass* InClass) { GameModeClass = InClass; }

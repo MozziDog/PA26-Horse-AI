@@ -1976,6 +1976,7 @@ void FPhysXPhysicsScene::PhysicsThreadMain()
             {
                 const bool              bObjectTypes       = bPendingQueryObjectTypes;
                 const bool              bSweepQuery        = bPendingQuerySweep;
+                const bool              bOverlapQuery      = bPendingQueryOverlap;
                 const FVector           QueryStart         = PendingQueryStart;
                 const FVector           QueryDir           = PendingQueryDir;
                 const float             QueryMaxDist       = PendingQueryMaxDist;
@@ -1992,7 +1993,12 @@ void FPhysXPhysicsScene::PhysicsThreadMain()
                 bool bHit = false;
                 FPhysicsRaycastResult RaycastResult;
                 FPhysicsSweepResult   SweepResult;
-                if (bSweepQuery)
+                if (bOverlapQuery)
+                {
+                    bHit = ExecuteOverlapAnyByObjectTypes_PhysicsThread(
+                        QueryStart, QueryRotation, QueryShape, QueryObjectMask, QueryIgnoreActorId);
+                }
+                else if (bSweepQuery)
                 {
                     bHit = bObjectTypes
                             ? ExecuteSweepByObjectTypes_PhysicsThread(QueryStart, QueryDir, QueryMaxDist, QueryRotation, QueryShape, QueryObjectMask, QueryIgnoreActorId, SweepResult)
@@ -2044,6 +2050,7 @@ void FPhysXPhysicsScene::PhysicsThreadMain()
         bPhysicsQueryInProgress = false;
         bPhysicsQueryCompleted  = true;
         bPendingQuerySweep      = false;
+        bPendingQueryOverlap    = false;
     }
     PhysicsThreadDoneCv.notify_all();
 }
@@ -2063,6 +2070,7 @@ void FPhysXPhysicsScene::StartPhysicsThread()
     bPhysicsQueryInProgress     = false;
     bPhysicsQueryCompleted      = false;
     bPendingQuerySweep          = false;
+    bPendingQueryOverlap        = false;
     CompletedPhysicsFrameIndex  = 0;
     PendingPhysicsFrameIndex    = 0;
     PendingPhysicsDeltaTime     = 0.0f;
@@ -2440,6 +2448,7 @@ bool FPhysXPhysicsScene::SubmitRaycastQuery_GameThread(
     PendingQueryIgnoreActorId  = IgnoreActorId;
     bPendingQueryObjectTypes   = bObjectTypes;
     bPendingQuerySweep         = false;
+    bPendingQueryOverlap       = false;
     bPendingQueryHit           = false;
     PendingQueryResult         = FPhysicsRaycastResult();
     PendingSweepQueryResult    = FPhysicsSweepResult();
@@ -2573,6 +2582,7 @@ bool FPhysXPhysicsScene::SubmitSweepQuery_GameThread(
     PendingQueryIgnoreActorId  = IgnoreActorId;
     bPendingQueryObjectTypes   = bObjectTypes;
     bPendingQuerySweep         = true;
+    bPendingQueryOverlap       = false;
     bPendingQueryHit           = false;
     PendingQueryResult         = FPhysicsRaycastResult();
     PendingSweepQueryResult    = FPhysicsSweepResult();
@@ -2596,6 +2606,85 @@ bool FPhysXPhysicsScene::SubmitSweepQuery_GameThread(
     }
 
     OutResult              = PendingSweepQueryResult;
+    const bool bHit        = bPendingQueryHit;
+    bPhysicsQueryCompleted = false;
+    return bHit;
+}
+
+bool FPhysXPhysicsScene::SubmitOverlapQuery_GameThread(
+    const FVector&         Location,
+    const FQuat&           Rotation,
+    const FCollisionShape& Shape,
+    uint32                 ObjectTypeMask,
+    uint32                 IgnoreActorId)
+{
+    if (!Scene || ObjectTypeMask == 0)
+    {
+        return false;
+    }
+
+    PxGeometryHolder Geometry;
+    PxQuat ShapeAxisRotation(PxIdentity);
+    if (!BuildPxSweepGeometry(Shape, Geometry, ShapeAxisRotation))
+    {
+        return false;
+    }
+
+    Runtime.RecordOverlapQuery();
+
+    std::unique_lock<std::mutex> Lock(PhysicsThreadMutex);
+    PhysicsThreadDoneCv.wait(
+        Lock,
+        [this]()
+        {
+            return bPhysicsThreadStopRequested || (!bPhysicsQueryPending && !bPhysicsQueryInProgress);
+        }
+    );
+
+    if (bPhysicsThreadStopRequested)
+    {
+        return false;
+    }
+
+    if (!bPhysicsThreadStarted)
+    {
+        Lock.unlock();
+        return ExecuteOverlapAnyByObjectTypes_PhysicsThread(Location, Rotation, Shape, ObjectTypeMask, IgnoreActorId);
+    }
+
+    PendingQueryStart          = Location;
+    PendingQueryDir            = FVector::ZeroVector;
+    PendingQueryMaxDist        = 0.0f;
+    PendingQueryRotation       = Rotation;
+    PendingQueryShape          = Shape;
+    PendingQueryTraceChannel   = ECollisionChannel::WorldStatic;
+    PendingQueryObjectTypeMask = ObjectTypeMask;
+    PendingQueryIgnoreActorId  = IgnoreActorId;
+    bPendingQueryObjectTypes   = true;
+    bPendingQuerySweep         = false;
+    bPendingQueryOverlap       = true;
+    bPendingQueryHit           = false;
+    PendingQueryResult         = FPhysicsRaycastResult();
+    PendingSweepQueryResult    = FPhysicsSweepResult();
+    bPhysicsQueryCompleted     = false;
+    bPhysicsQueryPending       = true;
+    PhysicsThreadCv.notify_one();
+
+    PhysicsThreadDoneCv.wait(
+        Lock,
+        [this]()
+        {
+            return bPhysicsQueryCompleted || bPhysicsThreadStopRequested;
+        }
+    );
+
+    if (bPhysicsThreadStopRequested && !bPhysicsQueryCompleted)
+    {
+        bPhysicsQueryPending   = false;
+        bPhysicsQueryCompleted = false;
+        return false;
+    }
+
     const bool bHit        = bPendingQueryHit;
     bPhysicsQueryCompleted = false;
     return bHit;
@@ -3080,6 +3169,93 @@ bool FPhysXPhysicsScene::ExecuteSweepByObjectTypes_PhysicsThread(
     return OutResult.bBlockingHit;
 }
 
+bool FPhysXPhysicsScene::ExecuteOverlapAnyByObjectTypes_PhysicsThread(
+    const FVector&         Location,
+    const FQuat&           Rotation,
+    const FCollisionShape& Shape,
+    uint32                 ObjectTypeMask,
+    uint32                 IgnoreActorId
+) const
+{
+    if (!Scene || ObjectTypeMask == 0)
+    {
+        return false;
+    }
+
+    PxGeometryHolder Geometry;
+    PxQuat ShapeAxisRotation(PxIdentity);
+    if (!BuildPxSweepGeometry(Shape, Geometry, ShapeAxisRotation))
+    {
+        return false;
+    }
+
+    struct FObjectTypeOverlapFilter : PxQueryFilterCallback
+    {
+        uint32 IgnoreActorId  = 0;
+        PxU32  ObjectTypeMask = 0;
+
+        FObjectTypeOverlapFilter(uint32 InIgnoreActorId, PxU32 InMask)
+            : IgnoreActorId(InIgnoreActorId), ObjectTypeMask(InMask)
+        {
+        }
+
+        PxQueryHitType::Enum preFilter(
+            const PxFilterData&,
+            const PxShape* Shape,
+            const PxRigidActor* Actor,
+            PxHitFlags&
+        ) override
+        {
+            const uint32 ShapeActorId = GetActorIdFromShape(Shape);
+            const uint32 BodyActorId  = GetActorIdFromActor(Actor);
+            if (IgnoreActorId != 0 && (ShapeActorId == IgnoreActorId || BodyActorId == IgnoreActorId))
+            {
+                return PxQueryHitType::eNONE;
+            }
+
+            if (Shape)
+            {
+                if (Shape->getFlags().isSet(PxShapeFlag::eTRIGGER_SHAPE))
+                {
+                    return PxQueryHitType::eNONE;
+                }
+
+                const PxFilterData ShapeData      = Shape->getQueryFilterData();
+                const PxU32        ShapeObjectBit = 1u << GetPhysicsFilterObjectType(ShapeData.word0);
+                if ((ShapeObjectBit & ObjectTypeMask) == 0)
+                {
+                    return PxQueryHitType::eNONE;
+                }
+            }
+
+            return PxQueryHitType::eBLOCK;
+        }
+
+        PxQueryHitType::Enum postFilter(const PxFilterData&, const PxQueryHit&) override
+        {
+            return PxQueryHitType::eBLOCK;
+        }
+    };
+
+    FObjectTypeOverlapFilter FilterCallback(IgnoreActorId, ObjectTypeMask);
+    PxOverlapBuffer Hit;
+    PxQueryFilterData FilterData;
+    FilterData.flags = PxQueryFlag::eSTATIC | PxQueryFlag::eDYNAMIC | PxQueryFlag::ePREFILTER;
+
+    const FQuat NormalizedRotation = Rotation.GetNormalized();
+    const PxTransform Pose(ToPxVec3(Location), ToPxQuat(NormalizedRotation) * ShapeAxisRotation);
+
+    PxSceneReadLock ReadLock(*Scene);
+    const bool bStatus = Scene->overlap(
+        Geometry.any(),
+        Pose,
+        Hit,
+        FilterData,
+        &FilterCallback
+    );
+    return bStatus && Hit.hasBlock;
+}
+
 bool FPhysXPhysicsScene::Raycast(
     const FVector&    Start,
     const FVector&    Dir,
@@ -3203,4 +3379,16 @@ bool FPhysXPhysicsScene::SweepByObjectTypes(
     }
 
     return ResolveSweepResult_GameThread(PhysicsResult, OutHit);
+}
+
+bool FPhysXPhysicsScene::OverlapAnyByObjectTypes(
+    const FVector&         Location,
+    const FQuat&           Rotation,
+    const FCollisionShape& Shape,
+    uint32                 ObjectTypeMask,
+    const AActor*          IgnoreActor
+)
+{
+    const uint32 IgnoreActorId = IgnoreActor ? IgnoreActor->GetUUID() : 0;
+    return SubmitOverlapQuery_GameThread(Location, Rotation, Shape, ObjectTypeMask, IgnoreActorId);
 }
