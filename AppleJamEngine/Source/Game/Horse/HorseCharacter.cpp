@@ -281,6 +281,14 @@ void AHorseCharacter::AddCameraVerticalInput(float Value)
 	CameraPitch = ClampCameraPitch(CameraPitch + Value * (bInvertMouseY ? -1.0f : 1.0f), MinCameraPitch, MaxCameraPitch);
 	UpdateCameraControlRotation();
 }
+void AHorseCharacter::ResetCameraToDefault()
+{
+	CameraYawOffset = 0.0f;
+	CameraPitch = ClampCameraPitch(DefaultCameraPitch, MinCameraPitch, MaxCameraPitch);
+	CameraTimeSinceLookInput = CameraReturnDelay;
+	bCameraLookInputThisFrame = false;
+	UpdateCameraControlRotation();
+}
 void AHorseCharacter::RebindComponents()
 {
 	RootSceneComponent = GetRootComponent();

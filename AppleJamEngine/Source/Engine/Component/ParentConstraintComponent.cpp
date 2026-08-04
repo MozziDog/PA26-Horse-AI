@@ -98,11 +98,11 @@ FTransform UParentConstraintComponent::GetRelativeOffset() const
     return FTransform(RelativeLocationOffset, RelativeRotationOffset, FVector(1.0f, 1.0f, 1.0f));
 }
 
-void UParentConstraintComponent::SetRelativeOffset(const FTransform& InRelativeOffset)
+void UParentConstraintComponent::SetRelativeOffset(const FVector& InRelativeLocation, const FRotator& InRelativeRotation)
 {
-    RelativeLocationOffset = InRelativeOffset.Location;
-    RelativeRotationOffset = InRelativeOffset.GetRotator();
-    ApplyConstraint();
+	RelativeLocationOffset = InRelativeLocation;
+	RelativeRotationOffset = InRelativeRotation;
+	ApplyConstraint();
 }
 
 USceneComponent* UParentConstraintComponent::GetConstrainedRoot() const

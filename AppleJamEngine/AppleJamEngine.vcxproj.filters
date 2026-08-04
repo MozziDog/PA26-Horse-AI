@@ -6417,4 +6417,12 @@
   <ItemGroup>
     <ResourceCompile Include="AppleJamEngine.rc" />
   </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Source\Game\Rider\RiderCharacter.cpp">
+      <Filter>Source\Game</Filter>
+    </ClCompile>
+    <ClInclude Include="Source\Game\Rider\RiderCharacter.h">
+      <Filter>Source\Game</Filter>
+    </ClInclude>
+  </ItemGroup>
 </Project>

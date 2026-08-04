@@ -5,6 +5,7 @@
 
 #include "GameFramework/World.h"
 #include "Game/Horse/HorseCharacter.h"
+#include "Game/Rider/RiderCharacter.h"
 
 // ============================================================
 // 게임-특화 액터를 Editor 의 "Place Actor" 메뉴에 등록 — 현재는 비어 있음.
@@ -24,6 +25,21 @@ void RegisterGameActorPlacements()
 			if (Actor)
 			{
 				Actor->InitDefaultComponents("Content/Mesh/Horse/Reexport/MalbersHorse_noArmour_noLow_SkeletalMesh.uasset");
+				Actor->SetActorLocation(Location);
+			}
+			return Actor;
+		}
+	);
+
+	FActorPlacementRegistry::Get().RegisterEntry(
+		"Rider Character",
+		[](UWorld* World, const FVector& Location) -> AActor*
+		{
+			if (!World) return nullptr;
+			ARiderCharacter* Actor = World->SpawnActor<ARiderCharacter>();
+			if (Actor)
+			{
+				Actor->InitDefaultComponents("Content/Mesh/HorseRider/Rider_SkeletalMesh.uasset");
 				Actor->SetActorLocation(Location);
 			}
 			return Actor;

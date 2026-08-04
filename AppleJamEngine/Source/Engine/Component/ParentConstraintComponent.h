@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "Component/ActorComponent.h"
 #include "Math/Transform.h"
@@ -43,7 +43,7 @@ public:
     FName GetSocketName() const { return SocketName; }
 
     FTransform GetRelativeOffset() const;
-    void SetRelativeOffset(const FTransform& InRelativeOffset);
+	void SetRelativeOffset(const FVector& InRelativeLocation, const FRotator& InRelativeRotation);
 
 private:
     // NOTE: 컴포넌트를 프로퍼티로 노출을 지원하지 않아 현재로썬 코드를 통해서만 Attach 가능

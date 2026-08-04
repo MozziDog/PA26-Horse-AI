@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "GameFramework/AActor.h"
 #include "Math/Rotator.h"
@@ -95,7 +95,7 @@ public:
 	// CharacterMovement 의 bOrientRotationToMovement 와 동시 true 면 Movement 가 마지막 우선 —
 	// 보통 둘 중 하나만 켜는 것이 일반적.
 	UPROPERTY(Edit, Save, Category="Pawn", DisplayName="Use Controller Rotation Pitch")
-	bool bUseControllerRotationPitch = true;
+	bool bUseControllerRotationPitch = false;
 	UPROPERTY(Edit, Save, Category="Pawn", DisplayName="Use Controller Rotation Yaw")
 	bool bUseControllerRotationYaw   = false;
 	UPROPERTY(Edit, Save, Category="Pawn", DisplayName="Use Controller Rotation Roll")

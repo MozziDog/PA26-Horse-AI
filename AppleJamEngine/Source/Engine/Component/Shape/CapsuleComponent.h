@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 #pragma once
 
 #include "Component/ShapeComponent.h"
@@ -28,7 +28,7 @@ public:
 
 protected:
 	UPROPERTY(Edit, Save, Category="Shape", DisplayName="Capsule Radius", Min=0.01f, Max=10000.0f, Speed=1.0f)
-	float CapsuleRadius = 1.8f;
+	float CapsuleRadius = 0.3f;
 	UPROPERTY(Edit, Save, Category="Shape", DisplayName="Capsule Half Height", Min=0.01f, Max=10000.0f, Speed=1.0f)
-	float CapsuleHalfHeight = 3.0f;
+	float CapsuleHalfHeight = 0.9f;
 };

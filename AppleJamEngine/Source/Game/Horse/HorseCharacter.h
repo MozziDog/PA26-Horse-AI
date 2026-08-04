@@ -53,6 +53,9 @@ public:
 	void AddCameraHorizontalInput(float Value);
 	UFUNCTION(Callable, Category = "Horse|Command") 
 	void AddCameraVerticalInput(float Value);
+
+    UFUNCTION(Callable, Category = "Horse|Camera")
+    void ResetCameraToDefault();
 protected:
 	void OnPostLoad(FArchive& Ar) override; // Re-Initialize after save & load
 
