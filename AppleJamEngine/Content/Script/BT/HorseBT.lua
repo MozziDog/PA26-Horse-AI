@@ -9,6 +9,9 @@ local selector = BT.selector
 return selector {
     label = "Root",
 
+	-- Whistle navigation owns gait only while a call request is active.
+	task("CallPlayer"),
+
     -- Travel: 주행 모드 유지. gait 미변경(req④ "현재 속도 유지") → 속도는 기수 gear가 소유.
     -- 조향/장애물회피/도로추종은 Locomotion arbiter가 담당하므로 여기서는 Running만 반환한다.
     task(function(_) return BT.Running end, "Travel"),

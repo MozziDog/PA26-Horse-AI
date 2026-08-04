@@ -36,6 +36,9 @@ public:
 	UFUNCTION(Pure, Category = "Rider|Mount")
 	AHorseCharacter* GetMountedHorse() const { return MountedHorse; }
 
+	UFUNCTION(Callable, Category="Rider|Horse")
+	void Whistle();
+
 protected:
 	void SetupInputComponent() override;
 

@@ -18,6 +18,7 @@ class URoadSensorComponent;
 class UBlackboardComponent;
 class USpringArmComponent;
 class UCameraComponent;
+class UHorseCallNavigationComponent;
 
 UCLASS()
 class AHorseCharacter : public APawn
@@ -36,9 +37,14 @@ public:
 	UHorseMovementComponent* GetHorseMovement() const { return MovementComponent; }
 
     UFUNCTION(Callable, Category = "Horse|Rider")
-    void SetRiderMounted(bool bInRiderMounted) { bRiderMounted = bInRiderMounted; }
+    void SetRiderMounted(bool bInRiderMounted);
     UFUNCTION(Pure, Category = "Horse|Rider")
     bool IsRiderMounted() const { return bRiderMounted; }
+
+	UFUNCTION(Pure, Category="Horse|Call")
+	bool IsPlayerOwnedHorse() const { return bPlayerOwnedHorse; }
+	UFUNCTION(Callable, Category="Horse|Call")
+	void RequestWhistleCall(const FVector& TargetLocation);
 
 	// 플레이어 입력 전달 관련
 	// Possess된 경우 스스로 호출, 그 외에는 public api로 외부(탑승자 측)에서 호출
@@ -86,6 +92,10 @@ protected:
 	TWeakObjectPtr<URoadSensorComponent> RoadSensorComponent = nullptr;
 	TWeakObjectPtr<USpringArmComponent> SpringArmComponent = nullptr;
 	TWeakObjectPtr<UCameraComponent> CameraComponent = nullptr;
+	TWeakObjectPtr<UHorseCallNavigationComponent> CallNavigationComponent = nullptr;
+
+	UPROPERTY(Edit, Save, Category="Horse|Call", DisplayName="Player Owned Horse")
+	bool bPlayerOwnedHorse = false;
 
 	UPROPERTY(Edit, Save, Category = "Horse|Camera", DisplayName = "Auto Camera Input")
 	bool bAutoInputCamera = true;

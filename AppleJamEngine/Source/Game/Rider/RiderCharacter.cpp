@@ -10,6 +10,7 @@
 #include "Game/Horse/HorseCharacter.h"
 #include "GameFramework/GameMode/PlayerController.h"
 #include "GameFramework/World.h"
+#include "Core/Logging/Log.h"
 
 #include <algorithm>
 
@@ -82,6 +83,10 @@ void ARiderCharacter::SetupInputComponent()
 
 	InputComponent->AddActionMapping("Unmount", "GamepadFaceButtonRight");
 	InputComponent->BindAction("Unmount", EInputEvent::Pressed, [this]() { Unmount(); });
+
+	InputComponent->AddActionMapping("Whistle", "H");
+	InputComponent->AddActionMapping("Whistle", "GamepadDPadDown");
+	InputComponent->BindAction("Whistle", EInputEvent::Pressed, [this]() { Whistle(); });
 
 	InputComponent->AddActionMapping("HorseSlowDown", "S");
 	InputComponent->AddActionMapping("HorseStop", "X");
@@ -267,5 +272,36 @@ void ARiderCharacter::SetHorseGaze(float Value)
 	if (MountedHorse)
 	{
 		MountedHorse->SetGazeInput(Value);
+	}
+}
+
+void ARiderCharacter::Whistle()
+{
+	if (MountedHorse) return;
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	AHorseCharacter* BestHorse = nullptr;
+	float BestDistance = FLT_MAX;
+	int32 OwnedHorseCount = 0;
+	for (AActor* Actor : World->GetActors())
+	{
+		AHorseCharacter* Horse = Cast<AHorseCharacter>(Actor);
+		if (!Horse || !Horse->IsPlayerOwnedHorse()) continue;
+		++OwnedHorseCount;
+		const float Distance = FVector::Distance(GetActorLocation(), Horse->GetActorLocation());
+		if (Distance < BestDistance)
+		{
+			BestDistance = Distance;
+			BestHorse = Horse;
+		}
+	}
+	if (OwnedHorseCount > 1)
+	{
+		UE_LOG("[Rider] Multiple player-owned horses found (%d); whistling to nearest.", OwnedHorseCount);
+	}
+	if (BestHorse)
+	{
+		BestHorse->RequestWhistleCall(GetActorLocation());
 	}
 }

@@ -35,6 +35,13 @@ namespace HorseBBKeys
 	// 유저 입력
 	inline const FName UserMoveDir = FName("User.MoveDir");  // FVector(world), 유저 입력 방향. 크기 = 강도[0~1]
 
+	// 상위 복셀 경로 추종 → 하위 context steering
+	inline const FName NavigationDirection    = FName("Navigation.Direction");
+	inline const FName NavigationHasDirection = FName("Navigation.HasDirection");
+	inline const FName NavigationAligning     = FName("Navigation.Aligning");
+	inline const FName CallRequested          = FName("Call.Requested");
+	inline const FName CallStatus             = FName("Call.Status");
+
 	// ── BT → Locomotion ──────────────────────────────────────
 	inline const FName DesiredGait = FName("DesiredGait");   // int (EHorseGait). BT 가 원하는 보법.
 }

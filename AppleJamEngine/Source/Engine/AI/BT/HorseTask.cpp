@@ -3,6 +3,8 @@
 #include "AI/BT/BTBehaviorRegistry.h"
 #include "AI/Blackboard.h"
 #include "Game/Horse/HorseLocomotionComponent.h"   // EHorseGait
+#include "Game/Horse/HorseCallNavigationComponent.h"
+#include "Game/Horse/HorseConstants.h"
 #include "GameFramework/AActor.h"
 #include "Runtime/EngineInitHooks.h"
 
@@ -33,6 +35,40 @@ namespace
 					Ctx.Blackboard->SetInt(FName("DesiredGait"), static_cast<int>(Gait));
 				}
 			};
+
+		FBTBehaviorRegistry::RegisterTask(FName("CallPlayer"), [SetDesiredGait](FBTContext& Ctx)
+			{
+				if (!Ctx.Blackboard) return EBTResult::Fail;
+				bool bRequested = false;
+				if (!Ctx.Blackboard->TryGetBool(HorseBBKeys::CallRequested, bRequested) || !bRequested)
+				{
+					return EBTResult::Fail;
+				}
+
+				int StatusValue = static_cast<int>(EHorseCallNavigationStatus::Idle);
+				Ctx.Blackboard->TryGetInt(HorseBBKeys::CallStatus, StatusValue);
+				const EHorseCallNavigationStatus Status = static_cast<EHorseCallNavigationStatus>(StatusValue);
+				if (Status == EHorseCallNavigationStatus::Following)
+				{
+					SetDesiredGait(Ctx, EHorseGait::Trot);
+					return EBTResult::Running;
+				}
+				if (Status == EHorseCallNavigationStatus::Planning || Status == EHorseCallNavigationStatus::Aligning)
+				{
+					SetDesiredGait(Ctx, EHorseGait::Stop);
+					return EBTResult::Running;
+				}
+
+				SetDesiredGait(Ctx, EHorseGait::Stop);
+				Ctx.Blackboard->SetBool(HorseBBKeys::CallRequested, false);
+				if (Status == EHorseCallNavigationStatus::Reached ||
+					Status == EHorseCallNavigationStatus::ReachedPartial ||
+					Status == EHorseCallNavigationStatus::CompletedByMount)
+				{
+					return EBTResult::Success;
+				}
+				return EBTResult::Fail;
+			});
 
 		// Run: 전력 질주 요청(Flee 등). Chew/Idle: 정지 요청.
 		FBTBehaviorRegistry::RegisterTask(FName("Run"), [SetDesiredGait](FBTContext& Ctx)

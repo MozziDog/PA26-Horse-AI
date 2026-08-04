@@ -254,6 +254,8 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClCompile Include="Source\Engine\AI\BT\BehaviorTreeDebug.cpp" />
     <ClCompile Include="Source\Engine\AI\BT\BuiltinTask.cpp" />
     <ClCompile Include="Source\Engine\AI\BT\HorseTask.cpp" />
+    <ClCompile Include="Source\Engine\AI\Navigation\VoxelNavigationGrid.cpp" />
+    <ClCompile Include="Source\Engine\AI\Navigation\VoxelNavigationVolume.cpp" />
     <ClCompile Include="Source\Engine\AI\RoadNetwork\RoadGraph.cpp" />
     <ClCompile Include="Source\Engine\Animation\AnimInstance.cpp" />
     <ClCompile Include="Source\Engine\Animation\AnimationManager.cpp" />
@@ -309,6 +311,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClCompile Include="Source\Engine\Collision\Ray\RayUtilsSIMD.cpp" />
     <ClCompile Include="Source\Engine\Component\ActorComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\MeshComponent.cpp" />
+    <ClCompile Include="Source\Engine\Component\ParentConstraintComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\PrimitiveComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\SceneComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\ShapeComponent.cpp" />
@@ -363,7 +366,6 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClCompile Include="Source\Engine\Component\Shape\SphereComponent.cpp" />
     <ClCompile Include="Source\Engine\Component\Vehicle\VehicleWheelPoseComponent.cpp" />
     <ClCompile Include="Source\Engine\Core\ProjectSettings.cpp" />
-    <ClCompile Include="Source\Engine\Component\ParentConstraintComponent.cpp" />
     <ClCompile Include="Source\Engine\Core\ScoreManager.cpp" />
     <ClCompile Include="Source\Engine\Core\TickFunction.cpp" />
     <ClCompile Include="Source\Engine\Core\Logging\Log.cpp" />
@@ -643,14 +645,15 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClCompile Include="Source\Game\GameActorPlacements.cpp" />
     <ClCompile Include="Source\Game\Horse\AnimNotify_HorseJump.cpp" />
     <ClCompile Include="Source\Game\Horse\CliffFanSensorComponent.cpp" />
+    <ClCompile Include="Source\Game\Horse\HorseCallNavigationComponent.cpp" />
     <ClCompile Include="Source\Game\Horse\HorseCharacter.cpp" />
-    <ClCompile Include="Source\Game\Rider\RiderCharacter.cpp" />
     <ClCompile Include="Source\Game\Horse\HorseLocomotionComponent.cpp" />
     <ClCompile Include="Source\Game\Horse\HorseMovementComponent.cpp" />
     <ClCompile Include="Source\Game\Horse\HorseRagdollTestComponent.cpp" />
     <ClCompile Include="Source\Game\Horse\JumpObstacleSensorComponent.cpp" />
     <ClCompile Include="Source\Game\Horse\ObstacleFanSensorComponent.cpp" />
     <ClCompile Include="Source\Game\Lua\GameLuaBindings.cpp" />
+    <ClCompile Include="Source\Game\Rider\RiderCharacter.cpp" />
     <ClCompile Include="Source\ObjViewer\ObjViewerEngine.cpp" />
     <ClCompile Include="Source\ObjViewer\ObjViewerPanel.cpp" />
     <ClCompile Include="Source\ObjViewer\ObjViewerRenderPipeline.cpp" />
@@ -784,6 +787,9 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClInclude Include="Source\Engine\AI\BT\BTLuaBuilder.h" />
     <ClInclude Include="Source\Engine\AI\BT\BehaviorTree.h" />
     <ClInclude Include="Source\Engine\AI\BT\BehaviorTreeDebug.h" />
+    <ClInclude Include="Source\Engine\AI\Navigation\VoxelNavigationGrid.h" />
+    <ClInclude Include="Source\Engine\AI\Navigation\VoxelNavigationTypes.h" />
+    <ClInclude Include="Source\Engine\AI\Navigation\VoxelNavigationVolume.h" />
     <ClInclude Include="Source\Engine\AI\RoadNetwork\RoadGraph.h" />
     <ClInclude Include="Source\Engine\Animation\AnimExtractContext.h" />
     <ClInclude Include="Source\Engine\Animation\AnimInstance.h" />
@@ -852,6 +858,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClInclude Include="Source\Engine\Collision\Ray\RayUtilsSIMD.h" />
     <ClInclude Include="Source\Engine\Component\ActorComponent.h" />
     <ClInclude Include="Source\Engine\Component\MeshComponent.h" />
+    <ClInclude Include="Source\Engine\Component\ParentConstraintComponent.h" />
     <ClInclude Include="Source\Engine\Component\PrimitiveComponent.h" />
     <ClInclude Include="Source\Engine\Component\SceneComponent.h" />
     <ClInclude Include="Source\Engine\Component\ShapeComponent.h" />
@@ -907,7 +914,6 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClInclude Include="Source\Engine\Component\Shape\SphereComponent.h" />
     <ClInclude Include="Source\Engine\Component\Vehicle\VehicleWheelPoseComponent.h" />
     <ClInclude Include="Source\Engine\Core\Common.h" />
-    <ClInclude Include="Source\Engine\Component\ParentConstraintComponent.h" />
     <ClInclude Include="Source\Engine\Core\Delegate.h" />
     <ClInclude Include="Source\Engine\Core\ProjectSettings.h" />
     <ClInclude Include="Source\Engine\Core\ScoreManager.h" />
@@ -1269,8 +1275,8 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClInclude Include="Source\Game\GameActorPlacements.h" />
     <ClInclude Include="Source\Game\Horse\AnimNotify_HorseJump.h" />
     <ClInclude Include="Source\Game\Horse\CliffFanSensorComponent.h" />
+    <ClInclude Include="Source\Game\Horse\HorseCallNavigationComponent.h" />
     <ClInclude Include="Source\Game\Horse\HorseCharacter.h" />
-    <ClInclude Include="Source\Game\Rider\RiderCharacter.h" />
     <ClInclude Include="Source\Game\Horse\HorseConstants.h" />
     <ClInclude Include="Source\Game\Horse\HorseLocomotionComponent.h" />
     <ClInclude Include="Source\Game\Horse\HorseMovementComponent.h" />
@@ -1278,6 +1284,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClInclude Include="Source\Game\Horse\JumpObstacleSensorComponent.h" />
     <ClInclude Include="Source\Game\Horse\ObstacleFanSensorComponent.h" />
     <ClInclude Include="Source\Game\Lua\GameLuaBindings.h" />
+    <ClInclude Include="Source\Game\Rider\RiderCharacter.h" />
     <ClInclude Include="Source\ObjViewer\ObjViewerEngine.h" />
     <ClInclude Include="Source\ObjViewer\ObjViewerPanel.h" />
     <ClInclude Include="Source\ObjViewer\ObjViewerRenderPipeline.h" />

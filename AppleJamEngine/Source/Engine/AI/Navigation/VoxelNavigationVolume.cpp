@@ -1,0 +1,141 @@
+#include "pch.h"
+
+#include "AI/Navigation/VoxelNavigationVolume.h"
+
+#include "Component/Shape/BoxComponent.h"
+#include "Core/Logging/Log.h"
+#include "Core/Types/CollisionTypes.h"
+#include "Debug/DrawDebugHelpers.h"
+#include "GameFramework/World.h"
+#include "Serialization/Archive.h"
+
+void AVoxelNavigationVolume::InitDefaultComponents(const FVector& Extent)
+{
+	VolumeBox = AddComponent<UBoxComponent>();
+	SetRootComponent(VolumeBox.Get());
+	if (VolumeBox)
+	{
+		VolumeBox->SetBoxExtent(Extent);
+		VolumeBox->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		VolumeBox->SetGenerateOverlapEvents(false);
+		VolumeBox->SetSimulatePhysics(false);
+	}
+}
+
+void AVoxelNavigationVolume::BeginPlay()
+{
+	RebindComponents();
+	Super::BeginPlay();
+	RebuildNavigation();
+}
+
+void AVoxelNavigationVolume::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+	if (bDrawWalkableNodes || bDrawGraphEdges)
+	{
+		DrawNavigationDebug();
+	}
+}
+
+void AVoxelNavigationVolume::PostDuplicate()
+{
+	Super::PostDuplicate();
+	RebindComponents();
+}
+
+void AVoxelNavigationVolume::OnPostLoad(FArchive& Ar)
+{
+	Super::OnPostLoad(Ar);
+	RebindComponents();
+}
+
+bool AVoxelNavigationVolume::RebuildNavigation()
+{
+	RebindComponents();
+	UWorld* World = GetWorld();
+	UBoxComponent* Box = VolumeBox.Get();
+	if (!World || !Box)
+	{
+		return false;
+	}
+	const FRotator VolumeRotation = GetActorRotation();
+	if (std::abs(VolumeRotation.Pitch) > 0.01f || std::abs(VolumeRotation.Yaw) > 0.01f || std::abs(VolumeRotation.Roll) > 0.01f)
+	{
+		UE_LOG("[VoxelNavigation] Volume=%s uses axis-aligned prototype bounds; actor rotation is ignored.", GetName().c_str());
+	}
+
+	FVoxelNavigationBuildSettings Settings;
+	Settings.CellSize = CellSize;
+	Settings.AgentRadius = AgentRadius;
+	Settings.AgentHeight = AgentHeight;
+	Settings.MaxWalkableSlopeDegrees = MaxWalkableSlopeDegrees;
+	Settings.MaxNeighborHeightDelta = MaxNeighborHeightDelta;
+
+	const bool bSuccess = Grid.Build(World, GetActorLocation(), Box->GetScaledBoxExtent(), Settings, this);
+	const FVoxelNavigationBuildStats& Stats = Grid.GetBuildStats();
+	DebugSampledCells = Stats.NumSampledCells;
+	DebugWalkableNodes = Stats.NumWalkableNodes;
+	DebugDirectedEdges = Stats.NumDirectedEdges;
+	DebugRejectedSlope = Stats.NumRejectedSlope;
+	DebugRejectedClearance = Stats.NumRejectedClearance;
+	DebugBuildTimeMs = Stats.BuildTimeMs;
+
+	UE_LOG("[VoxelNavigation] Build Volume=%s Success=%d Cells=%d Nodes=%d Edges=%d SlopeRejected=%d ClearanceRejected=%d TimeMs=%.3f",
+		GetName().c_str(), bSuccess ? 1 : 0, DebugSampledCells, DebugWalkableNodes, DebugDirectedEdges,
+		DebugRejectedSlope, DebugRejectedClearance, DebugBuildTimeMs);
+	return bSuccess;
+}
+
+bool AVoxelNavigationVolume::Contains(const FVector& Point) const
+{
+	if (Grid.IsBuilt()) return Grid.Contains(Point);
+	const UBoxComponent* Box = VolumeBox.Get();
+	if (!Box) return false;
+	const FVector Extent = Box->GetScaledBoxExtent();
+	const FVector Min = GetActorLocation() - Extent;
+	const FVector Max = GetActorLocation() + Extent;
+	return Point.X >= Min.X && Point.X <= Max.X &&
+		Point.Y >= Min.Y && Point.Y <= Max.Y &&
+		Point.Z >= Min.Z && Point.Z <= Max.Z;
+}
+
+FVoxelNavigationPathResult AVoxelNavigationVolume::FindPath(const FVector& Start, const FVector& Goal) const
+{
+	return Grid.FindPath(Start, Goal, GoalAcceptanceRadius, MaxStartSnapDistance, MaxPathLength);
+}
+
+void AVoxelNavigationVolume::RebindComponents()
+{
+	VolumeBox = Cast<UBoxComponent>(GetRootComponent());
+}
+
+void AVoxelNavigationVolume::DrawNavigationDebug() const
+{
+	UWorld* World = GetWorld();
+	if (!World || !Grid.IsBuilt() || MaxDebugNodes <= 0) return;
+
+	const TArray<FVoxelNavigationNode>& Nodes = Grid.GetNodes();
+	const int32 NodeLimit = (std::min)(MaxDebugNodes, static_cast<int32>(Nodes.size()));
+	for (int32 Index = 0; Index < NodeLimit; ++Index)
+	{
+		const FVoxelNavigationNode& Node = Nodes[static_cast<size_t>(Index)];
+		if (bDrawWalkableNodes)
+		{
+			DrawDebugBox(World, Node.Position + FVector::UpVector * 0.03f,
+				FVector(CellSize * 0.18f, CellSize * 0.18f, 0.03f), FColor::Green());
+		}
+		if (bDrawGraphEdges)
+		{
+			for (int32 Neighbor : Node.Neighbors)
+			{
+				if (Neighbor > Index && Neighbor < NodeLimit)
+				{
+					DrawDebugLine(World, Node.Position + FVector::UpVector * 0.08f,
+						Nodes[static_cast<size_t>(Neighbor)].Position + FVector::UpVector * 0.08f,
+						FColor(80, 160, 255));
+				}
+			}
+		}
+	}
+}

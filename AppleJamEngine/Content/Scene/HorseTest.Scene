@@ -16611,6 +16611,23 @@
             "bIsActive" : true,
             "bTickEnable" : true
           }
+        }, {
+          "ClassName" : "UHorseCallNavigationComponent",
+          "ObjectId" : 463,
+          "Properties" : {
+            "AlignmentCompleteAngle" : 30.000000,
+            "AlignmentTimeout" : 5.000000,
+            "ArrivalRadius" : 2.000000,
+            "MinimumProgressDistance" : 0.250000,
+            "StuckTimeout" : 3.000000,
+            "WaypointRadius" : 0.750000,
+            "bAutoActivate" : true,
+            "bDrawPath" : true,
+            "bEditorOnly" : false,
+            "bHiddenInComponentTree" : false,
+            "bIsActive" : true,
+            "bTickEnable" : true
+          }
         }],
       "ObjectId" : 457,
       "Properties" : {
@@ -16640,6 +16657,7 @@
         "bInvertMouseY" : false,
         "bNeedsTick" : true,
         "bResetHealthOnBeginPlay" : true,
+        "bPlayerOwnedHorse" : true,
         "bUseControllerRotationPitch" : false,
         "bUseControllerRotationRoll" : false,
         "bUseControllerRotationYaw" : false
@@ -16961,6 +16979,68 @@
           "bEditorOnly" : false,
           "bHiddenInComponentTree" : false,
           "bIsActive" : true,
+          "bTickEnable" : true
+        }
+      }
+    }, {
+      "ClassName" : "AVoxelNavigationVolume",
+      "Name" : "VoxelNavigationVolume",
+      "NonSceneComponents" : [],
+      "ObjectId" : 464,
+      "Properties" : {
+        "AgentHeight" : 2.000000,
+        "AgentRadius" : 0.600000,
+        "CellSize" : 0.500000,
+        "GoalAcceptanceRadius" : 2.000000,
+        "MaxDebugNodes" : 4000,
+        "MaxNeighborHeightDelta" : 0.400000,
+        "MaxPathLength" : 0.000000,
+        "MaxStartSnapDistance" : 2.000000,
+        "MaxWalkableSlopeDegrees" : 30.000000,
+        "PendingActorLocation" : [-32.000000, -110.000000, 5.000000],
+        "PendingActorRotation" : [0.000000, 0.000000, 0.000000],
+        "PendingActorScale" : [1.000000, 1.000000, 1.000000],
+        "PendingActorVisible" : true,
+        "PendingTagsString" : "",
+        "bDrawGraphEdges" : false,
+        "bDrawWalkableNodes" : false,
+        "bNeedsTick" : true
+      },
+      "RootComponent" : {
+        "Children" : [],
+        "ClassName" : "UBoxComponent",
+        "ObjectId" : 465,
+        "Properties" : {
+          "AttachSocketName" : "Name_None",
+          "BoxExtent" : [20.000000, 20.000000, 6.000000],
+          "CachedEditRotator" : [0.000000, 0.000000, 0.000000],
+          "CenterOfMassOffset" : [0.000000, 0.000000, 0.000000],
+          "CollisionEnabled" : 0,
+          "Mass" : 1.000000,
+          "ObjectType" : 0,
+          "RelativeTransform.Location" : [-32.000000, -110.000000, 5.000000],
+          "RelativeTransform.Scale" : [1.000000, 1.000000, 1.000000],
+          "ResponseContainer" : {
+            "Responses[0]" : 2,
+            "Responses[1]" : 2,
+            "Responses[2]" : 2,
+            "Responses[3]" : 2,
+            "Responses[4]" : 2
+          },
+          "ShapeColor" : [0.000000, 1.000000, 0.000000, 1.000000],
+          "bAutoActivate" : true,
+          "bCastShadow" : false,
+          "bCastShadowAsTwoSided" : false,
+          "bDrawOnlyIfSelected" : true,
+          "bEditorOnly" : false,
+          "bEnableCCD" : false,
+          "bEnableGravity" : false,
+          "bGenerateOverlapEvents" : false,
+          "bHiddenInComponentTree" : false,
+          "bIsActive" : true,
+          "bIsVisible" : true,
+          "bKinematic" : true,
+          "bSimulatePhysics" : false,
           "bTickEnable" : true
         }
       }

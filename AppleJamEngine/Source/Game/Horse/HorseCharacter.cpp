@@ -18,6 +18,7 @@
 #include "AI/Blackboard.h"
 #include "HorseMovementComponent.h"
 #include "HorseLocomotionComponent.h"
+#include "HorseCallNavigationComponent.h"
 #include "ObstacleFanSensorComponent.h"
 #include "JumpObstacleSensorComponent.h"
 #include "CliffFanSensorComponent.h"
@@ -145,6 +146,7 @@ void AHorseCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 	// 플레이어/BT 입력을 받아 매 tick MovementComponent 로 라우팅.
 	LocomotionComponent = AddComponent<UHorseLocomotionComponent>(); 
 	BlackboardComponent = AddComponent<UBlackboardComponent>();
+	CallNavigationComponent = AddComponent<UHorseCallNavigationComponent>();
 	// 골반쪽에 pivot이 형성되는 점을 고려, 센서류에 +0.5씩 추가 x offset 부여
 	ObstacleFanSensorComponent = AddComponent<UObstacleFanSensorComponent>();
 	if(ObstacleFanSensorComponent)
@@ -252,6 +254,23 @@ void AHorseCharacter::RequestGiddyup() { if (LocomotionComponent) LocomotionComp
 void AHorseCharacter::RequestSlowDown() { if (LocomotionComponent) LocomotionComponent->RequestSlowDown(); }
 void AHorseCharacter::RequestStop() { if (LocomotionComponent) LocomotionComponent->RequestStop(); }
 
+void AHorseCharacter::SetRiderMounted(bool bInRiderMounted)
+{
+	bRiderMounted = bInRiderMounted;
+	if (bRiderMounted && CallNavigationComponent)
+	{
+		CallNavigationComponent->NotifyMounted();
+	}
+}
+
+void AHorseCharacter::RequestWhistleCall(const FVector& TargetLocation)
+{
+	if (bPlayerOwnedHorse && CallNavigationComponent)
+	{
+		CallNavigationComponent->RequestCall(TargetLocation);
+	}
+}
+
 void AHorseCharacter::SetGazeInput(float Value)
 {
 	bGazeInput = Value > GamepadTriggerHoldThreshold;
@@ -299,6 +318,7 @@ void AHorseCharacter::RebindComponents()
 	LocomotionComponent = GetComponentByClass<UHorseLocomotionComponent>();
 	BTAgentComponent = GetComponentByClass<UBTAgentComponent>();
 	BlackboardComponent = GetComponentByClass<UBlackboardComponent>();
+	CallNavigationComponent = GetComponentByClass<UHorseCallNavigationComponent>();
 	ObstacleFanSensorComponent = GetComponentByClass<UObstacleFanSensorComponent>();
 	JumpObstacleSensorComponent = GetComponentByClass<UJumpObstacleSensorComponent>();
 	CliffFanSensorComponent = GetComponentByClass<UCliffFanSensorComponent>();

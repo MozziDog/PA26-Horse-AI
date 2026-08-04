@@ -124,6 +124,9 @@
     <Filter Include="Source\Engine\AI\BT">
       <UniqueIdentifier>{8ebdb6ad-f8e6-c6ef-2b96-c07f8791f3b3}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source\Engine\AI\Navigation">
+      <UniqueIdentifier>{acb99ddd-4ce9-7faf-7a11-7b5a443c285e}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Source\Engine\AI\RoadNetwork">
       <UniqueIdentifier>{8ec30fc6-39a1-cff1-bb0d-9f77513b5854}</UniqueIdentifier>
     </Filter>
@@ -414,6 +417,9 @@
     </Filter>
     <Filter Include="Source\Game\Lua">
       <UniqueIdentifier>{ddcba6a3-b876-cfec-7f99-d7afa0539550}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\Game\Rider">
+      <UniqueIdentifier>{de08b772-719f-9491-2154-6d18cb64fa7f}</UniqueIdentifier>
     </Filter>
     <Filter Include="Source\ObjViewer">
       <UniqueIdentifier>{4eb3c9f4-0e4c-8f36-7302-d2d6da75ce11}</UniqueIdentifier>
@@ -1037,6 +1043,12 @@
     <ClCompile Include="Source\Engine\AI\BT\HorseTask.cpp">
       <Filter>Source\Engine\AI\BT</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Engine\AI\Navigation\VoxelNavigationGrid.cpp">
+      <Filter>Source\Engine\AI\Navigation</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Engine\AI\Navigation\VoxelNavigationVolume.cpp">
+      <Filter>Source\Engine\AI\Navigation</Filter>
+    </ClCompile>
     <ClCompile Include="Source\Engine\AI\RoadNetwork\RoadGraph.cpp">
       <Filter>Source\Engine\AI\RoadNetwork</Filter>
     </ClCompile>
@@ -1202,6 +1214,9 @@
     <ClCompile Include="Source\Engine\Component\MeshComponent.cpp">
       <Filter>Source\Engine\Component</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Engine\Component\ParentConstraintComponent.cpp">
+      <Filter>Source\Engine\Component</Filter>
+    </ClCompile>
     <ClCompile Include="Source\Engine\Component\PrimitiveComponent.cpp">
       <Filter>Source\Engine\Component</Filter>
     </ClCompile>
@@ -1360,9 +1375,6 @@
     </ClCompile>
     <ClCompile Include="Source\Engine\Component\Vehicle\VehicleWheelPoseComponent.cpp">
       <Filter>Source\Engine\Component\Vehicle</Filter>
-    </ClCompile>
-    <ClCompile Include="Source\Engine\Component\ParentConstraintComponent.cpp">
-      <Filter>Source\Engine\Component</Filter>
     </ClCompile>
     <ClCompile Include="Source\Engine\Core\ProjectSettings.cpp">
       <Filter>Source\Engine\Core</Filter>
@@ -2204,6 +2216,9 @@
     <ClCompile Include="Source\Game\Horse\CliffFanSensorComponent.cpp">
       <Filter>Source\Game\Horse</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Game\Horse\HorseCallNavigationComponent.cpp">
+      <Filter>Source\Game\Horse</Filter>
+    </ClCompile>
     <ClCompile Include="Source\Game\Horse\HorseCharacter.cpp">
       <Filter>Source\Game\Horse</Filter>
     </ClCompile>
@@ -2224,6 +2239,9 @@
     </ClCompile>
     <ClCompile Include="Source\Game\Lua\GameLuaBindings.cpp">
       <Filter>Source\Game\Lua</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Game\Rider\RiderCharacter.cpp">
+      <Filter>Source\Game\Rider</Filter>
     </ClCompile>
     <ClCompile Include="Source\ObjViewer\ObjViewerEngine.cpp">
       <Filter>Source\ObjViewer</Filter>
@@ -2501,6 +2519,15 @@
     <ClInclude Include="Source\Engine\AI\BT\BehaviorTreeDebug.h">
       <Filter>Source\Engine\AI\BT</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Engine\AI\Navigation\VoxelNavigationGrid.h">
+      <Filter>Source\Engine\AI\Navigation</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Engine\AI\Navigation\VoxelNavigationTypes.h">
+      <Filter>Source\Engine\AI\Navigation</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Engine\AI\Navigation\VoxelNavigationVolume.h">
+      <Filter>Source\Engine\AI\Navigation</Filter>
+    </ClInclude>
     <ClInclude Include="Source\Engine\AI\RoadNetwork\RoadGraph.h">
       <Filter>Source\Engine\AI\RoadNetwork</Filter>
     </ClInclude>
@@ -2705,6 +2732,9 @@
     <ClInclude Include="Source\Engine\Component\MeshComponent.h">
       <Filter>Source\Engine\Component</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Engine\Component\ParentConstraintComponent.h">
+      <Filter>Source\Engine\Component</Filter>
+    </ClInclude>
     <ClInclude Include="Source\Engine\Component\PrimitiveComponent.h">
       <Filter>Source\Engine\Component</Filter>
     </ClInclude>
@@ -2869,9 +2899,6 @@
     </ClInclude>
     <ClInclude Include="Source\Engine\Core\Common.h">
       <Filter>Source\Engine\Core</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Engine\Component\ParentConstraintComponent.h">
-      <Filter>Source\Engine\Component</Filter>
     </ClInclude>
     <ClInclude Include="Source\Engine\Core\Delegate.h">
       <Filter>Source\Engine\Core</Filter>
@@ -3956,6 +3983,9 @@
     <ClInclude Include="Source\Game\Horse\CliffFanSensorComponent.h">
       <Filter>Source\Game\Horse</Filter>
     </ClInclude>
+    <ClInclude Include="Source\Game\Horse\HorseCallNavigationComponent.h">
+      <Filter>Source\Game\Horse</Filter>
+    </ClInclude>
     <ClInclude Include="Source\Game\Horse\HorseCharacter.h">
       <Filter>Source\Game\Horse</Filter>
     </ClInclude>
@@ -3979,6 +4009,9 @@
     </ClInclude>
     <ClInclude Include="Source\Game\Lua\GameLuaBindings.h">
       <Filter>Source\Game\Lua</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Game\Rider\RiderCharacter.h">
+      <Filter>Source\Game\Rider</Filter>
     </ClInclude>
     <ClInclude Include="Source\ObjViewer\ObjViewerEngine.h">
       <Filter>Source\ObjViewer</Filter>
@@ -6416,13 +6449,5 @@
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="AppleJamEngine.rc" />
-  </ItemGroup>
-  <ItemGroup>
-    <ClCompile Include="Source\Game\Rider\RiderCharacter.cpp">
-      <Filter>Source\Game</Filter>
-    </ClCompile>
-    <ClInclude Include="Source\Game\Rider\RiderCharacter.h">
-      <Filter>Source\Game</Filter>
-    </ClInclude>
   </ItemGroup>
 </Project>

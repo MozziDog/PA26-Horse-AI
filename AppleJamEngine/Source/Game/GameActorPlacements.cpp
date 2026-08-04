@@ -4,6 +4,7 @@
 #include "Engine/Runtime/EngineInitHooks.h"
 
 #include "GameFramework/World.h"
+#include "AI/Navigation/VoxelNavigationVolume.h"
 #include "Game/Horse/HorseCharacter.h"
 #include "Game/Rider/RiderCharacter.h"
 
@@ -16,6 +17,21 @@
 // ============================================================
 void RegisterGameActorPlacements()
 {
+	FActorPlacementRegistry::Get().RegisterEntry(
+		"Voxel Navigation Volume",
+		[](UWorld* World, const FVector& Location) -> AActor*
+		{
+			if (!World) return nullptr;
+			AVoxelNavigationVolume* Actor = World->SpawnActor<AVoxelNavigationVolume>();
+			if (Actor)
+			{
+				Actor->InitDefaultComponents();
+				Actor->SetActorLocation(Location);
+			}
+			return Actor;
+		}
+	);
+
 	FActorPlacementRegistry::Get().RegisterEntry(
 		"Horse Character",
 		[](UWorld* World, const FVector& Location) -> AActor*

@@ -45,6 +45,9 @@ struct FHorseSteeringInfluence
 	FVector RoadDir = FVector(0.0f, 0.0f, 0.0f);	// 도로 방향(수평, 정규화)
 	bool    bRoad = false;                      // 유효한 도로 방향 존재 여부
 	float   RoadWeightEff = 0.0f;               // 거리 감쇠 및 유저 입력 시의 yield 반영한 도로추종 가중치
+	FVector NavigationDir = FVector::ZeroVector;
+	bool    bNavigation = false;
+	bool    bNavigationAligning = false;
 };
 
 UCLASS()
@@ -139,6 +142,9 @@ protected:
 	float RoadNearDistance = 3.0f;
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Road Far Distance", Min=0.0f, Max=50.0f, Speed=0.05f)
 	float RoadFarDistance = 14.0f;
+
+	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Navigation Weight", Min=0.0f, Max=20.0f, Speed=0.05f)
+	float NavigationWeight = 4.0f;
 
 	// ── context-steering 튜닝 : 조향 떨림 방지 관련 ─────────────────────────────────────────────────────
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Inertia Weight", Min=0.0f, Max=10.0f, Speed=0.05f)

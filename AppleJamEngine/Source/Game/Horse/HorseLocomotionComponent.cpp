@@ -96,6 +96,12 @@ void UHorseLocomotionComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 
 	UpdateGait(DeltaTime);                                                  // BT 요청 + 쿨타임 반영
 	const FHorseSteeringInfluence Influence = GatherSteeringInfluences(*BB);     // UserInput/Road 소스
+	if (Influence.bNavigationAligning && Influence.bNavigation)
+	{
+		Gait = EHorseGait::Stop;
+		Movement->AddInputVector(Influence.NavigationDir, 0.01f);
+		return;
+	}
 	UpdateJumpGate(*BB, DeltaTime);                                         // 정면 장애물 점프 게이트
 	UpdateContextSteering(*BB, *Owner, Forward, Influence, DeltaTime);      // 회피 조향 + Movement 입력
 }
@@ -119,11 +125,27 @@ FHorseSteeringInfluence UHorseLocomotionComponent::GatherSteeringInfluences(FBla
 {
 	FHorseSteeringInfluence Inf;
 
-	// 기수가 탑승중이지 않을 때에는 유저입력/도로추종하지 않음
-	// NOTE: possessed 또는 mounted가 아니라면 애초에 유저 조작 안들어오긴 하지만 방어적으로 영향력 배제
+	// 탑승 중에는 유저/도로, 비탑승 호출 중에는 상위 경로 방향만 수집한다.
 	const AHorseCharacter* Horse = Cast<AHorseCharacter>(GetOwner());
-	if (!Horse || !Horse->IsRiderMounted())
+	if (!Horse)
 	{
+		return Inf;
+	}
+	if (!Horse->IsRiderMounted())
+	{
+		bool bHasNavigation = false;
+		FVector NavigationDirection;
+		if (BB.TryGetBool(HorseBBKeys::NavigationHasDirection, bHasNavigation) && bHasNavigation &&
+			BB.TryGetVector(HorseBBKeys::NavigationDirection, NavigationDirection))
+		{
+			NavigationDirection.Z = 0.0f;
+			if (!NavigationDirection.IsNearlyZero())
+			{
+				Inf.NavigationDir = NavigationDirection.Normalized();
+				Inf.bNavigation = true;
+				BB.TryGetBool(HorseBBKeys::NavigationAligning, Inf.bNavigationAligning);
+			}
+		}
 		return Inf;
 	}
 
@@ -163,6 +185,14 @@ FHorseSteeringInfluence UHorseLocomotionComponent::GatherSteeringInfluences(FBla
 // 이미 bJumpPerformed인 경우에는 다시 점프 안함. (제자리 혹은 점프 후 연속 점프 방지)
 void UHorseLocomotionComponent::UpdateJumpGate(FBlackboard& BB, float DeltaTime)
 {
+	const AHorseCharacter* Horse = Cast<AHorseCharacter>(GetOwner());
+	if (!Horse || !Horse->IsRiderMounted())
+	{
+		JumpCandidateTime = 0.0f;
+		bJumpPerformed = false;
+		Movement->CancelPendingJump();
+		return;
+	}
 	bool  bJumpable = false;
 	float FwdDist   = 0.0f;
 	const float JumpTriggerDist =
@@ -344,6 +374,7 @@ void UHorseLocomotionComponent::ScoreSlots(const FVector& Forward, const FHorseS
 		float Interest = InertiaWeight * std::max(0.0f, Field.SlotDir[i].Dot(Forward));
 		if (Influence.UserMag > 0.0f) { Interest += UserWeight * Influence.UserMag * std::max(0.0f, Field.SlotDir[i].Dot(Influence.UserDir)); }
 		if (Influence.bRoad)          { Interest += Influence.RoadWeightEff * std::max(0.0f, Field.SlotDir[i].Dot(Influence.RoadDir)); }
+		if (Influence.bNavigation)    { Interest += NavigationWeight * std::max(0.0f, Field.SlotDir[i].Dot(Influence.NavigationDir)); }
 
 		float EffDanger = SpreadDanger[i];
 		// 정면 방향일 경우
@@ -623,6 +654,7 @@ void UHorseLocomotionComponent::Serialize(FArchive& Ar)
 	Ar << RoadUserYield;
 	Ar << RoadNearDistance;
 	Ar << RoadFarDistance;
+	Ar << NavigationWeight;
 	Ar << CliffOverrideMinInput;
 	Ar << StrafeEnterMaxSpeed;
 }
