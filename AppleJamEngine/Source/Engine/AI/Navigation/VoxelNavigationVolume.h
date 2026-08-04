@@ -37,6 +37,7 @@ private:
 
 	TWeakObjectPtr<UBoxComponent> VolumeBox = nullptr;
 	FVoxelNavigationGrid Grid;
+	int32 InitialBuildDelayTicks = 0;
 
 	UPROPERTY(Edit, Save, Category="Navigation|Build", DisplayName="Cell Size", Min=0.1f, Max=5.0f, Speed=0.05f)
 	float CellSize = 0.5f;

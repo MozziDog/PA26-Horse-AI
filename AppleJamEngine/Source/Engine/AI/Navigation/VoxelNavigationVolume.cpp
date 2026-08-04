@@ -26,12 +26,26 @@ void AVoxelNavigationVolume::BeginPlay()
 {
 	RebindComponents();
 	Super::BeginPlay();
-	RebuildNavigation();
+	// Primitive components enqueue their body creation during BeginPlay.  Let one
+	// complete physics frame consume those commands before querying the scene.
+	InitialBuildDelayTicks = 1;
 }
 
 void AVoxelNavigationVolume::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+	if (InitialBuildDelayTicks >= 0)
+	{
+		if (InitialBuildDelayTicks == 0)
+		{
+			InitialBuildDelayTicks = -1;
+			RebuildNavigation();
+		}
+		else
+		{
+			--InitialBuildDelayTicks;
+		}
+	}
 	if (bDrawWalkableNodes || bDrawGraphEdges)
 	{
 		DrawNavigationDebug();
@@ -52,6 +66,7 @@ void AVoxelNavigationVolume::OnPostLoad(FArchive& Ar)
 
 bool AVoxelNavigationVolume::RebuildNavigation()
 {
+	InitialBuildDelayTicks = -1;
 	RebindComponents();
 	UWorld* World = GetWorld();
 	UBoxComponent* Box = VolumeBox.Get();
