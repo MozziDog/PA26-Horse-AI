@@ -300,16 +300,27 @@ void UHorseCallNavigationComponent::AdvanceFollowing(float DeltaTime)
 		return;
 	}
 
-	while (CurrentWaypoint < static_cast<int32>(PathPoints.size()) &&
-		FVector::Distance(HorseLocation, PathPoints[static_cast<size_t>(CurrentWaypoint)]) <= WaypointRadius)
+	while (CurrentWaypoint < static_cast<int32>(PathPoints.size()))
 	{
+		const bool bIsFinalWaypoint = CurrentWaypoint == static_cast<int32>(PathPoints.size()) - 1;
+		float AcceptanceRadius = WaypointRadius;
+		if (bIsFinalWaypoint && !bPlannedPartial)
+		{
+			const float EndpointTargetDistance = FVector::Distance(PathPoints.back(), RawTarget);
+			AcceptanceRadius = std::max(0.05f, ArrivalRadius - EndpointTargetDistance);
+		}
+		if (FVector::Distance(HorseLocation, PathPoints[static_cast<size_t>(CurrentWaypoint)]) > AcceptanceRadius)
+		{
+			break;
+		}
 		++CurrentWaypoint;
 	}
 	if (CurrentWaypoint >= static_cast<int32>(PathPoints.size()))
 	{
-		StopAtTerminalStatus(bPlannedPartial
-			? EHorseCallNavigationStatus::ReachedPartial
-			: EHorseCallNavigationStatus::Reached);
+		const bool bReachedRawTarget = FVector::Distance(HorseLocation, RawTarget) <= ArrivalRadius;
+		StopAtTerminalStatus(bReachedRawTarget
+			? EHorseCallNavigationStatus::Reached
+			: EHorseCallNavigationStatus::ReachedPartial);
 		return;
 	}
 
