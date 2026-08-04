@@ -144,6 +144,8 @@ bool ARiderCharacter::Unmount()
 	}
 
 	Horse->SetRiderMounted(false);
+	// TODO: 말이 하차 시 즉시 점추지 않고 자연스럽게 서서히 멈추도록 구현
+	Horse->RequestStop();
 	Horse->SetSteeringInput(0.0f);
 	Horse->SetStrafeForwardInput(0.0f);
 	Horse->SetGazeInput(0.0f);
