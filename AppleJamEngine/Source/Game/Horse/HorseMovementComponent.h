@@ -128,6 +128,9 @@ public:
 	bool    IsSliding() const { return MoveMode == EHorseMoveMode::Sliding; }
 	UFUNCTION(Pure, Category="HorseMovement")
 	bool    IsGrounded() const { return MoveMode == EHorseMoveMode::Grounded; }
+	// 점프 시퀀스인지 여부 (도움닫기 - 이륙 직전 - 이륙해서 공중인 상태;의 3가지 포함)
+	UFUNCTION(Pure, Category="HorseMovement")
+	bool    IsJumpInProgress() const { return bJumpWindUp || bWantJump || bJumpActive; }
 	// 끼임 탈출을 위해 몸통 충돌을 잠시 꺼둔 상태인지
 	UFUNCTION(Pure, Category="HorseMovement")
 	bool    IsEscapingStuck() const { return bEscapingStuck; }
@@ -151,11 +154,7 @@ public:
 	// 점프 시작 요청
 	// 도움닫기 + 점프 애니메이션을 시작한다. 실제 이륙은 AnimNotify_HorseJump → NotifyJumpTakeoff() 가 담당
 	UFUNCTION(Callable, Category="HorseMovement")
-	void    StartJump();
-	// wind-up 중 점프 조건이 사라졌을 때 pending 요청을 취소한다.
-	// 이미 이륙했거나 Notify가 실제 점프를 예약한 뒤에는 건드리지 않는다.
-	UFUNCTION(Callable, Category="HorseMovement")
-	void    CancelPendingJump();
+	void    StartJumpSequence();
 	// AnimNotify_HorseJump에 의해 콜백으로 호출
 	// bWantJump를 통해 간접적으로 점프하므로 중복 호출도 문제 없음
 	UFUNCTION(Callable, Category="HorseMovement")
@@ -462,8 +461,8 @@ protected:
 	float InclineAngle    = 0.0f;   // 이징된 경사([-1,1])
 	float AirTime         = 0.0f;   // 물리 기반 이동 체류 시간(초)
 	bool  bJumpActive     = false;  // 점프로 [이륙~착지] 동안 true. 비자발적 낙하와 구분 & 착지 리셋용
-	bool  bJumpRequested  = false;  // 점프 애니메이션 요청. 'bJump' AnimInstance parameter와 동기화됨
-	bool  bWantJump       = false;  // NotifyJumpTakeoff()에서 플래그 설정, TickGrounded()에서 소비, 점프.
+	bool  bJumpWindUp     = false;  // 점프 도움닫기 중인지 여부. 애니메이션 트리거하고 점프 시퀀스 시작하는 역할
+	bool  bWantJump       = false;  // 점프 시퀀스에서 실제 이륙 요청. TickGrounded()에서 소비해서 점프.
 	bool  bBrakeRequested = false;  // 이 frame Brake() 호출됨(tick 끝에서 소비 후 클리어)
 	bool  bWasBraking     = false;  // 직전 frame brake 상태 — 급정지 진입 에지(rising) 검출용
 	bool  bRearingRequested = false;  // 급정지 진입 에지에서만 1 frame true. 'bRearing' AnimGraph pulse

@@ -452,7 +452,7 @@ void UHorseMovementComponent::EnterSliding()
 {
 	MoveMode       = EHorseMoveMode::Sliding;
 	SlideElapsed   = 0.0f;
-	bJumpRequested = false;   // wind-up 중 미끄러짐 진입 → 점프 요청 취소.
+	bJumpWindUp    = false;   // 도움닫기 중 미끄러짐 진입 → 점프 시퀀스 취소
 	bSkidding      = false;   // 경사 미끄러짐이 관성을 대체.
 	bSteepGround   = false;
 }
@@ -943,7 +943,7 @@ void UHorseMovementComponent::EnterFalling(bool bFromJump)
 	bCollapseRequested = false;
 	if (!bFromJump)
 	{
-		bJumpRequested = false;   // wind-up 중 발밑 지면이 사라짐 → 점프 요청 취소.
+		bJumpWindUp = false;   // 도움닫기 중 발밑 지면이 사라짐 → 점프 시퀀스 취소
 	}
 }
 
@@ -1101,31 +1101,24 @@ void UHorseMovementComponent::EndStuckEscape()
 
 // ============================================================================
 
-void UHorseMovementComponent::StartJump()
+void UHorseMovementComponent::StartJumpSequence()
 {
 	if (MoveMode != EHorseMoveMode::Grounded)
 	{
 		return;   // 공중/미끄러짐 중엔 재점프 불가.
 	}
-	// 점프 애니 시작만 요청(bJump anim 변수). 물리 이륙은 애니 takeoff 의 NotifyJumpTakeoff() 가 건다.
-	// 접지 상태에서 매 frame 호출돼도 idempotent — 이미 요청/공중이면 아래에서 걸러진다.
-	bJumpRequested = true;
-}
-
-void UHorseMovementComponent::CancelPendingJump()
-{
-	if (MoveMode == EHorseMoveMode::Grounded && !bWantJump)
-	{
-		bJumpRequested = false;
-	}
+	// 도움 닫기 시작 (bJump 애님파라미터로 전달)
+	// 실제 이륙은 NotifyJumpTakeoff() 쪽에서
+	// NOTE: 중복 호출될 수 있음. 그러나 자연스럽게 무시됨 (어차피 animation SM에서 자기자신으로 트랜지션 불가)
+	bJumpWindUp = true;
 }
 
 void UHorseMovementComponent::OnJumpNotify()
 {
 	// Grounded에서만 점프 가능
-	if (MoveMode != EHorseMoveMode::Grounded)
+	if (MoveMode != EHorseMoveMode::Grounded || !bJumpWindUp)
 	{
-		UE_LOG("[UHorseMovementComponent] Jump cancelled since it's not grounded");
+		UE_LOG("[UHorseMovementComponent] Jump notify ignored: not grounded or no pending request");
 		return;  
 	}
 	bWantJump = true;
@@ -1135,8 +1128,8 @@ void UHorseMovementComponent::PerformJump()
 {
 	bWantJump      = false;
 	Velocity.Z     = JumpSpeed;
-	EnterFalling(true);             // 점프 즉시 Falling으로 전환(bJumpRequested 는 아래에서 별도 처리).
-	bJumpRequested = false;         // bJump anim pulse 종료 — 클립은 이미 진입, auto-exit 로 1회만 재생.
+	EnterFalling(true);             // 점프 즉시 Falling으로 전환(bJumpWindUp 는 아래에서 별도 처리).
+	bJumpWindUp    = false;         // bJump anim pulse 종료 — 클립은 이미 진입, auto-exit 로 1회만 재생.
 	bJumpActive    = true;          // 의도적 점프 플래그 (실족 추락과 구분·착지 리셋용) — 착지까지 유지, anim 쪽에 관여 X
 
 	// 점프 즉시 착지로 오인 방지:
@@ -1150,7 +1143,14 @@ void UHorseMovementComponent::PerformJump()
 
 void UHorseMovementComponent::Brake()
 {
-	// 이 frame bBrake 를 켜고 목표 속도를 0 으로(위 TickComponent 가 소비). 자연 감속과 별개로 급정지 애니 트리거.
+	// 점프 시퀀스 도중이면 브레이크 요청 무시
+	if (IsJumpInProgress())
+	{
+		return;
+	}
+
+	// Brake 요청은 아무 때나 들어올 수 있으니 request 플래그만 설정, TickComponent에서 브레이크 처리
+	// (JumpRequested와 동일한 패턴)
 	bBrakeRequested = true;
 }
 
@@ -1238,11 +1238,11 @@ void UHorseMovementComponent::PushAnimGraphVariables()
 	Graph->SetGraphVariableFloat(FName("InclineAngle"),    bGrounded ? InclineAngle : 0.0f);
 	Graph->SetGraphVariableFloat(FName("AirTime"),         AirTime);
 	Graph->SetGraphVariableBool(FName("bBrake"),           bBrakeRequested);
-	// bJump 은 점프 애니 진입 pulse — bJumpRequested 만(공중 내내 유지되는 bJumpActive 는 넣지 않는다).
+	// bJump 은 점프 애니 진입 pulse — bJumpWindUp 만(공중 내내 유지되는 bJumpActive 는 넣지 않는다).
 	// 점프 스테이트 exit 가 Automatic Sequence End 라, bJump 을 공중 동안 true 로 물고 있으면 클립이
 	// 끝나 자동 exit 된 직후 진입 전환(bJump==true)이 다시 걸려 무한 재진입한다. takeoff(PerformJump)
-	// 에서 bJumpRequested 가 꺼지므로 bJump 은 클립 도중 false 로 떨어지고 클립은 1회만 재생된다.
-	Graph->SetGraphVariableBool(FName("bJump"),            bJumpRequested);
+	// 에서 bJumpWindUp 가 꺼지므로 bJump 은 클립 도중 false 로 떨어지고 클립은 1회만 재생된다.
+	Graph->SetGraphVariableBool(FName("bJump"),            bJumpWindUp);
 	// bRearing 은 급정지 진입 에지에서만 1 frame true 인 pulse — bJump 과 동일한 이유로 계속 물고 있으면
 	// Rearing 클립 auto-exit 직후 재진입해 무한 반복된다. TickComponent 가 다음 frame 즉시 false 로 내린다.
 	Graph->SetGraphVariableBool(FName("bRearing"),         bRearingRequested);

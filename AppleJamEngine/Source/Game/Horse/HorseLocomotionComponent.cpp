@@ -186,17 +186,16 @@ void UHorseLocomotionComponent::UpdateJumpGate(FBlackboard& BB, float DeltaTime)
 		JumpCandidateTime += std::max(0.0f, DeltaTime);
 		if (JumpCandidateTime >= JumpConfirmTime && !bJumpPerformed)
 		{
-			Movement->StartJump();
+			Movement->StartJumpSequence();
 			bJumpPerformed = true;   // 이번 접근에 대한 점프 소진
 		}
 	}
 	else
 	{
 		JumpCandidateTime = 0.0f;
-		// 애니메이션 wind-up 중 센서 조건이 사라지면 요청을 취소한다.
-		// OnJumpNotify도 bJumpRequested를 다시 확인하므로 이미 진입한 클립의 Notify가 와도 이륙하지 않는다.
-		Movement->CancelPendingJump();
 		bJumpPerformed = false;  // 장애물 벗어남 → 다음 장애물 상황을 위해 리셋
+		// NOTE: 한 번 요청한 점프는 취소하지 않는다. 
+		// 점프 시퀀스 중 도움닫기에서 장애물에 의해 점프 조건이 만족되지 않는 상황이 발생해버림
 	}
 }
 
@@ -245,10 +244,16 @@ void UHorseLocomotionComponent::UpdateContextSteering(FBlackboard& BB, const AAc
 		// 단, 유저가 조향 중이면 제자리 회전만은 허용 (구석 탈출용)
 		else
 		{
-			Movement->Brake();   // 전진 목표속도 0 + 급정지/rearing 트리거
-			if (!bJumpPerformed) // 점프 도중에는 급브레이크하지 않음
+			if (Movement->IsJumpInProgress())
 			{
-				Gait = EHorseGait::Stop;
+				// 점프 도중에는 막혀도 브레이크하지 않음
+				// NOTE: 착지 후 급정지하는 상황을 막기 위해 방향과 속력은 계속 공급
+				Movement->AddInputVector(Forward, GetGaitScaledSpeed());
+			}
+			else
+			{
+				Movement->Brake();          // 급정지 + 달리는 중이었다면 rearing 트리거
+				Gait = EHorseGait::Stop;	// 브레이크 후 재출발 방지
 			}
 		}
 	}
@@ -420,7 +425,7 @@ void UHorseLocomotionComponent::ApplySteering(const FVector& Forward, const FSte
 	}
 
 	// 유저가 낭떠러지 쪽으로 밀어 그 슬롯이 강제로 선택된 경우 (급)브레이크
-	if (Field.bCliff[BestIdx])
+	if (Field.bCliff[BestIdx] && !Movement->IsJumpInProgress())
 	{
 		Movement->Brake();
 		Gait = EHorseGait::Stop;
