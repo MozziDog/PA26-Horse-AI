@@ -197,6 +197,8 @@ public:
 	float JumpSpeed = 5.8f;            // m/s — 점프 시 초기 상향 속도. (5.8m/s → 약 1.7m 점프)
 	UPROPERTY(Edit, Save, Category="HorseMovement|Steering", DisplayName = "Turn Smooth Time", Min=0.05f, Max=5.0f, Speed=0.01f)
 	float YawAlignTime = 0.4f;         // 초 — 진행 방향을 heading으로 수렴시키는 시간, 작을수록 민첩
+	UPROPERTY(Edit, Save, Category="HorseMovement|Steering", DisplayName = "Turn Rate Inertia", Min=0.0f, Max=1.0f)
+	float TurnRateInertia = 0.1f;	   // % — 기존 TurnRate를 1초에 얼마나 남길지, 클 수록 민첩
 	UPROPERTY(Edit, Save, Category="HorseMovement|Steering", DisplayName = "Max Turn Rate", Min=0.0f, Max=720.0f, Speed=1.0f)
 	float MaxTurnRate = 205.0f;        // deg/s — 선회율 상한 ( NOTE: Turn 계통의 애니메이션과 맞춰야 함 )
 
@@ -354,11 +356,11 @@ protected:
 
 	// ── 입력 → AnimGraph 상태 ────────────────────────────────────────────────
 	// pending 입력을 소비해 NormalizedSpeed / LateralSpeed / TurnRate / rearing pulse 를 만든다.
-	void UpdateMoveInput();
+	void UpdateMoveInput(float DeltaTime);
 	// 평행이동 입력 처리 — 선회 없이 종/횡 성분만.
 	void UpdateStrafeInput(const FVector& InForward, const FVector& InRight);
 	// 일반 보행 입력 처리 — 목표 속도 + 급정지/뒷발서기 게이팅 + 조향각.
-	void UpdateSteeringInput(const FVector& InDesired, const FVector& InForward);
+	void UpdateSteeringInput(const FVector& InDesired, const FVector& InForward, float DeltaTime);
 	// 이번 frame 계산한 AnimGraph 변수들을 mesh AnimInstance 에 push.
 	void PushAnimGraphVariables();
 

@@ -126,7 +126,7 @@ void UHorseMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType
 	// 끼임 탈출 타이머는 모드와 무관하게 흐른다(탈출 도중 지면을 다시 잡아 Grounded 로 돌아오기 때문).
 	UpdateStuckEscape(DeltaTime);
 
-	UpdateMoveInput();
+	UpdateMoveInput(DeltaTime);
 
 	FVector WorldDelta(0.0f, 0.0f, 0.0f);
 	FQuat RootYawTwist = FQuat::Identity;
@@ -159,7 +159,7 @@ void UHorseMovementComponent::TickComponent(float DeltaTime, ELevelTick TickType
 	bBrakeRequested     = false;   // frame 소비 후 클리어(다음 frame Locomotion 이 재요청).
 }
 
-void UHorseMovementComponent::UpdateMoveInput()
+void UHorseMovementComponent::UpdateMoveInput(float DeltaTime)
 {
 	FVector Desired;
 	ConsumeInputVector(Desired);   // strafe 여부와 무관하게 pending 입력은 소비해 둔다.
@@ -174,7 +174,7 @@ void UHorseMovementComponent::UpdateMoveInput()
 	}
 	else
 	{
-		UpdateSteeringInput(Desired, Forward);
+		UpdateSteeringInput(Desired, Forward, DeltaTime);
 	}
 }
 
@@ -195,7 +195,7 @@ void UHorseMovementComponent::UpdateStrafeInput(const FVector& InForward, const 
 	}
 }
 
-void UHorseMovementComponent::UpdateSteeringInput(const FVector& InDesired, const FVector& InForward)
+void UHorseMovementComponent::UpdateSteeringInput(const FVector& InDesired, const FVector& InForward, float DeltaTime)
 {
 	LateralSpeed = 0.0f;
 
@@ -223,7 +223,7 @@ void UHorseMovementComponent::UpdateSteeringInput(const FVector& InDesired, cons
 	}
 
 	// 조향 — 목표 진행방향을 yaw rate(deg/s)으로 변환 (anim blend space에 맞추기)
-	TurnRate = 0.0f;
+	float TargetTurnRate = 0.0f;
 	if (!InDesired.IsNearlyZero())
 	{
 		const FVector Heading = InDesired.Normalized();
@@ -232,9 +232,14 @@ void UHorseMovementComponent::UpdateSteeringInput(const FVector& InDesired, cons
 		const float Cross        = InForward.X * Heading.Y - InForward.Y * Heading.X;
 		const float HeadingError = std::atan2(Cross, Dot) * RAD_TO_DEG;
 		const float AlignTime    = std::max(YawAlignTime, 1.e-3f);
-		TurnRate       = std::clamp(HeadingError / AlignTime, -MaxTurnRate, MaxTurnRate);
+		TargetTurnRate       = std::clamp(HeadingError / AlignTime, -MaxTurnRate, MaxTurnRate);
 		LastInputDirXY = Heading;   // 끼임 판정 기준 방향
 	}
+
+	// TurnRateInertia만큼 기존의 TurnRate를 남겨서 smoothing
+	// NOTE: 이미 감쇄가 적용된 TargetTurnRate라서 2중 감쇄인 상태
+	float TurnRateSmoothing = 1.0f - std::pow(1.0f - TurnRateInertia, DeltaTime * 60 /*60fps 기준*/);
+	TurnRate = std::lerp(TurnRate, TargetTurnRate, TurnRateSmoothing);
 	NormalizedSpeed = TargetSpeed;
 }
 
@@ -1703,6 +1708,7 @@ void UHorseMovementComponent::Serialize(FArchive& Ar)
 	Ar << EdgeSlipSpeed;
 	Ar << JumpSpeed;
 	Ar << YawAlignTime;
+	Ar << TurnRateInertia;
 	Ar << MaxTurnRate;
 	// ── Collision 관련 ──
 	Ar << bTorsoCollision;
