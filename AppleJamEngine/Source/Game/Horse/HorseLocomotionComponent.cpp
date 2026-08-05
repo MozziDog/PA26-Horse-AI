@@ -527,7 +527,8 @@ void UHorseLocomotionComponent::UpdateGait(float DeltaTime)
 	if (BlackboardComp)
 	{
 		int Desired = 0;
-		if (BlackboardComp->GetBlackboard().TryGetInt(HorseBBKeys::DesiredGait, Desired))
+		if (BlackboardComp->GetBlackboard().TryGetInt(HorseBBKeys::DesiredGait, Desired) 
+			&& Desired != static_cast<int>(EHorseGait::None))
 		{
 			const int CurGait = static_cast<int>(Gait);
 			const int TargetGait = std::clamp(Desired, 0, static_cast<int>(EHorseGait::Gallop));

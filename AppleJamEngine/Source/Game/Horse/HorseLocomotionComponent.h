@@ -16,7 +16,8 @@ class AActor;
 UENUM()
 enum class EHorseGait : uint8
 {
-	Stop,     // 정지
+	None = 0, // 정보 없음. DesiredGait가 없음 등을 표현할 때 사용
+	Stop = 1, // 정지
 	Walk,     // 평보
 	Trot,     // 속보
 	Canter,   // 구보

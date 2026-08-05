@@ -59,7 +59,8 @@ namespace
 					return EBTResult::Running;
 				}
 
-				SetDesiredGait(Ctx, EHorseGait::Stop);
+				// 성공이든 실패든 끝나면 DesiredGait 초기화
+				SetDesiredGait(Ctx, EHorseGait::None);
 				Ctx.Blackboard->SetBool(HorseBBKeys::CallRequested, false);
 				if (Status == EHorseCallNavigationStatus::Reached ||
 					Status == EHorseCallNavigationStatus::ReachedPartial ||
