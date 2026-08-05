@@ -190,7 +190,6 @@ void UHorseLocomotionComponent::UpdateJumpGate(FBlackboard& BB, float DeltaTime)
 	{
 		JumpCandidateTime = 0.0f;
 		bJumpPerformed = false;
-		Movement->CancelPendingJump();
 		return;
 	}
 	bool  bJumpable = false;
