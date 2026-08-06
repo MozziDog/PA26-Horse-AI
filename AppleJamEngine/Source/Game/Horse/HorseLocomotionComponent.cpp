@@ -18,7 +18,9 @@ namespace
 {
 	EHorseGait GaitStep(EHorseGait Gait, int Delta)
 	{
-		return static_cast<EHorseGait>(static_cast<uint8>(Gait) + Delta);
+		int NewGait = std::max(static_cast<int>(Gait) + Delta,
+								static_cast<int>(EHorseGait::Stop));
+		return static_cast<EHorseGait>(NewGait);
 	}
 
 	// V 를 world +Z 축 기준 Deg(도) 만큼 회전(수평 부채꼴 slot 생성용). Z 성분 보존.
@@ -568,34 +570,24 @@ void UHorseLocomotionComponent::RequestGiddyup()
 void UHorseLocomotionComponent::RequestSlowDown()
 {
 	// NOTE: Strafe 모드는 정지 상태에서만 진입 가능하므로 Strafe 모드 중의 감속/정지 명령은 자연스럽게 무시됨
-	if (Gait <= MinGait)
-	{
-		return;
-	}
 	Gait = GaitStep(Gait, -1);
 }
 
 void UHorseLocomotionComponent::RequestStop()
 {
 	Gait = EHorseGait::Stop;
-	ClampGaitToEnvelope();
 }
 
-void UHorseLocomotionComponent::SetGaitEnvelope(EHorseGait InMin, EHorseGait InMax)
+void UHorseLocomotionComponent::SetMaxGait(EHorseGait InMax)
 {
-	if (InMin > InMax)
-	{
-		std::swap(InMin, InMax);
-	}
-	MinGait = InMin;
 	MaxGait = InMax;
 	ClampGaitToEnvelope();
 }
 
 void UHorseLocomotionComponent::ClampGaitToEnvelope()
 {
-	if (Gait < MinGait)      Gait = MinGait;
-	else if (Gait > MaxGait) Gait = MaxGait;
+	if (Gait < EHorseGait::Stop) Gait = EHorseGait::Stop;
+	if (Gait > MaxGait) Gait = MaxGait;
 }
 
 float UHorseLocomotionComponent::GetGaitTargetSpeed() const

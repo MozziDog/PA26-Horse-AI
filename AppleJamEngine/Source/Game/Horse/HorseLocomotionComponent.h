@@ -75,7 +75,7 @@ public:
 	// BT가 모드에 맞춰 gait 범위를 제약할 때 사용
 	// 현재 gait가 범위를 벗어나면 tick()에서 끌어당긴다
 	UFUNCTION(Callable, Category="Locomotion|Gait")
-	void SetGaitEnvelope(EHorseGait InMin, EHorseGait InMax);
+	void SetMaxGait(EHorseGait InMax);
 
 	// 평행이동(strafe) 플레이어 입력 라우팅 — HorseCharacter에서 매 frame 호출.
 	// 평행이동 모드 시에는 유저 입력을 blackboard를 통해 간접으로 받지 않고 직접 받음
@@ -206,8 +206,7 @@ protected:
 
 	// ── runtime states ──────────────────────────────────────────────────────────────────────────────────
 	EHorseGait Gait     = EHorseGait::Stop;
-	EHorseGait MinGait  = EHorseGait::Stop;
-	EHorseGait MaxGait  = EHorseGait::Gallop;
+	EHorseGait MaxGait  = EHorseGait::Gallop;	// 현재 속력으로는 선회각 모자름 등의 사유로 잠시 속도 늦출 때 사용
 	float      GaitUpTimer   = 0.0f;   // >0 이면 up-shift 대기 중.
 	FVector    SteerDir      = FVector(0.0f, 0.0f, 0.0f);   // 직전 프레임에 선택한 회피 heading(커밋 히스테리시스용). 0=미초기화.
 	float      PrevDanger[HORSE_MAX_FAN_SLOTS] = {};   // slot 별 직전 프레임 danger(slow-release 감쇠용).
