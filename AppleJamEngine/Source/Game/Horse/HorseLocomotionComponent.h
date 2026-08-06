@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "Component/ActorComponent.h"
 
@@ -24,7 +24,7 @@ enum class EHorseGait : uint8
 	Gallop,   // 습보(최고속)
 };
 
-constexpr int HORSE_MAX_FAN_SLOTS = 8;   // slot 병렬 버퍼 상한. cpp 에서 ObsFanCount <= 이 값 검증.
+constexpr int HORSE_MAX_FAN_SLOTS = 8;   // slot 병렬 버퍼 상한. cpp 에서 SteeringSlotCount <= 이 값 검증.
 
 // context-steering 작업 버퍼 — slot 병렬 배열을 한 덩어리로 묶어 하위 단계 간 전달.
 struct FSteerContext
@@ -103,6 +103,7 @@ protected:
 	void UpdateJumpGate(FBlackboard& BB, float DeltaTime);
 	void UpdateContextSteering(FBlackboard& BB, const AActor& Owner, const FVector& Forward, const FHorseSteeringInfluence& Influence, float DeltaTime);
 	// UpdateContextSteering 하위 루틴
+	void UpdateUTurnState(const FVector& Forward, const FHorseSteeringInfluence& Influence);
 	void BuildDangerField(FBlackboard& BB, const FVector& Forward, float DeltaTime, FSteerContext& Field);   // 슬롯 별 danger/hard-block 산출
 	void ScoreSlots(const FVector& Forward, const FHorseSteeringInfluence& Influence, FSteerContext& Field) const;   // 슬롯 별 최종 스코어 계산
 	void ApplySteering(const FVector& Forward, const FSteerContext& Field, float DeltaTime);				// 보간까지 거친 후 Movement에 전달
@@ -146,6 +147,12 @@ protected:
 
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Navigation Weight", Min=0.0f, Max=20.0f, Speed=0.05f)
 	float NavigationWeight = 4.0f;
+	// 호출 네비게이션 목표가 전방 sensor fan 밖으로 크게 벗어나면 유턴 상태에 진입
+	// 진입/해제 각도를 분리해 경계에서 유턴↔정지로 상태가 떨리는 것 방지
+	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="U-Turn Enter Angle", Min=0.0f, Max=180.0f, Speed=1.0f)
+	float UTurnEnterAngle = 65.0f;
+	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="U-Turn Exit Angle", Min=0.0f, Max=180.0f, Speed=1.0f)
+	float UTurnExitAngle = 30.0f;
 
 	// ── context-steering 튜닝 : 조향 떨림 방지 관련 ─────────────────────────────────────────────────────
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Inertia Weight", Min=0.0f, Max=10.0f, Speed=0.05f)
@@ -211,6 +218,8 @@ protected:
 	FVector    SteerDir      = FVector(0.0f, 0.0f, 0.0f);   // 직전 프레임에 선택한 회피 heading(커밋 히스테리시스용). 0=미초기화.
 	float      PrevDanger[HORSE_MAX_FAN_SLOTS] = {};   // slot 별 직전 프레임 danger(slow-release 감쇠용).
 	float      SteerAngle    = 0.0f;   // 현재 조향각(forward 기준 deg). 목표각으로 slew 되는 상태값.
+	bool       bUTurnActive = false;   // 호출 네비게이션 전용 Walk 유턴 상태.
+	int        UTurnExtraSlotIndex = -1; // 유턴 중 고정할 좌/우 ExtraSlot.
 	bool       bJumpPerformed = false;   // 이번 점프 요청에 실제로 점프했는지 여부 (무한 점프 방지)
 	float      JumpCandidateTime = 0.0f; // 현재 점프 후보가 연속으로 유지된 시간.
 

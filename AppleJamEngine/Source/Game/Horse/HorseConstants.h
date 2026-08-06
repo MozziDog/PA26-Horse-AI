@@ -7,8 +7,21 @@ namespace HorseBBKeys
 	// ── Perception → Locomotion ──────────────────────────────
 
 	// 각 ray의 각도(actor forward 기준, deg 단위)
-	inline constexpr float ObsFanAngles[5] = { -40.0f, -20.0f, 0.0f, 20.0f, 40.0f };
-	inline constexpr int   ObsFanCount = 5;
+	inline constexpr float ObsSlotAngles[5] = { -40.0f, -20.0f, 0.0f, 20.0f, 40.0f };
+	inline constexpr int   ObsSlotCount = 5;
+
+	// ExtraSlot은 경로 추종 시의 NavDir가 후방인지를 판정하고 후방인 경우 '유턴' 방향을 고르는 용도
+	// 장애물/절벽 등 danger sensor와는 상호작용하지 않음.
+	inline constexpr int ExtraSlotCount = 2;
+	inline constexpr int SteeringSlotCount = ObsSlotCount + ExtraSlotCount;
+	inline constexpr int ExtraSlotLeftIndex = 0;
+	inline constexpr int ExtraSlotRightIndex = SteeringSlotCount - 1;
+	inline constexpr float SteeringSlotAngles[SteeringSlotCount] =
+	{
+		-110.0f,	// 좌측 후방 슬롯
+		-40.0f, -20.0f, 0.0f, 20.0f, 40.0f,		// 전방 슬롯 (= ObsSlotAngles)
+		110.0f,		// 우측 후방 슬롯
+	};
 
 	// 전방 부채꼴 각 ray의 clearance(장애물까지 거리, m). 미탐지 시에는 센서 Probe Range.
 	inline const FName ObsClear[5] =

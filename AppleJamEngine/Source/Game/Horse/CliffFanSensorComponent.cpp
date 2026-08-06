@@ -89,9 +89,9 @@ void UCliffFanSensorComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 		: FVector::UpVector;
 
 	// slot 별 지면 유무 판정
-	for (int i = 0; i < HorseBBKeys::ObsFanCount; ++i)
+	for (int i = 0; i < HorseBBKeys::ObsSlotCount; ++i)
 	{
-		const FVector PlanarDir  = RotateAroundZ(Forward, HorseBBKeys::ObsFanAngles[i]);
+		const FVector PlanarDir  = RotateAroundZ(Forward, HorseBBKeys::ObsSlotAngles[i]);
 		const FVector GroundDir  = ProjectDirectionOntoGround(PlanarDir, GroundNormal);
 		const FVector ProbePoint = Origin + GroundDir * ProbeDist;
 		const FVector RayStart   = ProbePoint + FVector(0.0f, 0.0f, ProbeUpDist);
@@ -135,9 +135,9 @@ void UCliffFanSensorComponent::ContributeSelectedVisuals(FScene& Scene) const
 	const FVector GroundNormal = Movement
 		? Movement->GetCurrentGroundNormal()
 		: FVector::UpVector;
-	for (int i = 0; i < HorseBBKeys::ObsFanCount; ++i)
+	for (int i = 0; i < HorseBBKeys::ObsSlotCount; ++i)
 	{
-		const FVector PlanarDir = RotateAroundZ(Forward, HorseBBKeys::ObsFanAngles[i]);
+		const FVector PlanarDir = RotateAroundZ(Forward, HorseBBKeys::ObsSlotAngles[i]);
 		const FVector GroundDir = ProjectDirectionOntoGround(PlanarDir, GroundNormal);
 		const FVector RayStart = Origin + GroundDir * WalkProbeDistance + FVector(0.0f, 0.0f, ProbeUpDist);
 		Scene.AddDebugLine(RayStart, RayStart + Down * RayLen, FColor(0, 200, 255));

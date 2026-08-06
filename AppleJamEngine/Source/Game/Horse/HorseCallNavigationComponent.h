@@ -84,7 +84,7 @@ private:
 	UPROPERTY(Edit, Save, Category="Horse|Call", DisplayName="Arrival Radius", Min=0.1f, Max=20.0f, Speed=0.1f)
 	float ArrivalRadius = 2.0f;
 	UPROPERTY(Edit, Save, Category="Horse|Call", DisplayName="Waypoint Radius", Min=0.1f, Max=5.0f, Speed=0.05f)
-	float WaypointRadius = 3.0f;
+	float WaypointRadius = 2.0f;
 	UPROPERTY(Edit, Save, Category="Horse|Call", DisplayName="Alignment Complete Angle", Min=1.0f, Max=90.0f)
 	float AlignmentCompleteAngleDeg = 30.0f;
 	UPROPERTY(Edit, Save, Category="Horse|Call", DisplayName="Alignment Timeout", Min=0.1f, Max=30.0f, Speed=0.1f)

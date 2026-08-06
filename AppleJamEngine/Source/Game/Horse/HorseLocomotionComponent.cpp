@@ -1,4 +1,4 @@
-﻿#include "HorseLocomotionComponent.h"
+#include "HorseLocomotionComponent.h"
 
 #include "HorseMovementComponent.h"
 #include "HorseCharacter.h"
@@ -31,6 +31,20 @@ namespace
 		const float S = std::sin(R);
 		return FVector(V.X * C - V.Y * S, V.X * S + V.Y * C, V.Z);
 	}
+
+	bool IsExtraSteeringSlot(int SlotIndex)
+	{
+		return SlotIndex == HorseBBKeys::ExtraSlotLeftIndex ||
+			SlotIndex == HorseBBKeys::ExtraSlotRightIndex;
+	}
+
+	// SteeringSlot: ExtraSlot과 SensorSlot 모두 포함. 총 7개
+	// SensorSlot(ObsSlot): 전방 센서로 감지하는 슬롯. 총 5개
+	// ExtraSlot: 유턴 판정용 후방 슬롯. danger 계산하지 않고 NavDir만 계산
+	int ToSensorSlotIndex(int SteeringSlotIndex)
+	{
+		return SteeringSlotIndex - 1;
+	}
 }
 
 UHorseLocomotionComponent::UHorseLocomotionComponent()
@@ -57,6 +71,8 @@ void UHorseLocomotionComponent::BeginPlay()
 
 	Gait        = EHorseGait::Stop;
 	GaitUpTimer = 0.0f;
+	bUTurnActive = false;
+	UTurnExtraSlotIndex = -1;
 }
 
 void UHorseLocomotionComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction& ThisTickFunction)
@@ -235,8 +251,8 @@ void UHorseLocomotionComponent::UpdateJumpGate(FBlackboard& BB, float DeltaTime)
 //    장애물 앞에서만 좌/우 핑퐁을 억제하고 열린 공간에선 forward 로 복귀한다. 미초기화면 forward.
 void UHorseLocomotionComponent::UpdateContextSteering(FBlackboard& BB, const AActor& Owner, const FVector& Forward, const FHorseSteeringInfluence& Influence, float DeltaTime)
 {
-	static_assert(HorseBBKeys::ObsFanCount <= HORSE_MAX_FAN_SLOTS, "PrevDanger 버퍼(MaxFanSlots)보다 fan slot 이 많음");
-	constexpr int N = HorseBBKeys::ObsFanCount;
+	static_assert(HorseBBKeys::SteeringSlotCount <= HORSE_MAX_FAN_SLOTS, "PrevDanger 버퍼(MaxFanSlots)보다 steering slot 이 많음");
+	constexpr int N = HorseBBKeys::SteeringSlotCount;
 
 	if (SteerDir.IsNearlyZero())
 	{
@@ -248,12 +264,13 @@ void UHorseLocomotionComponent::UpdateContextSteering(FBlackboard& BB, const AAc
 	// 정면 방향 슬롯 인덱스 구하기
 	for (int i = 1; i < N; ++i)
 	{
-		if (std::abs(HorseBBKeys::ObsFanAngles[i]) < std::abs(HorseBBKeys::ObsFanAngles[Field.CenterIdx]))
+		if (std::abs(HorseBBKeys::SteeringSlotAngles[i]) < std::abs(HorseBBKeys::SteeringSlotAngles[Field.CenterIdx]))
 		{
 			Field.CenterIdx = i;
 		}
 	}
 
+	UpdateUTurnState(Forward, Influence);
 	BuildDangerField(BB, Forward, DeltaTime, Field);
 	ScoreSlots(Forward, Influence, Field);
 
@@ -290,20 +307,69 @@ void UHorseLocomotionComponent::UpdateContextSteering(FBlackboard& BB, const AAc
 	}
 }
 
+void UHorseLocomotionComponent::UpdateUTurnState(const FVector& Forward, const FHorseSteeringInfluence& Influence)
+{
+	if (!Influence.bNavigation)
+	{
+		bUTurnActive = false;
+		UTurnExtraSlotIndex = -1;
+		return;
+	}
+
+	const float Dot = std::clamp(Forward.Dot(Influence.NavigationDir), -1.0f, 1.0f);
+	const float Cross = Forward.X * Influence.NavigationDir.Y - Forward.Y * Influence.NavigationDir.X;
+	const float SignedAngle = std::atan2(Cross, Dot) * RAD_TO_DEG;
+	const float AbsAngle = std::abs(SignedAngle);
+	const float EnterAngle = std::clamp(UTurnEnterAngle, 0.0f, 180.0f);
+	const float ExitAngle = std::min(EnterAngle, std::clamp(UTurnExitAngle, 0.0f, 180.0f));
+
+	if (!bUTurnActive)
+	{
+		if (AbsAngle >= EnterAngle)
+		{
+			UE_LOG("[UTurnDebug], Staring U-Turn");
+			bUTurnActive = true;
+			UTurnExtraSlotIndex = SignedAngle < 0.0f
+				? HorseBBKeys::ExtraSlotLeftIndex
+				: HorseBBKeys::ExtraSlotRightIndex;
+		}
+	}
+	else if (AbsAngle <= ExitAngle)
+	{
+		UE_LOG("[UTurnDebug], Finishing U-Turn");
+		bUTurnActive = false;
+		UTurnExtraSlotIndex = -1;
+	}
+
+	if (bUTurnActive)
+	{
+		// ExtraSlot으로 유턴한 동안은 전진 궤적을 작게 유지한다.
+		SetMaxGait(EHorseGait::Walk);
+	}
+}
+
 void UHorseLocomotionComponent::BuildDangerField(FBlackboard& BB, const FVector& Forward, float DeltaTime, FSteerContext& Field)
 {
-	constexpr int N = HorseBBKeys::ObsFanCount;
+	constexpr int N = HorseBBKeys::SteeringSlotCount;
 
 	// 1) slot 별 danger(2단계). clear>=Safe → 0, Hard~Safe → 0..1 램프, clear<=Hard → 1(하드 제외).
 	//    hard-block(bHardBlk)은 안전 제외라 항상 즉응. soft danger 는 아래에서 slow-release 로 감쇠.
 	const float RampSpan = std::max(1.e-3f, SafeDistance - HardBlockDistance);
 	for (int i = 0; i < N; ++i)
 	{
+		Field.SlotDir[i] = RotateAroundZ(Forward, HorseBBKeys::SteeringSlotAngles[i]);
+		if (IsExtraSteeringSlot(i))
+		{
+			// ExtraSlot은 sensor 값을 읽거나 danger를 유지하지 않는다.
+			PrevDanger[i] = 0.0f;
+			continue;
+		}
+
 		// 장애물 유무에 의한 danger
-		Field.SlotDir[i] = RotateAroundZ(Forward, HorseBBKeys::ObsFanAngles[i]);
+		const int SensorSlotIndex = ToSensorSlotIndex(i);
 
 		float Clear = SafeDistance;   // 값을 못 읽으면 열린 것으로 간주.
-		BB.TryGetFloat(HorseBBKeys::ObsClear[i], Clear);
+		BB.TryGetFloat(HorseBBKeys::ObsClear[SensorSlotIndex], Clear);
 
 		if      (Clear <= HardBlockDistance) { Field.Danger[i] = 1.0f; Field.bHardBlk[i] = true; }
 		else if (Clear <  SafeDistance)      { Field.Danger[i] = (SafeDistance - Clear) / RampSpan; }
@@ -312,9 +378,14 @@ void UHorseLocomotionComponent::BuildDangerField(FBlackboard& BB, const FVector&
 
 	for (int i = 0; i < N; ++i)
 	{
+		if (IsExtraSteeringSlot(i))
+		{
+			continue;
+		}
+
 		// 낭떠러지 유무에 의한 danger
 		bool bGround;
-		if (BB.TryGetBool(HorseBBKeys::ObsGround[i], bGround) && !bGround)
+		if (BB.TryGetBool(HorseBBKeys::ObsGround[ToSensorSlotIndex(i)], bGround) && !bGround)
 		{
 			// NOTE: 유저가 그 방향으로 직접 밀어 접근하려는 슬롯은 ScoreSlots()에서 danger 수치를 걷어낸다.
 			//       그 경우에도 bCliff는 남으니 절벽앞 정지를 판단할 수 있음.
@@ -328,6 +399,11 @@ void UHorseLocomotionComponent::BuildDangerField(FBlackboard& BB, const FVector&
 	//     내려갈 때만 생기므로 회피 반응은 늦어지지 않는다. 토글 off 면 이전 값을 관측치로 리셋만 한다.
 	for (int i = 0; i < N; ++i)
 	{
+		if (IsExtraSteeringSlot(i))
+		{
+			continue;
+		}
+
 		if (bDangerPersistence)
 		{
 			Field.Danger[i] = std::max(Field.Danger[i], PrevDanger[i] - DangerReleaseRate * DeltaTime);
@@ -339,7 +415,7 @@ void UHorseLocomotionComponent::BuildDangerField(FBlackboard& BB, const FVector&
 // Score = interest - danger + inertia, bHardBlk[i]가 참인 slot은 후보에서 제외
 void UHorseLocomotionComponent::ScoreSlots(const FVector& Forward, const FHorseSteeringInfluence& Influence, FSteerContext& Field) const
 {
-	constexpr int N = HorseBBKeys::ObsFanCount;
+	constexpr int N = HorseBBKeys::SteeringSlotCount;
 
 	// 유저가 낭떠러지 쪽으로 '직접' 미는 방향 슬롯은 danger 를 걷어낸다 → 강제로 낭떠러지 방향으로 모는 것 허용
 	// 유저 입력 방향이랑 일치하지 않는 낭떠러지는 danger를 유지해 회피 성향 유지
@@ -347,6 +423,11 @@ void UHorseLocomotionComponent::ScoreSlots(const FVector& Forward, const FHorseS
 	const float CliffOverrideAlignDot = 0.9f;
 	for (int i = 0; i < N; i++)
 	{
+		if (IsExtraSteeringSlot(i))
+		{
+			continue;
+		}
+
 		bUserIntoCliff[i] = Field.bCliff[i]
 							&& Influence.UserMag >= CliffOverrideMinInput
 							&& Field.SlotDir[i].Dot(Influence.UserDir) >= CliffOverrideAlignDot;
@@ -357,21 +438,49 @@ void UHorseLocomotionComponent::ScoreSlots(const FVector& Forward, const FHorseS
 	float SpreadDanger[HORSE_MAX_FAN_SLOTS] = {};
 	for (int i = 0; i < N; i++)
 	{
+		if (IsExtraSteeringSlot(i))
+		{
+			continue;
+		}
+
 		float D = Field.Danger[i];
-		if (i > 0)     { D = std::max(D, DangerSpread * Field.Danger[i - 1]); }
-		if (i < N - 1) { D = std::max(D, DangerSpread * Field.Danger[i + 1]); }
+		if (i > 0 && !IsExtraSteeringSlot(i - 1))     { D = std::max(D, DangerSpread * Field.Danger[i - 1]); }
+		if (i < N - 1 && !IsExtraSteeringSlot(i + 1)) { D = std::max(D, DangerSpread * Field.Danger[i + 1]); }
 		SpreadDanger[i] = D;
 	}
 
 	float DangerActivation = 0.0f;
-	for (int i = 0; i < N; i++) 
-	{ 
-		DangerActivation = std::max(DangerActivation, SpreadDanger[i]); 
+	for (int i = 0; i < N; i++)
+	{
+		if (!IsExtraSteeringSlot(i))
+		{
+			DangerActivation = std::max(DangerActivation, SpreadDanger[i]);
+		}
 	}
 
 	const FVector DebugDrawPivot = Owner->GetActorLocation() + FVector::UpVector * 0.3f;
 	for (int i = 0; i < N; i++)
 	{
+		if (IsExtraSteeringSlot(i))
+		{
+			const bool bEligible = bUTurnActive && i == UTurnExtraSlotIndex;
+			Field.Score[i] = bEligible
+				? NavigationWeight * std::max(0.0f, Field.SlotDir[i].Dot(Influence.NavigationDir))
+				: -FLT_MAX;
+			if (Field.BestIdx < 0 || Field.Score[i] > Field.Score[Field.BestIdx])
+			{
+				Field.BestIdx = i;
+			}
+
+			if (bDrawSteeringDebug && World.IsValid())
+			{
+				const FColor Col = bEligible ? FColor(80, 160, 255) : FColor(80, 80, 80);
+				DrawDebugLine(World, DebugDrawPivot, DebugDrawPivot + Field.SlotDir[i] *
+					(1.0f + std::max(0.0f, Field.Score[i])), Col);
+			}
+			continue;
+		}
+
 		float Interest = InertiaWeight * std::max(0.0f, Field.SlotDir[i].Dot(Forward));
 		if (Influence.UserMag > 0.0f) { Interest += UserWeight * Influence.UserMag * std::max(0.0f, Field.SlotDir[i].Dot(Influence.UserDir)); }
 		if (Influence.bRoad)          { Interest += Influence.RoadWeightEff * std::max(0.0f, Field.SlotDir[i].Dot(Influence.RoadDir)); }
@@ -414,13 +523,14 @@ void UHorseLocomotionComponent::ScoreSlots(const FVector& Forward, const FHorseS
 
 void UHorseLocomotionComponent::ApplySteering(const FVector& Forward, const FSteerContext& Field, float DeltaTime)
 {
-	constexpr int N = HorseBBKeys::ObsFanCount;
+	constexpr int N = HorseBBKeys::SteeringSlotCount;
 	const int BestIdx = Field.BestIdx;
 
 	// sub-slot 포물선 보간
 	// 최고점 slot 과 양옆 score로 조향각을 구해 조향각이 이산적일 때의 어색함 + snap 경계에서의 떨림 방지
-	float TargetAngle = HorseBBKeys::ObsFanAngles[BestIdx];
+	float TargetAngle = HorseBBKeys::SteeringSlotAngles[BestIdx];
 	if (BestIdx > 0 && BestIdx < N - 1
+		&& !IsExtraSteeringSlot(BestIdx - 1) && !IsExtraSteeringSlot(BestIdx + 1)
 		&& !Field.bHardBlk[BestIdx - 1] && !Field.bHardBlk[BestIdx + 1]
 		&& !Field.bCliff[BestIdx - 1]   && !Field.bCliff[BestIdx + 1])   // 낭떠러지 이웃으로 heading 이 휘지 않게
 	{
@@ -431,7 +541,7 @@ void UHorseLocomotionComponent::ApplySteering(const FVector& Forward, const FSte
 		if (Denom < -1.e-4f)   // 아래로 볼록(진짜 peak)일 때만 보간.
 		{
 			const float Offset = std::clamp(0.5f * (sL - sR) / Denom, -1.0f, 1.0f);   // [-1,1] slot 단위.
-			const float Step   = HorseBBKeys::ObsFanAngles[BestIdx + 1] - HorseBBKeys::ObsFanAngles[BestIdx];
+			const float Step   = HorseBBKeys::SteeringSlotAngles[BestIdx + 1] - HorseBBKeys::SteeringSlotAngles[BestIdx];
 			TargetAngle += Offset * Step;
 		}
 	}
@@ -649,4 +759,6 @@ void UHorseLocomotionComponent::Serialize(FArchive& Ar)
 	Ar << NavigationWeight;
 	Ar << CliffOverrideMinInput;
 	Ar << StrafeEnterMaxSpeed;
+	Ar << UTurnEnterAngle;
+	Ar << UTurnExitAngle;
 }

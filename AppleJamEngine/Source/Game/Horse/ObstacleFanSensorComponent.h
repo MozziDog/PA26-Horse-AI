@@ -9,7 +9,7 @@ class IPhysicsScene;
 struct FHitResult;
 
 // 전방 부채꼴 box sweep 으로 장애물 회피용 clearance map 을 Blackboard 에 기록(HorseBBKeys::ObsClear)
-// 부채꼴 각도는 HorseBBKeys::ObsFanAngles 상수값 사용
+// 부채꼴 각도는 HorseBBKeys::ObsSlotAngles 상수값 사용
 // 
 // 소비: UHorseLocomotionComponent 의 context-steering
 // NOTE: 현재는 WorldStatic 대상만. 방향은 Component forward 기준.

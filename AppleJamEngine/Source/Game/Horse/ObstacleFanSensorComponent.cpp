@@ -116,9 +116,9 @@ void UObstacleFanSensorComponent::TickComponent(float DeltaTime, ELevelTick Tick
 	// ── 부채꼴 clearance ── 
 	const FVector BodyExtent(BodyHalfWidth, BodyHalfWidth, BodyHalfHeight);
 	const FCollisionShape BodyShape = FCollisionShape::MakeBox(BodyExtent);
-	for (int i = 0; i < HorseBBKeys::ObsFanCount; ++i)
+	for (int i = 0; i < HorseBBKeys::ObsSlotCount; ++i)
 	{
-		const FVector PlanarDir = RotateAroundZ(Forward, HorseBBKeys::ObsFanAngles[i]);
+		const FVector PlanarDir = RotateAroundZ(Forward, HorseBBKeys::ObsSlotAngles[i]);
 		FVector Dir, Right, Up;
 		FQuat BoxRotation;
 		if (!BuildGroundAlignedFrame(PlanarDir, GroundUp, Dir, Right, Up, BoxRotation))
@@ -308,9 +308,9 @@ void UObstacleFanSensorComponent::ContributeSelectedVisuals(FScene& Scene) const
 	}
 
 	// ── 스티어링 판단용 부채꼴 box sweep 센서 ──
-	for (int i = 0; i < HorseBBKeys::ObsFanCount; i++)
+	for (int i = 0; i < HorseBBKeys::ObsSlotCount; i++)
 	{
-		const FVector PlanarDir = RotateAroundZ(Forward, HorseBBKeys::ObsFanAngles[i]);
+		const FVector PlanarDir = RotateAroundZ(Forward, HorseBBKeys::ObsSlotAngles[i]);
 		FVector Dir, Right, Up;
 		FQuat BoxRotation;
 		if (!BuildGroundAlignedFrame(PlanarDir, GroundUp, Dir, Right, Up, BoxRotation))
