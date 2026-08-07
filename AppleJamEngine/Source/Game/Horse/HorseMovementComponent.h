@@ -198,7 +198,7 @@ public:
 	UPROPERTY(Edit, Save, Category="HorseMovement|Steering", DisplayName = "Turn Smooth Time", Min=0.05f, Max=5.0f, Speed=0.01f)
 	float YawAlignTime = 0.4f;         // 초 — 진행 방향을 heading으로 수렴시키는 시간, 작을수록 민첩
 	UPROPERTY(Edit, Save, Category="HorseMovement|Steering", DisplayName = "Turn Rate Inertia", Min=0.0f, Max=1.0f)
-	float TurnRateInertia = 0.1f;	   // % — 기존 TurnRate를 1초에 얼마나 남길지, 클 수록 민첩
+	float TurnRateInertia = 0.08f;	   // % — 기존 TurnRate를 1초에 얼마나 남길지, 클 수록 민첩
 	UPROPERTY(Edit, Save, Category="HorseMovement|Steering", DisplayName = "Max Turn Rate", Min=0.0f, Max=720.0f, Speed=1.0f)
 	float MaxTurnRate = 205.0f;        // deg/s — 선회율 상한 ( NOTE: Turn 계통의 애니메이션과 맞춰야 함 )
 

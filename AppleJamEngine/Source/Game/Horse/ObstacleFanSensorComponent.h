@@ -49,7 +49,7 @@ private:
 	float BodyHalfWidth = 0.3f;   // m — box 좌우/전후 half extent. 기존 sphere와 같은 전방 clearance 여유를 유지한다.
 
 	UPROPERTY(Edit, Save, Category="Sensor", DisplayName="Body Half Height", Min=0.0f, Max=3.0f, Speed=0.02f)
-	float BodyHalfHeight = 1.0f;  // m — component 기본 높이(지면+1.2m) 기준 box 하단이 약 0.2m가 된다.
+	float BodyHalfHeight = 0.8f;  // m — component 기본 높이(지면+1.2m) 기준 box 하단이 약 0.2m가 된다.
 
 	UPROPERTY(Edit, Save, Category="Sensor", DisplayName="Ground Bias Angle", Min=0.0f, Max=15.0f, Speed=0.1f)
 	float GroundBiasAngle = 5.0f; // deg — box 정렬은 유지하고 sweep 경로만 지면 접선보다 위로 든다.

@@ -42,10 +42,10 @@ private:
 	float GallopProbeDistance = 7.5f;
 
 	UPROPERTY(Edit, Save, Category="AI|Sensor", DisplayName="Probe Up Distance", Min=0.0f, Max=5.0f, Speed=0.02f)
-	float ProbeUpDist = 1.0f;		// m - 오르막길이나 점프로 오를 수 있는 단차 정도는 지면으로 판정
+	float ProbeUpDist = 3.0f;		// m - 오르막길이나 점프로 오를 수 있는 단차 정도는 지면으로 판정
 
 	UPROPERTY(Edit, Save, Category="AI|Sensor", DisplayName="Probe Down Distance", Min=0.0f, Max=10.0f, Speed=0.05f)
-	float ProbeDownDist = 3.0f;     // m — 내리막길이나 뛰어내릴만한 높이도 지면으로 판정
+	float ProbeDownDist = 5.0f;     // m — 내리막길이나 뛰어내릴만한 높이도 지면으로 판정
 
 	UPROPERTY(Edit, Save, Category="AI|Sensor", DisplayName="Draw Debug")
 	bool  bDrawDebug = true;
