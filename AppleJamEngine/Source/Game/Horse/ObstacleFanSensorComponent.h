@@ -30,6 +30,9 @@ protected:
 
 private:
 	// 단일 슬롯에 대해 1차 검사 결과를 기반으로 2차/3차 검사(Traversable check) 수행
+	bool BuildGroundAlignedFrame(const FVector& PlanarDir, const FVector& GroundUp,
+		FVector& OutForward, FVector& OutRight, FVector& OutUp, FQuat& OutRotation) const;
+
 	bool IsTraversableTerrain(IPhysicsScene* Physics, const FVector& Origin, 
 						const FVector& PlanarDir, const FHitResult& SweepHit) const;
 	// 2차 검사: 만약 1차 검사점의 normal이 걸을 수 없는 각도라면, 그것이 허용할만한 단차인지 체크
@@ -53,6 +56,9 @@ private:
 
 	UPROPERTY(Edit, Save, Category="Sensor", DisplayName="Ground Bias Angle", Min=0.0f, Max=15.0f, Speed=0.1f)
 	float GroundBiasAngle = 5.0f; // deg — box 정렬은 유지하고 sweep 경로만 지면 접선보다 위로 든다.
+
+	UPROPERTY(Edit, Save, Category="Sensor", DisplayName="Max Ground Alignment Angle", Min=0.0f, Max=90.0f, Speed=0.5f)
+	float MaxGroundAlignmentAngle = 35.0f;
 
 	UPROPERTY(Edit, Save, Category="Sensor", DisplayName="Terrain Sample Spacing", Min=0.1f, Max=2.0f, Speed=0.05f)
 	float TerrainSampleSpacing = 0.5f; // m — sweep 충돌이 지형인지 확인할 수직 ray 간격.

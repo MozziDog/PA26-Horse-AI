@@ -1,4 +1,4 @@
-﻿#include "pch.h"
+#include "pch.h"
 #include "ObstacleFanSensorComponent.h"
 
 #include "Game/Horse/HorseConstants.h"
@@ -25,30 +25,6 @@ namespace
 		return FVector(V.X * C - V.Y * S, V.X * S + V.Y * C, V.Z);
 	}
 
-	bool BuildGroundAlignedFrame(const FVector& PlanarDir, const FVector& GroundUp,
-		FVector& OutForward, FVector& OutRight, FVector& OutUp, FQuat& OutRotation)
-	{
-		OutUp = GroundUp.IsNearlyZero() ? FVector::UpVector : GroundUp.Normalized();
-		OutForward = PlanarDir - OutUp * PlanarDir.Dot(OutUp);
-		if (OutForward.IsNearlyZero())
-		{
-			return false;
-		}
-		OutForward = OutForward.Normalized();
-		OutRight = OutUp.Cross(OutForward);
-		if (OutRight.IsNearlyZero())
-		{
-			return false;
-		}
-		OutRight = OutRight.Normalized();
-		OutUp = OutForward.Cross(OutRight).Normalized();
-
-		FMatrix Basis = FMatrix::Identity;
-		Basis.SetAxes(OutForward, OutRight, OutUp);
-		OutRotation = Basis.ToQuat();
-		return true;
-	}
-
 	void DrawOrientedBox(UWorld* World, const FVector& Center, const FVector& Extent,
 		const FVector& Forward, const FVector& Right, const FVector& Up, const FColor& Color)
 	{
@@ -72,6 +48,38 @@ UObstacleFanSensorComponent::UObstacleFanSensorComponent()
 	// Blackboard를 소비하는 Locomotion(TG_DuringPhysics)보다 먼저 최신 센서 값을 기록한다.
 	PrimaryComponentTick.SetTickGroup(TG_PrePhysics);
 	PrimaryComponentTick.SetEndTickGroup(TG_PrePhysics);
+}
+
+bool UObstacleFanSensorComponent::BuildGroundAlignedFrame(const FVector& PlanarDir, const FVector& GroundUp,
+	FVector& OutForward, FVector& OutRight, FVector& OutUp, FQuat& OutRotation) const
+{
+	OutUp = GroundUp.IsNearlyZero() ? FVector::UpVector : GroundUp.Normalized();
+	OutForward = PlanarDir - OutUp * PlanarDir.Dot(OutUp);
+	if (OutForward.IsNearlyZero())
+	{
+		return false;
+	}
+	OutForward = OutForward.Normalized();
+
+	// 최대 각도 이하로 ground align 제한
+	const float MaxAlignmentRad = std::clamp(MaxGroundAlignmentAngle, 0.0f, 90.0f) * DEG_TO_RAD;
+	const float GroundAlignedPitch = std::asin(std::clamp(OutForward.Z, -1.0f, 1.0f));
+	const float ClampedPitch = std::clamp(GroundAlignedPitch, -MaxAlignmentRad, MaxAlignmentRad);
+	const FVector NormalizedPlanarDir = PlanarDir.Normalized();
+	OutForward = (NormalizedPlanarDir * std::cos(ClampedPitch) + FVector::UpVector * std::sin(ClampedPitch)).Normalized();
+
+	OutRight = OutUp.Cross(OutForward);
+	if (OutRight.IsNearlyZero())
+	{
+		return false;
+	}
+	OutRight = OutRight.Normalized();
+	OutUp = OutForward.Cross(OutRight).Normalized();
+
+	FMatrix Basis = FMatrix::Identity;
+	Basis.SetAxes(OutForward, OutRight, OutUp);
+	OutRotation = Basis.ToQuat();
+	return true;
 }
 
 void UObstacleFanSensorComponent::BeginPlay()
