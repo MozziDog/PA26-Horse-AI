@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "Component/SceneComponent.h"
 #include "Component/AI/BlackboardComponent.h"
@@ -41,7 +41,7 @@ private:
 	void ResetBlackboardResult() const;
 
 	UPROPERTY(Edit, Save, Category="Sensor|Jump", DisplayName="Jump Probe Range", Min=0.0f, Max=50.0f, Speed=0.1f)
-	float JumpProbeRange = 6.0f;
+	float JumpProbeRange = 10.0f;
 
 	UPROPERTY(Edit, Save, Category="Sensor|Jump", DisplayName="Jump Probe Up", Min=0.0f, Max=3.0f, Speed=0.02f)
 	float JumpProbeUp = 1.0f;

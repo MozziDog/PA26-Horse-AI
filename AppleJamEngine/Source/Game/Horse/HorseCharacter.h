@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "GameFramework/Pawn/Pawn.h"
 #include "Object/Ptr/WeakObjectPtr.h"
 
@@ -36,10 +36,10 @@ public:
 	UFUNCTION(Pure, Catergory="Character|Components")
 	UHorseMovementComponent* GetHorseMovement() const { return MovementComponent; }
 
-    UFUNCTION(Callable, Category = "Horse|Rider")
-    void SetRiderMounted(bool bInRiderMounted);
-    UFUNCTION(Pure, Category = "Horse|Rider")
-    bool IsRiderMounted() const { return bRiderMounted; }
+	UFUNCTION(Callable, Category = "Horse|Rider")
+	void SetRiderMounted(bool bInRiderMounted);
+	UFUNCTION(Pure, Category = "Horse|Rider")
+	bool IsRiderMounted() const { return bRiderMounted; }
 
 	UFUNCTION(Pure, Category="Horse|Call")
 	bool IsPlayerOwnedHorse() const { return bPlayerOwnedHorse; }
@@ -65,8 +65,8 @@ public:
 	UFUNCTION(Callable, Category = "Horse|Command") 
 	void AddCameraVerticalInput(float Value);
 
-    UFUNCTION(Callable, Category = "Horse|Camera")
-    void ResetCameraToDefault();
+	UFUNCTION(Callable, Category = "Horse|Camera")
+	void ResetCameraToDefault();
 protected:
 	void OnPostLoad(FArchive& Ar) override; // Re-Initialize after save & load
 
@@ -95,7 +95,7 @@ protected:
 	TWeakObjectPtr<UHorseCallNavigationComponent> CallNavigationComponent = nullptr;
 
 	UPROPERTY(Edit, Save, Category="Horse|Call", DisplayName="Player Owned Horse")
-	bool bPlayerOwnedHorse = false;
+	bool bPlayerOwnedHorse = true;
 
 	UPROPERTY(Edit, Save, Category = "Horse|Camera", DisplayName = "Auto Camera Input")
 	bool bAutoInputCamera = true;

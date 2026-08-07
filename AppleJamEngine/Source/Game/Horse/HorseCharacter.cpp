@@ -1,4 +1,4 @@
-﻿#include "pch.h"
+#include "pch.h"
 #include "HorseCharacter.h"
 
 #include "Animation/Graph/AnimGraphManager.h"
@@ -152,7 +152,7 @@ void AHorseCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 	if(ObstacleFanSensorComponent)
 	{
 		ObstacleFanSensorComponent->AttachToComponent(RootSceneComponent);
-		ObstacleFanSensorComponent->SetRelativeLocation(FVector(1.0f, 0.0f, -StandHeight + 1.0f));
+		ObstacleFanSensorComponent->SetRelativeLocation(FVector(0.0f, 0.0f, -StandHeight + 1.2f));
 	}
 	JumpObstacleSensorComponent = AddComponent<UJumpObstacleSensorComponent>();
 	if (JumpObstacleSensorComponent)

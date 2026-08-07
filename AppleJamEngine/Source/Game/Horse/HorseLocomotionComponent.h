@@ -117,9 +117,9 @@ protected:
 	// SafeDistance~HardBlockDistance 구간은 danger 수치 0 ~ 1 선형 증가 (soft penalty)
 	// HardBlockDistance 이하는 danger=1 → 해당 slot 을 반드시 제외 (hard penalty)
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Safe Distance", Min=0.0f, Max=20.0f, Speed=0.05f)
-	float SafeDistance = 2.0f;    // m — clearance 가 이 값부터 danger 가 붙기 시작(램프 상단).
+	float SafeDistance = 5.0f;    // m — clearance 가 이 값부터 danger 가 붙기 시작(램프 상단).
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Hard Block Distance", Min=0.0f, Max=20.0f, Speed=0.05f)
-	float HardBlockDistance = 0.8f;   // m — 이 값 이하 clearance 인 slot 은 danger=1 이며 절대 선택 안 함
+	float HardBlockDistance = 1.8f;   // m — 이 값 이하 clearance 인 slot 은 danger=1 이며 절대 선택 안 함
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Danger Weight", Min=0.0f, Max=20.0f, Speed=0.05f)
 	float DangerWeight = 3.0f;    // danger 가 interest 를 깎는 강도. interest 합보다 커야 실제로 회피한다.
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Danger Spread", Min=0.0f, Max=1.0f, Speed=0.02f)
@@ -198,9 +198,9 @@ protected:
 	UPROPERTY(Edit, Save, Category = "Locomotion|Jump", DisplayName = "Trot Jump Trigger Dist", Min = 0.0f, Max = 20.0f, Speed = 0.05f)
 	float TrotJumpTriggerDist = 2.5f;
 	UPROPERTY(Edit, Save, Category = "Locomotion|Jump", DisplayName = "Canter Jump Trigger Dist", Min = 0.0f, Max = 20.0f, Speed = 0.05f)
-	float CanterJumpTriggerDist = 3.5f;
+	float CanterJumpTriggerDist = 4.0f;
 	UPROPERTY(Edit, Save, Category = "Locomotion|Jump", DisplayName = "Gallop Jump Trigger Dist", Min = 0.0f, Max = 20.0f, Speed = 0.05f)
-	float GallopJumpTriggerDist = 5.0f;
+	float GallopJumpTriggerDist = 7.0f;
 
 	// 한 프레임짜리 센서 hit로 점프가 래치되지 않도록 후보가 유지되어야 하는 시간.
 	UPROPERTY(Edit, Save, Category = "Locomotion|Jump", DisplayName = "Jump Confirm Time", Min = 0.0f, Max = 1.0f, Speed = 0.01f)

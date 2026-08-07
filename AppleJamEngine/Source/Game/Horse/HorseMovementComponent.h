@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "Component/Movement/PawnMovementComponent.h"
 #include "Core/Types/CollisionTypes.h"
@@ -172,7 +172,7 @@ public:
 	void    HandleCollapse();
 
 	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Max Speed", Min=0.0f, Max=50.0f, Speed=0.1f)
-	float MaxSpeed = 20.0f;             // m/s — NormalizedSpeed 정규화 기준(gallop 최고 속도)
+	float MaxSpeed = 17.0f;             // m/s — NormalizedSpeed 정규화 기준(gallop 최고 속도)
 	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Ground Snap Max Step", Min=0.0f, Max=5.0f, Speed=0.01f)
 	float GroundSnapMaxDown = 0.5f;    // 발밑으로 스냅해 내려갈 수 있는 최대 높이차. 넘게 벌어지면 낭떠러지 → 낙하
 	UPROPERTY(Edit, Save, Category="HorseMovement", DisplayName="Ground Snap Max Rise", Min=0.0f, Max=5.0f, Speed=0.01f)

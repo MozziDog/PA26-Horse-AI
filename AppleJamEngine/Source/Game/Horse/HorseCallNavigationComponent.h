@@ -98,13 +98,13 @@ private:
 
 	// deg/m. 각 보법의 최대 '초당 yaw 변화량'(deg/s)를 보법의 속력(m/s)로 나눠서 구한 최대 선회 곡률
 	// pure-pursuit curvature랑 비교해서 적절한 보법을 선택할 때 사용
-	// NOTE: 실제 값보다 조금 작게 설정하면 보수적으로, 조금 크게 설정하면 과감하게 움직임
+	// NOTE: 미리 감속할 수 있도록 실제 보법별 한계 곡률보다 작게 설정
 	UPROPERTY(Edit, Save, Category="Horse|Pure Pursuit", DisplayName="Walk Max Yaw Rate Per Speed", Min=0.0f, Max=720.0f)
 	float WalkMaxCurvature = 70.0f;
 	UPROPERTY(Edit, Save, Category="Horse|Pure Pursuit", DisplayName="Trot Max Yaw Rate Per Speed", Min=0.0f, Max=720.0f)
-	float TrotMaxCurvature = 45.0f;
+	float TrotMaxCurvature = 30.0f; // 실제 Trot 한계 곡률 약 45도
 	UPROPERTY(Edit, Save, Category="Horse|Pure Pursuit", DisplayName="Canter Max Yaw Rate Per Speed", Min=0.0f, Max=720.0f)
-	float CanterMaxCurvature = 36.0f;
+	float CanterMaxCurvature = 20.0f; // 실제 Canter 한계 곡률 약 36도
 	UPROPERTY(Edit, Save, Category="Horse|Pure Pursuit", DisplayName="Gallop Max Yaw Rate Per Speed", Min=0.0f, Max=720.0f)
 	float GallopMaxCurvature = 10.0f;
 
