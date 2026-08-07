@@ -1,4 +1,4 @@
-﻿#include "pch.h"
+#include "pch.h"
 
 #include "AI/BT/BTBehaviorRegistry.h"
 #include "AI/Blackboard.h"
@@ -50,7 +50,7 @@ namespace
 				const EHorseCallNavigationStatus Status = static_cast<EHorseCallNavigationStatus>(StatusValue);
 				if (Status == EHorseCallNavigationStatus::Following)
 				{
-					SetDesiredGait(Ctx, EHorseGait::Trot);
+					SetDesiredGait(Ctx, EHorseGait::Canter);
 					return EBTResult::Running;
 				}
 				if (Status == EHorseCallNavigationStatus::Planning || Status == EHorseCallNavigationStatus::Aligning)
