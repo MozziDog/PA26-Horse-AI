@@ -650,6 +650,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClCompile Include="Source\Game\Horse\HorseLocomotionComponent.cpp" />
     <ClCompile Include="Source\Game\Horse\HorseMovementComponent.cpp" />
     <ClCompile Include="Source\Game\Horse\HorseRagdollTestComponent.cpp" />
+    <ClCompile Include="Source\Game\Horse\HorseUserGuidanceComponent.cpp" />
     <ClCompile Include="Source\Game\Horse\JumpObstacleSensorComponent.cpp" />
     <ClCompile Include="Source\Game\Horse\ObstacleFanSensorComponent.cpp" />
     <ClCompile Include="Source\Game\Lua\GameLuaBindings.cpp" />
@@ -1281,6 +1282,7 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClInclude Include="Source\Game\Horse\HorseLocomotionComponent.h" />
     <ClInclude Include="Source\Game\Horse\HorseMovementComponent.h" />
     <ClInclude Include="Source\Game\Horse\HorseRagdollTestComponent.h" />
+    <ClInclude Include="Source\Game\Horse\HorseUserGuidanceComponent.h" />
     <ClInclude Include="Source\Game\Horse\JumpObstacleSensorComponent.h" />
     <ClInclude Include="Source\Game\Horse\ObstacleFanSensorComponent.h" />
     <ClInclude Include="Source\Game\Lua\GameLuaBindings.h" />

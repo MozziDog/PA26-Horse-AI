@@ -2,9 +2,9 @@
 #include "BTBehaviorRegistry.h"
 
 // 함수 로컬 static — 정적 초기화 순서 문제(SIOF) 회피.
-TMap<FName, FBTBehaviorRegistry::FTaskFn>& FBTBehaviorRegistry::Tasks()
+TMap<FName, FBTBehaviorRegistry::FTaskDefinition>& FBTBehaviorRegistry::Tasks()
 {
-	static TMap<FName, FTaskFn> Instance;
+	static TMap<FName, FTaskDefinition> Instance;
 	return Instance;
 }
 
@@ -16,7 +16,14 @@ TMap<FName, FBTBehaviorRegistry::FConditionFn>& FBTBehaviorRegistry::Conditions(
 
 void FBTBehaviorRegistry::RegisterTask(FName Name, FTaskFn Fn)
 {
-	Tasks()[Name] = std::move(Fn);
+	FTaskDefinition Definition;
+	Definition.Tick = std::move(Fn);
+	RegisterTask(Name, std::move(Definition));
+}
+
+void FBTBehaviorRegistry::RegisterTask(FName Name, FTaskDefinition Definition)
+{
+	Tasks()[Name] = std::move(Definition);
 }
 
 void FBTBehaviorRegistry::RegisterCondition(FName Name, FConditionFn Fn)
@@ -24,7 +31,7 @@ void FBTBehaviorRegistry::RegisterCondition(FName Name, FConditionFn Fn)
 	Conditions()[Name] = std::move(Fn);
 }
 
-const FBTBehaviorRegistry::FTaskFn* FBTBehaviorRegistry::FindTask(FName Name)
+const FBTBehaviorRegistry::FTaskDefinition* FBTBehaviorRegistry::FindTask(FName Name)
 {
 	auto It = Tasks().find(Name);
 	return It != Tasks().end() ? &It->second : nullptr;

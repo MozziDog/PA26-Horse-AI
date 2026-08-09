@@ -19,6 +19,7 @@
 #include "HorseMovementComponent.h"
 #include "HorseLocomotionComponent.h"
 #include "HorseCallNavigationComponent.h"
+#include "HorseUserGuidanceComponent.h"
 #include "ObstacleFanSensorComponent.h"
 #include "JumpObstacleSensorComponent.h"
 #include "CliffFanSensorComponent.h"
@@ -78,6 +79,20 @@ namespace
 		const float Delta = NormalizeCameraAngle(Target - Current);
 		const float Alpha = 1.0f - std::exp(-Speed * DeltaTime);
 		return NormalizeCameraAngle(Current + Delta * Alpha);
+	}
+
+	void WriteControlProfile(UBlackboardComponent* BlackboardComponent, bool bRoadAssist, bool bContextAvoidance, bool bAutoJump, bool bStrafe)
+	{
+		if (!BlackboardComponent)
+		{
+			return;
+		}
+
+		FBlackboard& Blackboard = BlackboardComponent->GetBlackboard();
+		Blackboard.SetBool(HorseBBKeys::ControlEnableRoadAssist, bRoadAssist);
+		Blackboard.SetBool(HorseBBKeys::ControlEnableContextAvoidance, bContextAvoidance);
+		Blackboard.SetBool(HorseBBKeys::ControlEnableAutoJump, bAutoJump);
+		Blackboard.SetBool(HorseBBKeys::ControlEnableStrafe, bStrafe);
 	}
 } // namespace
 
@@ -147,6 +162,7 @@ void AHorseCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 	LocomotionComponent = AddComponent<UHorseLocomotionComponent>(); 
 	BlackboardComponent = AddComponent<UBlackboardComponent>();
 	CallNavigationComponent = AddComponent<UHorseCallNavigationComponent>();
+	UserGuidanceComponent = AddComponent<UHorseUserGuidanceComponent>();
 	// 골반쪽에 pivot이 형성되는 점을 고려, 센서류에 +0.5씩 추가 x offset 부여
 	ObstacleFanSensorComponent = AddComponent<UObstacleFanSensorComponent>();
 	if(ObstacleFanSensorComponent)
@@ -225,7 +241,7 @@ void AHorseCharacter::SetupInputComponent()
 	InputComponent->AddGamepadAxisMapping("HorseStrafeForward", EInputAxisSourceType::GamepadLeftStickY, 1.0f);
 	InputComponent->BindAxis("HorseStrafeForward", [this](float Value) { SetStrafeForwardInput(Value); });
 
-	if (bAutoInputCamera)
+	if (bAutoInputCamera && bEnableMouseLook)
 	{
 		InputComponent->AddMouseAxisMapping("HorseCameraHorizontal", EInputAxisSourceType::MouseX, MouseSensitivity);
 		InputComponent->AddMouseAxisMapping("HorseCameraVertical", EInputAxisSourceType::MouseY, MouseSensitivity);
@@ -236,18 +252,10 @@ void AHorseCharacter::SetupInputComponent()
 
 void AHorseCharacter::SetSteeringInput(float Value)
 {
-	LastSteeringInput = Value;
-	FVector Move = FVector::ZeroVector;
-	const float Strength = std::clamp(std::abs(Value), 0.0f, 1.0f);
-	if (Strength > 1.e-3f)
-	{
-		FVector Forward = GetActorForward(); Forward.Z = 0.0f;
-		FVector Right = GetActorRight(); Right.Z = 0.0f;
-		const FVector Direction = Forward + Right * Value;
-		if (!Direction.IsNearlyZero()) Move = Direction.Normalized() * Strength;
-	}
-	if (BlackboardComponent) BlackboardComponent->GetBlackboard().SetVector(HorseBBKeys::UserMoveDir, Move);
-	if (LocomotionComponent) LocomotionComponent->SetStrafeHorizontalInput(std::clamp(Value, -1.0f, 1.0f));
+	const float SteeringInput = std::clamp(Value, -1.0f, 1.0f);
+	LastSteeringInput = SteeringInput;
+	if (UserGuidanceComponent) UserGuidanceComponent->OnSteeringInput(SteeringInput);
+	if (LocomotionComponent) LocomotionComponent->SetStrafeHorizontalInput(SteeringInput);
 }
 
 void AHorseCharacter::RequestGiddyup() { if (LocomotionComponent) LocomotionComponent->RequestGiddyup(); }
@@ -261,6 +269,8 @@ void AHorseCharacter::SetRiderMounted(bool bInRiderMounted)
 	{
 		CallNavigationComponent->NotifyMounted();
 	}
+
+	ApplyRiderControlState();
 }
 
 void AHorseCharacter::RequestWhistleCall(const FVector& TargetLocation)
@@ -279,7 +289,6 @@ void AHorseCharacter::SetGazeInput(float Value)
 
 void AHorseCharacter::SetStrafeForwardInput(float Value)
 {
-	LastForwardInput = Value;
 	if (LocomotionComponent) LocomotionComponent->SetStrafeVerticalInput(std::clamp(Value, -1.0f, 1.0f));
 }
 
@@ -319,6 +328,7 @@ void AHorseCharacter::RebindComponents()
 	BTAgentComponent = GetComponentByClass<UBTAgentComponent>();
 	BlackboardComponent = GetComponentByClass<UBlackboardComponent>();
 	CallNavigationComponent = GetComponentByClass<UHorseCallNavigationComponent>();
+	UserGuidanceComponent = GetComponentByClass<UHorseUserGuidanceComponent>();
 	ObstacleFanSensorComponent = GetComponentByClass<UObstacleFanSensorComponent>();
 	JumpObstacleSensorComponent = GetComponentByClass<UJumpObstacleSensorComponent>();
 	CliffFanSensorComponent = GetComponentByClass<UCliffFanSensorComponent>();
@@ -336,10 +346,24 @@ void AHorseCharacter::BeginPlay()
 	bCameraLookInputThisFrame = false;
 	LastSteeringInput = 0.0f;
 	bGazeInput = false;
-	LastForwardInput = 0.0f;
 	UpdateCameraControlRotation();
 
 	Super::BeginPlay();
+	ApplyRiderControlState();
+}
+
+void AHorseCharacter::ApplyRiderControlState()
+{
+	if (UserGuidanceComponent)
+	{
+		UserGuidanceComponent->SetGuidanceActive(bRiderMounted);
+		if (bRiderMounted)
+		{
+			UserGuidanceComponent->OnSteeringInput(LastSteeringInput);
+		}
+	}
+	WriteControlProfile(BlackboardComponent.Get(),
+		bRiderMounted, true, bRiderMounted, bRiderMounted);
 }
 
 void AHorseCharacter::Tick(float DeltaTime)

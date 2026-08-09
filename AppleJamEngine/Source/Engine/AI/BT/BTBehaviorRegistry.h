@@ -10,16 +10,28 @@ class FBTBehaviorRegistry
 public:
 	using FTaskFn      = std::function<EBTResult(FBTContext&)>;
 	using FConditionFn = std::function<bool(FBTContext&)>;
+	using FTaskLifecycleFn = std::function<void(FBTContext&)>;
+
+	struct FTaskDefinition
+	{
+		FTaskFn          Tick;
+		FTaskLifecycleFn OnEnter;
+		FTaskLifecycleFn OnAbort;
+		FTaskLifecycleFn OnExit;
+
+		bool IsValid() const { return static_cast<bool>(Tick); }
+	};
 
 	// 같은 이름으로 다시 등록하면 덮어쓴다(재등록 idempotent).
 	static void RegisterTask(FName Name, FTaskFn Fn);
+	static void RegisterTask(FName Name, FTaskDefinition Definition);
 	static void RegisterCondition(FName Name, FConditionFn Fn);
 
 	// 없으면 nullptr.
-	static const FTaskFn*      FindTask(FName Name);
+	static const FTaskDefinition* FindTask(FName Name);
 	static const FConditionFn* FindCondition(FName Name);
 
 private:
-	static TMap<FName, FTaskFn>&      Tasks();
+	static TMap<FName, FTaskDefinition>& Tasks();
 	static TMap<FName, FConditionFn>& Conditions();
 };

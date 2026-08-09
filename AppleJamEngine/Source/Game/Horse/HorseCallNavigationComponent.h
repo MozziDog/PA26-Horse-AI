@@ -8,7 +8,6 @@
 class AHorseCharacter;
 class AVoxelNavigationVolume;
 class UBlackboardComponent;
-class UHorseLocomotionComponent;
 enum class EHorseGait : uint8;
 
 UENUM()
@@ -28,6 +27,23 @@ enum class EHorseCallNavigationStatus : uint8
 	FailedNoPath,
 };
 
+inline bool IsCompletedCallNavigationStatus(EHorseCallNavigationStatus Status)
+{
+	return Status == EHorseCallNavigationStatus::Reached ||
+		Status == EHorseCallNavigationStatus::ReachedPartial ||
+		Status == EHorseCallNavigationStatus::CompletedByMount;
+}
+
+inline bool IsTerminalCallNavigationStatus(EHorseCallNavigationStatus Status)
+{
+	return IsCompletedCallNavigationStatus(Status) ||
+		Status == EHorseCallNavigationStatus::AbortedStuck ||
+		Status == EHorseCallNavigationStatus::AbortedAlignment ||
+		Status == EHorseCallNavigationStatus::FailedNoVolume ||
+		Status == EHorseCallNavigationStatus::FailedNoStart ||
+		Status == EHorseCallNavigationStatus::FailedNoPath;
+}
+
 UCLASS()
 class UHorseCallNavigationComponent : public UActorComponent
 {
@@ -40,33 +56,48 @@ public:
 
 	UFUNCTION(Callable, Category="Horse|Call")
 	void RequestCall(const FVector& TargetLocation);
+	// BT leaf task가 호출 lifecycle의 각 phase를 명시적으로 제어한다.
+	UFUNCTION(Callable, Category="Horse|Call")
+	bool BeginPlan();
+	UFUNCTION(Callable, Category="Horse|Call")
+	bool BeginAlignToPathStart();
+	UFUNCTION(Callable, Category="Horse|Call")
+	bool BeginFollowPath();
 	UFUNCTION(Callable, Category="Horse|Call")
 	void NotifyMounted();		// 플레이어가 탑승하면 경로 추종은 종료
 	UFUNCTION(Callable, Category="Horse|Call")
 	void CancelCall();
+	UFUNCTION(Callable, Category="Horse|Guidance")
+	void ClearGuidance();
 
 	UFUNCTION(Pure, Category="Horse|Call")
 	EHorseCallNavigationStatus GetStatus() const { return Status; }
 	UFUNCTION(Pure, Category="Horse|Call")
 	bool IsCallActive() const;
+	UFUNCTION(Pure, Category="Horse|Call")
+	bool IsPlanReady() const { return bPlanReady; }
+	UFUNCTION(Pure, Category="Horse|Call")
+	EHorseGait GetRecommendedGait() const { return RecommendedGait; }
 
 private:
 	void RebindOwnerComponents();
 	AVoxelNavigationVolume* FindNavigationVolume(const FVector& Start, const FVector& Goal) const;
 	void SetStatus(EHorseCallNavigationStatus NewStatus);
-	void SetNavigationDirection(const FVector& Direction, bool bAligning);
+	void PublishGuidance(const FVector& Direction);
 	void StopAtTerminalStatus(EHorseCallNavigationStatus TerminalStatus);
+	void ResetPlanState();
 	void AdvanceFollowing(float DeltaTime);
 	void DrawPathDebug() const;
+	bool HasValidCurrentWaypoint() const;
+	float GetCurrentWaypointAcceptanceRadius() const;
 	float GetPlanarAngleTo(const FVector& Direction) const;
 	FVector GetLookaheadPoint(const FVector& HorseLocation) const;
-	void UpdatePurePursuitGaitLimit(const FVector& HorseLocation, const FVector& LookaheadPoint);
+	void UpdatePurePursuitRecommendedGait(const FVector& HorseLocation, const FVector& LookaheadPoint);
 	EHorseGait GetMaxGaitForCurvature(float RequiredCurvatureDeg) const;
-	void SetMaxGait(EHorseGait InMaxGait);
+	void SetCallRequested(bool bRequested);
 
 	TWeakObjectPtr<AHorseCharacter> Horse = nullptr;
 	TWeakObjectPtr<UBlackboardComponent> BlackboardComponent = nullptr;
-	TWeakObjectPtr<UHorseLocomotionComponent> LocomotionComponent = nullptr;
 	TWeakObjectPtr<AVoxelNavigationVolume> ActiveVolume = nullptr;
 
 	TArray<FVector> PathPoints;
@@ -74,6 +105,8 @@ private:
 	int CurrentWaypoint = 0;
 	float AlignmentTime = 0.0f;
 	bool bPlannedPartial = false;
+	bool bPlanReady = false;
+	EHorseGait RecommendedGait = static_cast<EHorseGait>(0); // EHorseGait::None until BeginPlay initializes it.
 
 	// StuckTimeout 시간동안 위치가 MinProgressDist이상 변화하지 않으면 끼임으로 판정, 경로 추종 종료
 	float NoProgressTime = 0.0f;	
@@ -95,6 +128,8 @@ private:
 	float StuckTimeout = 3.0f;		// 이 시간보다 길게 유의미한 위치 변화가 없으면 '실패'로 판정
 	UPROPERTY(Edit, Save, Category="Horse|Call|Pure Pursuit", DisplayName="Lookahead Distance", Min=0.1f, Max=30.0f)
 	float LookaheadDistance = 3.0f;
+	UPROPERTY(Edit, Save, Category="Horse|Guidance", DisplayName="Navigation Guidance Weight", Min=0.0f, Max=20.0f, Speed=0.05f)
+	float NavigationWeight = 4.0f;
 
 	// deg/m. 각 보법의 최대 '초당 yaw 변화량'(deg/s)를 보법의 속력(m/s)로 나눠서 구한 최대 선회 곡률
 	// pure-pursuit curvature랑 비교해서 적절한 보법을 선택할 때 사용

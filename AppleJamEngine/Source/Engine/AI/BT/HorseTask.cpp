@@ -2,99 +2,273 @@
 
 #include "AI/BT/BTBehaviorRegistry.h"
 #include "AI/Blackboard.h"
-#include "Game/Horse/HorseLocomotionComponent.h"   // EHorseGait
+#include "Component/AI/BlackboardComponent.h"
 #include "Game/Horse/HorseCallNavigationComponent.h"
+#include "Game/Horse/HorseCharacter.h"
 #include "Game/Horse/HorseConstants.h"
+#include "Game/Horse/HorseLocomotionComponent.h" // EHorseGait
+#include "Game/Horse/HorseUserGuidanceComponent.h"
 #include "GameFramework/AActor.h"
 #include "Runtime/EngineInitHooks.h"
 
-// 말 전용 BT behavior(task/condition) 정의. Lua BT(BT/HorseBT.lua)가 이 이름들을 참조.
-// FEngineInitHooks 로 엔진 부팅 시 1회 자동 등록 → 등록 타이밍/순서 무관.
 namespace
 {
+	void SetDesiredGait(FBTContext& Context, EHorseGait Gait)
+	{
+		if (Context.Blackboard)
+		{
+			Context.Blackboard->SetInt(HorseBBKeys::DesiredGait, static_cast<int>(Gait));
+		}
+	}
+
+	void WriteControlProfile(FBTContext& Context, bool bRoadAssist, bool bContextAvoidance, bool bAutoJump, bool bStrafe)
+	{
+		if (!Context.Blackboard)
+		{
+			return;
+		}
+		Context.Blackboard->SetBool(HorseBBKeys::ControlEnableRoadAssist, bRoadAssist);
+		Context.Blackboard->SetBool(HorseBBKeys::ControlEnableContextAvoidance, bContextAvoidance);
+		Context.Blackboard->SetBool(HorseBBKeys::ControlEnableAutoJump, bAutoJump);
+		Context.Blackboard->SetBool(HorseBBKeys::ControlEnableStrafe, bStrafe);
+	}
+
+	void WriteCallControlProfile(FBTContext& Context)
+	{
+		WriteControlProfile(Context, false, true, false, false);
+	}
+
+	void SetCallRequested(FBTContext& Context, bool bRequested)
+	{
+		if (Context.Blackboard)
+		{
+			Context.Blackboard->SetBool(HorseBBKeys::CallRequested, bRequested);
+		}
+	}
+
+	AHorseCharacter* GetHorse(FBTContext& Context)
+	{
+		return Cast<AHorseCharacter>(Context.Owner);
+	}
+
+	UHorseCallNavigationComponent* GetNavigation(FBTContext& Context)
+	{
+		if (AHorseCharacter* Horse = GetHorse(Context))
+		{
+			return Horse->GetComponentByClass<UHorseCallNavigationComponent>();
+		}
+		return nullptr;
+	}
+
+	UHorseUserGuidanceComponent* GetUserGuidance(FBTContext& Context)
+	{
+		if (AHorseCharacter* Horse = GetHorse(Context))
+		{
+			return Horse->GetComponentByClass<UHorseUserGuidanceComponent>();
+		}
+		return nullptr;
+	}
+
+	EHorseCallNavigationStatus GetCallStatus(FBTContext& Context)
+	{
+		if (UHorseCallNavigationComponent* Navigation = GetNavigation(Context))
+		{
+			return Navigation->GetStatus();
+		}
+
+		int StatusValue = static_cast<int>(EHorseCallNavigationStatus::Idle);
+		if (Context.Blackboard)
+		{
+			Context.Blackboard->TryGetInt(HorseBBKeys::CallStatus, StatusValue);
+		}
+		return static_cast<EHorseCallNavigationStatus>(StatusValue);
+	}
+
+	void ClearCallProfile(FBTContext& Context)
+	{
+		if (UHorseCallNavigationComponent* Navigation = GetNavigation(Context))
+		{
+			Navigation->ClearGuidance();
+		}
+		WriteCallControlProfile(Context);
+	}
+
+	void AbortCall(FBTContext& Context)
+	{
+		if (UHorseCallNavigationComponent* Navigation = GetNavigation(Context))
+		{
+			Navigation->CancelCall();
+		}
+		SetDesiredGait(Context, EHorseGait::Stop);
+		ClearCallProfile(Context);
+	}
+
+	FBTBehaviorRegistry::FTaskDefinition MakeCallTask(
+		FBTBehaviorRegistry::FTaskFn Tick,
+		FBTBehaviorRegistry::FTaskLifecycleFn OnEnter)
+	{
+		FBTBehaviorRegistry::FTaskDefinition Definition;
+		Definition.Tick = std::move(Tick);
+		Definition.OnEnter = std::move(OnEnter);
+		Definition.OnAbort = AbortCall;
+		Definition.OnExit = ClearCallProfile;
+		return Definition;
+	}
+
 	void RegisterHorseTasks()
 	{
-		// NOTE: ThreatNear와 Hungry 등의 behavior 등은 테스트용 임시 구현. 추후 삭제/대체할 것.
-		FBTBehaviorRegistry::RegisterCondition(FName("ThreatNear"), [](FBTContext& Ctx)
+		FBTBehaviorRegistry::RegisterCondition(FName("Mounted"), [](FBTContext& Context)
 			{
-				bool Value = false;
-				return Ctx.Blackboard && Ctx.Blackboard->TryGetBool(FName("ThreatNear"), Value) && Value;
+				if (const AHorseCharacter* Horse = Cast<AHorseCharacter>(Context.Owner))
+				{
+					return Horse->IsRiderMounted();
+				}
+				return false;
 			});
-		FBTBehaviorRegistry::RegisterCondition(FName("Hungry"), [](FBTContext& Ctx)
+		FBTBehaviorRegistry::RegisterCondition(FName("CallRequested"), [](FBTContext& Context)
 			{
-				bool Value = false;
-				return Ctx.Blackboard && Ctx.Blackboard->TryGetBool(FName("Hungry"), Value) && Value;
+				bool bRequested = false;
+				return Context.Blackboard && Context.Blackboard->TryGetBool(HorseBBKeys::CallRequested, bRequested) && bRequested;
 			});
 
-		// 태스크 — BT 는 이동을 직접 만지지 않고 Blackboard 의 "DesiredGait"(원하는 보법)만 쓴다.
-		// Locomotion이 이를 읽어 쿨타임·envelope를 고려해 실제 gait에 반영하고 Movement로 라우팅한다.
-		auto SetDesiredGait = [](FBTContext& Ctx, EHorseGait Gait)
+		FBTBehaviorRegistry::FTaskDefinition RiderControl;
+		RiderControl.OnEnter = [](FBTContext& Context)
 			{
-				if (Ctx.Blackboard)
+				if (UHorseUserGuidanceComponent* Guidance = GetUserGuidance(Context))
 				{
-					Ctx.Blackboard->SetInt(FName("DesiredGait"), static_cast<int>(Gait));
+					Guidance->SetGuidanceActive(true);
 				}
 			};
-
-		FBTBehaviorRegistry::RegisterTask(FName("CallPlayer"), [SetDesiredGait](FBTContext& Ctx)
+		RiderControl.Tick = [](FBTContext& Context)
 			{
-				if (!Ctx.Blackboard) return EBTResult::Fail;
-				bool bRequested = false;
-				if (!Ctx.Blackboard->TryGetBool(HorseBBKeys::CallRequested, bRequested) || !bRequested)
+				const AHorseCharacter* Horse = Cast<AHorseCharacter>(Context.Owner);
+				if (!Context.Blackboard || !Horse || !Horse->IsRiderMounted())
 				{
 					return EBTResult::Fail;
 				}
-
-				int StatusValue = static_cast<int>(EHorseCallNavigationStatus::Idle);
-				Ctx.Blackboard->TryGetInt(HorseBBKeys::CallStatus, StatusValue);
-				const EHorseCallNavigationStatus Status = static_cast<EHorseCallNavigationStatus>(StatusValue);
-				if (Status == EHorseCallNavigationStatus::Following)
+				WriteControlProfile(Context, true, true, true, true);
+				SetDesiredGait(Context, EHorseGait::None);
+				return EBTResult::Running;
+			};
+		RiderControl.OnAbort = [](FBTContext& Context)
+			{
+				if (UHorseUserGuidanceComponent* Guidance = GetUserGuidance(Context))
 				{
-					SetDesiredGait(Ctx, EHorseGait::Canter);
-					return EBTResult::Running;
+					Guidance->SetGuidanceActive(false);
 				}
-				if (Status == EHorseCallNavigationStatus::Planning || Status == EHorseCallNavigationStatus::Aligning)
-				{
-					SetDesiredGait(Ctx, EHorseGait::Stop);
-					return EBTResult::Running;
-				}
+				WriteCallControlProfile(Context);
+			};
+		RiderControl.OnExit = RiderControl.OnAbort;
+		FBTBehaviorRegistry::RegisterTask(FName("RiderControlGuidance"), std::move(RiderControl));
 
-				// 성공이든 실패든 끝나면 DesiredGait 초기화
-				SetDesiredGait(Ctx, EHorseGait::None);
-				Ctx.Blackboard->SetBool(HorseBBKeys::CallRequested, false);
-				if (Status == EHorseCallNavigationStatus::Reached ||
-					Status == EHorseCallNavigationStatus::ReachedPartial ||
-					Status == EHorseCallNavigationStatus::CompletedByMount)
+		FBTBehaviorRegistry::RegisterTask(FName("PlanCallPath"), MakeCallTask(
+			[](FBTContext& Context)
+			{
+				WriteControlProfile(Context, false, true, false, false);
+				SetDesiredGait(Context, EHorseGait::Stop);
+				UHorseCallNavigationComponent* Navigation = GetNavigation(Context);
+				if (!Navigation)
+				{
+					return EBTResult::Fail;
+				}
+				const EHorseCallNavigationStatus Status = GetCallStatus(Context);
+				if (Navigation->IsPlanReady())
 				{
 					return EBTResult::Success;
 				}
-				return EBTResult::Fail;
-			});
+				if (IsTerminalCallNavigationStatus(Status))
+				{
+					SetCallRequested(Context, false);
+					return EBTResult::Fail;
+				}
+				return EBTResult::Running;
+			},
+			[](FBTContext& Context)
+			{
+				if (UHorseCallNavigationComponent* Navigation = GetNavigation(Context))
+				{
+					Navigation->ClearGuidance();
+					Navigation->BeginPlan();
+				}
+			}));
 
-		// Run: 전력 질주 요청(Flee 등). Chew/Idle: 정지 요청.
-		FBTBehaviorRegistry::RegisterTask(FName("Run"), [SetDesiredGait](FBTContext& Ctx)
+		FBTBehaviorRegistry::RegisterTask(FName("AlignToPathStart"), MakeCallTask(
+			[](FBTContext& Context)
 			{
-				SetDesiredGait(Ctx, EHorseGait::Gallop);
-				return EBTResult::Running;
-			});
-		FBTBehaviorRegistry::RegisterTask(FName("Chew"), [SetDesiredGait](FBTContext& Ctx) // 테스트용 임시 Task
+				WriteCallControlProfile(Context);
+				SetDesiredGait(Context, EHorseGait::Stop);
+				const EHorseCallNavigationStatus Status = GetCallStatus(Context);
+				if (Status == EHorseCallNavigationStatus::Following)
+				{
+					return EBTResult::Success;
+				}
+				if (IsTerminalCallNavigationStatus(Status))
+				{
+					SetCallRequested(Context, false);
+					return IsCompletedCallNavigationStatus(Status) ? EBTResult::Success : EBTResult::Fail;
+				}
+				return Status == EHorseCallNavigationStatus::Aligning ? EBTResult::Running : EBTResult::Fail;
+			},
+			[](FBTContext& Context)
 			{
-				SetDesiredGait(Ctx, EHorseGait::Stop);
-				return EBTResult::Running;
-			});
-		FBTBehaviorRegistry::RegisterTask(FName("Idle"), [SetDesiredGait](FBTContext& Ctx)
+				if (UHorseCallNavigationComponent* Navigation = GetNavigation(Context))
+				{
+					Navigation->BeginAlignToPathStart();
+				}
+			}));
+
+		FBTBehaviorRegistry::RegisterTask(FName("FollowCallPath"), MakeCallTask(
+			[](FBTContext& Context)
 			{
-				SetDesiredGait(Ctx, EHorseGait::Stop);
-				return EBTResult::Running;
-			});
-		FBTBehaviorRegistry::RegisterTask(FName("Travel"), [](FBTContext& Ctx)
+				WriteCallControlProfile(Context);
+				UHorseCallNavigationComponent* Navigation = GetNavigation(Context);
+				if (!Navigation)
+				{
+					return EBTResult::Fail;
+				}
+				const EHorseCallNavigationStatus Status = GetCallStatus(Context);
+				if (Status == EHorseCallNavigationStatus::Following)
+				{
+					SetDesiredGait(Context, Navigation->GetRecommendedGait());
+					return EBTResult::Running;
+				}
+				if (IsTerminalCallNavigationStatus(Status))
+				{
+					SetDesiredGait(Context, EHorseGait::Stop);
+					SetCallRequested(Context, false);
+					return IsCompletedCallNavigationStatus(Status) ? EBTResult::Success : EBTResult::Fail;
+				}
+				return EBTResult::Fail;
+			},
+			[](FBTContext& Context)
 			{
-				// 아무것도 안하고 Running 상태 유지. 구체적인 동작은 HorseLocomotionComponent에서 수행
-				return EBTResult::Running;
-			});
+				if (UHorseCallNavigationComponent* Navigation = GetNavigation(Context))
+				{
+					Navigation->BeginFollowPath();
+				}
+			}));
+
+		FBTBehaviorRegistry::FTaskDefinition Idle;
+		Idle.OnEnter = [](FBTContext& Context)
+		{
+			if (UHorseUserGuidanceComponent* Guidance = GetUserGuidance(Context))
+			{
+				Guidance->SetGuidanceActive(false);
+			}
+			if (UHorseCallNavigationComponent* Navigation = GetNavigation(Context))
+			{
+				Navigation->ClearGuidance();
+			}
+		};
+		Idle.Tick = [](FBTContext& Context)
+		{
+			WriteCallControlProfile(Context);
+			SetDesiredGait(Context, EHorseGait::Stop);
+			return EBTResult::Running;
+		};
+		FBTBehaviorRegistry::RegisterTask(FName("Idle"), std::move(Idle));
 	}
 
-	// 자기-등록 — 엔진 부팅 시 1회 자동 호출(RunAll).
 	struct FHorseTasksAutoReg
 	{
 		FHorseTasksAutoReg() { FEngineInitHooks::Register(&RegisterHorseTasks); }

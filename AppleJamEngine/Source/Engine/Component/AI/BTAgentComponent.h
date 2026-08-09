@@ -2,6 +2,7 @@
 
 #include "Component/ActorComponent.h"
 #include "AI/BT/BehaviorTree.h"
+#include "Object/Ptr/WeakObjectPtr.h"
 
 #include <memory>
 
@@ -19,6 +20,7 @@ public:
 	~UBTAgentComponent() override;
 
 	void BeginPlay() override;
+	void EndPlay() override;
 
 	// BT 구성용 Lua 스크립트(Content/Script 기준 상대경로)를 주입한다. BeginPlay 전에 설정해야 빌드에 반영됨.
 	void SetBehaviorTreeScript(const FString& InScriptPath) { BehaviorTreeScript = InScriptPath; }
@@ -35,6 +37,7 @@ protected:
 
 private:
 	void BuildBehaviorTree();     // BehaviorTreeScript 를 Lua 빌더로 구성. 실패/미지정 시 Tree = nullptr.
+	void AbortActiveTree();
 	void PublishSnapshot(uint64 Frame) const;
 
 	// 어떤 트리를 실행할지는 이 스크립트가 결정. 에디터에서 직접 지정하거나 소유 액터가 코드로 주입.
@@ -42,6 +45,6 @@ private:
 	FString BehaviorTreeScript;
 
 	std::unique_ptr<FBehaviorTree> Tree;
-	UBlackboardComponent* BlackboardComp = nullptr;
+	TWeakObjectPtr<UBlackboardComponent> BlackboardComp;
 	uint64 FrameCounter = 0;
 };

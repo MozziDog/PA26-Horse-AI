@@ -45,13 +45,17 @@ namespace HorseBBKeys
 	inline const FName RoadDir     = FName("Road.Dir");      // FVector(world), 추종할 도로 방향. RoadSensor 산출.
 	inline const FName RoadDist    = FName("Road.Dist");     // float, 도로 센서와 검출된 지점 간의 거리. 멀수록 도로 추종 약화.
 
-	// 유저 입력
-	inline const FName UserMoveDir = FName("User.MoveDir");  // FVector(world), 유저 입력 방향. 크기 = 강도[0~1]
+	// 활성 guidance producer가 locomotion에 전달하는 단일 방향/가중치 계약.
+	inline const FName GuidanceDirection = FName("Guidance.Direction"); // FVector(world), 수평 정규화 방향
+	inline const FName GuidanceWeight    = FName("Guidance.Weight");    // float, 0 이하면 guidance 없음
 
-	// 상위 복셀 경로 추종 → 하위 context steering
-	inline const FName NavigationDirection    = FName("Navigation.Direction");
-	inline const FName NavigationHasDirection = FName("Navigation.HasDirection");
-	inline const FName NavigationAligning     = FName("Navigation.Aligning");
+	// 활성 BT task/rider state가 locomotion 기능을 profile 단위로 제어한다.
+	inline const FName ControlEnableRoadAssist       = FName("Control.EnableRoadAssist");
+	inline const FName ControlEnableContextAvoidance = FName("Control.EnableContextAvoidance");
+	inline const FName ControlEnableAutoJump         = FName("Control.EnableAutoJump");
+	inline const FName ControlEnableStrafe           = FName("Control.EnableStrafe");
+
+	// 호출 요청/상태
 	inline const FName CallRequested          = FName("Call.Requested");
 	inline const FName CallStatus             = FName("Call.Status");
 

@@ -52,8 +52,9 @@ void UHorseCallNavigationComponent::BeginPlay()
 {
 	Super::BeginPlay();
 	RebindOwnerComponents();
+	RecommendedGait = EHorseGait::Trot;
 	SetStatus(EHorseCallNavigationStatus::Idle);
-	SetNavigationDirection(FVector::ZeroVector, false);
+	ClearGuidance();
 }
 
 void UHorseCallNavigationComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction& ThisTickFunction)
@@ -66,10 +67,16 @@ void UHorseCallNavigationComponent::TickComponent(float DeltaTime, ELevelTick Ti
 	{
 		DrawPathDebug();
 	}
-	if (!IsCallActive()) return;
+	if (!IsCallActive())
+	{
+		return;
+	}
 
 	AHorseCharacter* OwnerHorse = Horse.Get();
-	if (!OwnerHorse) return;
+	if (!OwnerHorse)
+	{
+		return;
+	}
 	if (OwnerHorse->IsRiderMounted())
 	{
 		NotifyMounted();
@@ -78,7 +85,7 @@ void UHorseCallNavigationComponent::TickComponent(float DeltaTime, ELevelTick Ti
 
 	if (Status == EHorseCallNavigationStatus::Aligning)
 	{
-		if (CurrentWaypoint < 0 || CurrentWaypoint >= PathPoints.size())
+		if (!HasValidCurrentWaypoint())
 		{
 			StopAtTerminalStatus(EHorseCallNavigationStatus::FailedNoPath);
 			return;
@@ -90,16 +97,12 @@ void UHorseCallNavigationComponent::TickComponent(float DeltaTime, ELevelTick Ti
 		{
 			AlignmentTime = 0.0f;
 			SetStatus(EHorseCallNavigationStatus::Following);
-			SetNavigationDirection(Direction, false);
-			if (BlackboardComponent)
-			{
-				BlackboardComponent->GetBlackboard().SetInt(HorseBBKeys::DesiredGait, static_cast<int>(EHorseGait::Trot));
-			}
+			PublishGuidance(Direction);
 			return;
 		}
 
 		AlignmentTime += (std::max)(0.0f, DeltaTime);
-		SetNavigationDirection(Direction, true);
+		PublishGuidance(Direction);
 		if (AlignmentTime >= AlignmentTimeout)
 		{
 			StopAtTerminalStatus(EHorseCallNavigationStatus::AbortedAlignment);
@@ -116,7 +119,6 @@ void UHorseCallNavigationComponent::TickComponent(float DeltaTime, ELevelTick Ti
 void UHorseCallNavigationComponent::RequestCall(const FVector& TargetLocation)
 {
 	RebindOwnerComponents();
-	SetMaxGait(EHorseGait::Gallop);
 	AHorseCharacter* OwnerHorse = Horse.Get();
 	if (!OwnerHorse || OwnerHorse->IsRiderMounted())
 	{
@@ -124,31 +126,42 @@ void UHorseCallNavigationComponent::RequestCall(const FVector& TargetLocation)
 	}
 
 	RawTarget = TargetLocation;
-	PathPoints.clear();
-	CurrentWaypoint = 0;
-	NoProgressTime = 0.0f;
-	AlignmentTime = 0.0f;
-	bPlannedPartial = false;
-	ActiveVolume.Reset();
-	SetStatus(EHorseCallNavigationStatus::Planning);
-	if (BlackboardComponent)
+	ResetPlanState();
+	RecommendedGait = EHorseGait::Trot;
+	ClearGuidance();
+	SetStatus(EHorseCallNavigationStatus::Idle);
+	SetCallRequested(true);
+}
+
+bool UHorseCallNavigationComponent::BeginPlan()
+{
+	RebindOwnerComponents();
+	AHorseCharacter* OwnerHorse = Horse.Get();
+	bool bRequested = false;
+	if (!OwnerHorse || !BlackboardComponent ||
+		!BlackboardComponent->GetBlackboard().TryGetBool(HorseBBKeys::CallRequested, bRequested) || !bRequested)
 	{
-		FBlackboard& BB = BlackboardComponent->GetBlackboard();
-		BB.SetBool(HorseBBKeys::CallRequested, true);
-		BB.SetInt(HorseBBKeys::DesiredGait, static_cast<int>(EHorseGait::Stop));
+		return false;
 	}
-	OwnerHorse->RequestStop();
+	if (bPlanReady)
+	{
+		return true;
+	}
+
+	ResetPlanState();
+	ClearGuidance();
+	SetStatus(EHorseCallNavigationStatus::Planning);
 
 	AVoxelNavigationVolume* Volume = FindNavigationVolume(OwnerHorse->GetActorLocation(), RawTarget);
 	if (!Volume)
 	{
 		StopAtTerminalStatus(EHorseCallNavigationStatus::FailedNoVolume);
-		return;
+		return false;
 	}
 	if (!Volume->IsNavigationBuilt() && !Volume->RebuildNavigation())
 	{
 		StopAtTerminalStatus(EHorseCallNavigationStatus::FailedNoPath);
-		return;
+		return false;
 	}
 	ActiveVolume = Volume;
 
@@ -159,7 +172,7 @@ void UHorseCallNavigationComponent::RequestCall(const FVector& TargetLocation)
 			Path.Failure == FVoxelNavigationPathResult::EFailure::NoStart
 				? EHorseCallNavigationStatus::FailedNoStart
 				: EHorseCallNavigationStatus::FailedNoPath);
-		return;
+		return false;
 	}
 
 	PathPoints = Path.Points;
@@ -167,56 +180,84 @@ void UHorseCallNavigationComponent::RequestCall(const FVector& TargetLocation)
 	if (PathPoints.empty())
 	{
 		StopAtTerminalStatus(EHorseCallNavigationStatus::FailedNoPath);
-		return;
+		return false;
 	}
 
 	CurrentWaypoint = PathPoints.size() > 1 ? 1 : 0;
 	ProgressAnchor = OwnerHorse->GetActorLocation();
-	FVector InitialDirection = PathPoints[CurrentWaypoint] - OwnerHorse->GetActorLocation();
-	InitialDirection.Z = 0.0f;
-	if (FVector::Distance(OwnerHorse->GetActorLocation(), RawTarget) <= ArrivalRadius)
-	{
-		StopAtTerminalStatus(EHorseCallNavigationStatus::Reached);
-	}
-	else if (!InitialDirection.IsNearlyZero() && GetPlanarAngleTo(InitialDirection) > AlignmentCompleteAngleDeg)
-	{
-		SetStatus(EHorseCallNavigationStatus::Aligning);
-		SetNavigationDirection(InitialDirection, true);
-	}
-	else
-	{
-		SetStatus(EHorseCallNavigationStatus::Following);
-		SetNavigationDirection(InitialDirection, false);
-		if (BlackboardComponent)
-		{
-			BlackboardComponent->GetBlackboard().SetInt(HorseBBKeys::DesiredGait, static_cast<int>(EHorseGait::Trot));
-		}
-	}
-
+	bPlanReady = true;
 	UE_LOG("[HorseCallNavigation] Planned Horse=%s Points=%d Partial=%d Length=%.3f SearchMs=%.3f Expanded=%d",
 		OwnerHorse->GetName().c_str(), PathPoints.size(), Path.bPartial ? 1 : 0,
 		Path.PathLength, Path.SearchTimeMs, Path.NumExpandedNodes);
+	return true;
+}
+
+bool UHorseCallNavigationComponent::BeginAlignToPathStart()
+{
+	AHorseCharacter* OwnerHorse = Horse.Get();
+	if (!OwnerHorse || !bPlanReady || !HasValidCurrentWaypoint())
+	{
+		StopAtTerminalStatus(EHorseCallNavigationStatus::FailedNoPath);
+		return false;
+	}
+	if (FVector::Distance(OwnerHorse->GetActorLocation(), RawTarget) <= ArrivalRadius)
+	{
+		StopAtTerminalStatus(EHorseCallNavigationStatus::Reached);
+		return false;
+	}
+
+	AlignmentTime = 0.0f;
+	SetStatus(EHorseCallNavigationStatus::Aligning);
+	FVector Direction = PathPoints[CurrentWaypoint] - OwnerHorse->GetActorLocation();
+	Direction.Z = 0.0f;
+	PublishGuidance(Direction);
+	return true;
+}
+
+bool UHorseCallNavigationComponent::BeginFollowPath()
+{
+	if (IsTerminalCallNavigationStatus(Status))
+	{
+		return false;
+	}
+
+	AHorseCharacter* OwnerHorse = Horse.Get();
+	if (!OwnerHorse || !bPlanReady || !HasValidCurrentWaypoint())
+	{
+		StopAtTerminalStatus(EHorseCallNavigationStatus::FailedNoPath);
+		return false;
+	}
+
+	SetStatus(EHorseCallNavigationStatus::Following);
+	const FVector LookaheadPoint = GetLookaheadPoint(OwnerHorse->GetActorLocation());
+	FVector Direction = LookaheadPoint - OwnerHorse->GetActorLocation();
+	Direction.Z = 0.0f;
+	UpdatePurePursuitRecommendedGait(OwnerHorse->GetActorLocation(), LookaheadPoint);
+	PublishGuidance(Direction);
+	return true;
 }
 
 void UHorseCallNavigationComponent::NotifyMounted()
 {
-	if (IsCallActive())
+	if (IsCallActive() || bPlanReady)
 	{
 		StopAtTerminalStatus(EHorseCallNavigationStatus::CompletedByMount);
 	}
+	SetCallRequested(false);
 }
 
 void UHorseCallNavigationComponent::CancelCall()
 {
-	SetNavigationDirection(FVector::ZeroVector, false);
-	if (BlackboardComponent)
-	{
-		BlackboardComponent->GetBlackboard().SetBool(HorseBBKeys::CallRequested, false);
-	}
-	PathPoints.clear();
-	ActiveVolume.Reset();
-	SetMaxGait(EHorseGait::Gallop);
+	ClearGuidance();
+	ResetPlanState();
+	RecommendedGait = EHorseGait::Trot;
+	SetCallRequested(false);
 	SetStatus(EHorseCallNavigationStatus::Idle);
+}
+
+void UHorseCallNavigationComponent::ClearGuidance()
+{
+	PublishGuidance(FVector::ZeroVector);
 }
 
 bool UHorseCallNavigationComponent::IsCallActive() const
@@ -229,10 +270,10 @@ bool UHorseCallNavigationComponent::IsCallActive() const
 void UHorseCallNavigationComponent::RebindOwnerComponents()
 {
 	Horse = Cast<AHorseCharacter>(GetOwner());
+	BlackboardComponent.Reset();
 	if (AHorseCharacter* OwnerHorse = Horse.Get())
 	{
 		BlackboardComponent = OwnerHorse->GetComponentByClass<UBlackboardComponent>();
-		LocomotionComponent = OwnerHorse->GetComponentByClass<UHorseLocomotionComponent>();
 	}
 }
 
@@ -265,38 +306,73 @@ void UHorseCallNavigationComponent::SetStatus(EHorseCallNavigationStatus NewStat
 	}
 }
 
-void UHorseCallNavigationComponent::SetNavigationDirection(const FVector& Direction, bool bAligning)
+void UHorseCallNavigationComponent::PublishGuidance(const FVector& Direction)
 {
-	if (!BlackboardComponent) return;
+	if (!BlackboardComponent)
+	{
+		RebindOwnerComponents();
+	}
+	if (!BlackboardComponent)
+	{
+		return;
+	}
+
 	FVector PlanarDirection = Direction;
 	PlanarDirection.Z = 0.0f;
 	const bool bHasDirection = !PlanarDirection.IsNearlyZero();
-	if (bHasDirection) PlanarDirection.Normalize();
-	FBlackboard& BB = BlackboardComponent->GetBlackboard();
-	BB.SetVector(HorseBBKeys::NavigationDirection, PlanarDirection);
-	BB.SetBool(HorseBBKeys::NavigationHasDirection, bHasDirection);
-	BB.SetBool(HorseBBKeys::NavigationAligning, bAligning && bHasDirection);
+	if (bHasDirection)
+	{
+		PlanarDirection.Normalize();
+	}
+	FBlackboard& Blackboard = BlackboardComponent->GetBlackboard();
+	Blackboard.SetVector(HorseBBKeys::GuidanceDirection, bHasDirection ? PlanarDirection : FVector::ZeroVector);
+	Blackboard.SetFloat(HorseBBKeys::GuidanceWeight, bHasDirection ? std::max(0.0f, NavigationWeight) : 0.0f);
 }
 
 void UHorseCallNavigationComponent::StopAtTerminalStatus(EHorseCallNavigationStatus TerminalStatus)
 {
-	SetNavigationDirection(FVector::ZeroVector, false);
+	ClearGuidance();
+	bPlanReady = false;
 	SetStatus(TerminalStatus);
-	if (BlackboardComponent)
+}
+
+void UHorseCallNavigationComponent::ResetPlanState()
+{
+	PathPoints.clear();
+	CurrentWaypoint = 0;
+	AlignmentTime = 0.0f;
+	NoProgressTime = 0.0f;
+	ProgressAnchor = FVector::ZeroVector;
+	bPlannedPartial = false;
+	bPlanReady = false;
+	ActiveVolume.Reset();
+}
+
+bool UHorseCallNavigationComponent::HasValidCurrentWaypoint() const
+{
+	return CurrentWaypoint >= 0 && CurrentWaypoint < static_cast<int>(PathPoints.size());
+}
+
+float UHorseCallNavigationComponent::GetCurrentWaypointAcceptanceRadius() const
+{
+	const bool bIsFinalWaypoint = CurrentWaypoint == static_cast<int>(PathPoints.size()) - 1;
+	if (!bIsFinalWaypoint || bPlannedPartial)
 	{
-		BlackboardComponent->GetBlackboard().SetInt(HorseBBKeys::DesiredGait, static_cast<int>(EHorseGait::Stop));
+		return WaypointRadius;
 	}
-	if (Horse)
-	{
-		Horse->RequestStop();
-	}
-	SetMaxGait(EHorseGait::Gallop); // MaxGait 제한 해제
+
+	const float EndpointTargetDistance = FVector::Distance(PathPoints.back(), RawTarget);
+	return std::max(0.05f, ArrivalRadius - EndpointTargetDistance);
 }
 
 void UHorseCallNavigationComponent::AdvanceFollowing(float DeltaTime)
 {
 	AHorseCharacter* OwnerHorse = Horse.Get();
-	if (!OwnerHorse) return;
+	if (!OwnerHorse || !HasValidCurrentWaypoint())
+	{
+		StopAtTerminalStatus(EHorseCallNavigationStatus::FailedNoPath);
+		return;
+	}
 	const FVector HorseLocation = OwnerHorse->GetActorLocation();
 	if (FVector::Distance(HorseLocation, RawTarget) <= ArrivalRadius)
 	{
@@ -304,23 +380,15 @@ void UHorseCallNavigationComponent::AdvanceFollowing(float DeltaTime)
 		return;
 	}
 
-	// 현재 waypoint에 도달했다면 다음 waypoint 선정
-	while (CurrentWaypoint < PathPoints.size())
+	while (HasValidCurrentWaypoint())
 	{
-		const bool bIsFinalWaypoint = CurrentWaypoint == (PathPoints.size() - 1);
-		float AcceptanceRadius = WaypointRadius;
-		if (bIsFinalWaypoint && !bPlannedPartial)
-		{
-			const float EndpointTargetDistance = FVector::Distance(PathPoints.back(), RawTarget);
-			AcceptanceRadius = std::max(0.05f, ArrivalRadius - EndpointTargetDistance);
-		}
-		if (FVector::Distance(HorseLocation, PathPoints[CurrentWaypoint]) > AcceptanceRadius)
+		if (FVector::Distance(HorseLocation, PathPoints[CurrentWaypoint]) > GetCurrentWaypointAcceptanceRadius())
 		{
 			break;
 		}
-		CurrentWaypoint++;
+		++CurrentWaypoint;
 	}
-	if (CurrentWaypoint >= PathPoints.size())
+	if (CurrentWaypoint >= static_cast<int>(PathPoints.size()))
 	{
 		const bool bReachedRawTarget = FVector::Distance(HorseLocation, RawTarget) <= ArrivalRadius;
 		StopAtTerminalStatus(bReachedRawTarget
@@ -329,13 +397,12 @@ void UHorseCallNavigationComponent::AdvanceFollowing(float DeltaTime)
 		return;
 	}
 
-	// Pure pursuit을 사용하여 Gait 계산
 	const FVector LookaheadPoint = GetLookaheadPoint(HorseLocation);
 	FVector Direction = LookaheadPoint - HorseLocation;
 	Direction.Z = 0.0f;
-	UpdatePurePursuitGaitLimit(HorseLocation, LookaheadPoint);
+	UpdatePurePursuitRecommendedGait(HorseLocation, LookaheadPoint);
+	PublishGuidance(Direction);
 
-	SetNavigationDirection(Direction, false);
 	if (FVector::Distance(HorseLocation, ProgressAnchor) >= MinProgressDist)
 	{
 		ProgressAnchor = HorseLocation;
@@ -353,7 +420,7 @@ void UHorseCallNavigationComponent::AdvanceFollowing(float DeltaTime)
 
 FVector UHorseCallNavigationComponent::GetLookaheadPoint(const FVector& HorseLocation) const
 {
-	if (CurrentWaypoint < 0 || CurrentWaypoint >= PathPoints.size())
+	if (!HasValidCurrentWaypoint())
 	{
 		UE_LOG("[UHorseCallNavigationComponent] CurrentWaypoint is out of range");
 		return HorseLocation;
@@ -361,14 +428,14 @@ FVector UHorseCallNavigationComponent::GetLookaheadPoint(const FVector& HorseLoc
 
 	float RemainingDistance = std::max(0.01f, LookaheadDistance);
 	FVector SegmentStart = HorseLocation;
-	for (int Index = CurrentWaypoint; Index < PathPoints.size(); Index++)
+	for (int Index = CurrentWaypoint; Index < static_cast<int>(PathPoints.size()); ++Index)
 	{
 		const FVector SegmentEnd = PathPoints[Index];
-		FVector Segment = SegmentEnd - SegmentStart;
+		const FVector Segment = SegmentEnd - SegmentStart;
 		const float SegmentLength = Segment.Length();
 		if (SegmentLength > RemainingDistance)
 		{
-			return SegmentStart + (SegmentEnd - SegmentStart) * (RemainingDistance / SegmentLength);
+			return SegmentStart + Segment * (RemainingDistance / SegmentLength);
 		}
 		RemainingDistance -= SegmentLength;
 		SegmentStart = SegmentEnd;
@@ -377,7 +444,7 @@ FVector UHorseCallNavigationComponent::GetLookaheadPoint(const FVector& HorseLoc
 	return PathPoints.back();
 }
 
-void UHorseCallNavigationComponent::UpdatePurePursuitGaitLimit(const FVector& HorseLocation, const FVector& LookaheadPoint)
+void UHorseCallNavigationComponent::UpdatePurePursuitRecommendedGait(const FVector& HorseLocation, const FVector& LookaheadPoint)
 {
 	AHorseCharacter* OwnerHorse = Horse.Get();
 	if (!OwnerHorse)
@@ -396,11 +463,10 @@ void UHorseCallNavigationComponent::UpdatePurePursuitGaitLimit(const FVector& Ho
 	}
 	Forward.Normalize();
 
-	// 곡률 기반으로 보법 계산
-	const float LateralOffset =  Forward.X * ToLookahead.Y - Forward.Y * ToLookahead.X; // Left에 투영한 ToLookahead의 길이
-	const float Curvature = 2.0f * LateralOffset / (LookaheadLength * LookaheadLength); // rad/m
-	const float RequiredCurvatureDeg = std::abs(Curvature) * RAD_TO_DEG;              // deg/m
-	SetMaxGait(GetMaxGaitForCurvature(RequiredCurvatureDeg));
+	const float LateralOffset = Forward.X * ToLookahead.Y - Forward.Y * ToLookahead.X;
+	const float Curvature = 2.0f * LateralOffset / (LookaheadLength * LookaheadLength);
+	const float RequiredCurvatureDeg = std::abs(Curvature) * RAD_TO_DEG;
+	RecommendedGait = GetMaxGaitForCurvature(RequiredCurvatureDeg);
 
 	if (bDrawPurePursuit)
 	{
@@ -418,15 +484,15 @@ EHorseGait UHorseCallNavigationComponent::GetMaxGaitForCurvature(float RequiredC
 {
 	if (RequiredCurvatureDeg <= GallopMaxCurvature) return EHorseGait::Gallop;
 	if (RequiredCurvatureDeg <= CanterMaxCurvature) return EHorseGait::Canter;
-	if (RequiredCurvatureDeg <= TrotMaxCurvature)   return EHorseGait::Trot;
+	if (RequiredCurvatureDeg <= TrotMaxCurvature) return EHorseGait::Trot;
 	return EHorseGait::Walk;
 }
 
-void UHorseCallNavigationComponent::SetMaxGait(EHorseGait InMaxGait)
+void UHorseCallNavigationComponent::SetCallRequested(bool bRequested)
 {
-	if (UHorseLocomotionComponent* Locomotion = LocomotionComponent.Get())
+	if (BlackboardComponent)
 	{
-		Locomotion->SetMaxGait(InMaxGait);
+		BlackboardComponent->GetBlackboard().SetBool(HorseBBKeys::CallRequested, bRequested);
 	}
 }
 
@@ -438,7 +504,7 @@ void UHorseCallNavigationComponent::DrawPathDebug() const
 	{
 		const FVector Point = PathPoints[Index] + FVector::UpVector * 0.12f;
 		DrawDebugSphere(World, Point, 0.12f, 4,
-			(Index == CurrentWaypoint) ? FColor::Yellow() : FColor(0, 190, 255) );
+			(static_cast<int>(Index) == CurrentWaypoint) ? FColor::Yellow() : FColor(0, 190, 255));
 		if (Index > 0)
 		{
 			DrawDebugLine(World, PathPoints[Index - 1] + FVector::UpVector * 0.12f, Point, FColor(0, 190, 255));

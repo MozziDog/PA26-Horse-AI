@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "BTAgentComponent.h"
 
 #include "Core/TickFunction.h"
@@ -79,14 +79,30 @@ void UBTAgentComponent::BeginPlay()
 	FLuaScriptManager::RegisterBTAgent(this);
 }
 
+void UBTAgentComponent::EndPlay()
+{
+	// Abort, reset, and unregister are all idempotent. UActorComponent can route
+	// EndPlay again from BeginDestroy, so no component-local lifecycle flag is needed.
+	AbortActiveTree();
+	Tree.reset();
+	BlackboardComp.Reset();
+	FLuaScriptManager::UnregisterBTAgent(this);
+
+	UActorComponent::EndPlay();
+}
+
 void UBTAgentComponent::ReleaseLuaForShutdown()
 {
 	FLuaScriptManager::UnregisterBTAgent(this);
-	Tree.reset();   // FLuaTask 의 sol::protected_function 해제
+	// This late path releases sol references only. Gameplay cleanup belongs to
+	// EndPlay and BuildBehaviorTree, where lifecycle callbacks have a valid owner.
+	Tree.reset();
+	BlackboardComp.Reset();
 }
 
 void UBTAgentComponent::BuildBehaviorTree()
 {
+	AbortActiveTree();
 	if (BehaviorTreeScript.empty())
 	{
 		UE_LOG("[BT] BehaviorTreeScript 미지정 — 트리 미구성");
@@ -102,6 +118,25 @@ void UBTAgentComponent::BuildBehaviorTree()
 	}
 }
 
+void UBTAgentComponent::AbortActiveTree()
+{
+	if (!Tree)
+	{
+		return;
+	}
+
+	FBTContext Context;
+	// Blackboard is a sibling component and can disappear before this one
+	// during teardown. Keep the owner when it is still valid so Abort handlers
+	// can release gameplay state even if Blackboard cleanup happened first.
+	Context.Owner = GetOwner();
+	if (UBlackboardComponent* Blackboard = BlackboardComp.Get())
+	{
+		Context.Blackboard = &Blackboard->GetBlackboard();
+	}
+	Tree->Abort(Context);
+}
+
 void UBTAgentComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction& ThisTickFunction)
 {
 	UActorComponent::TickComponent(DeltaTime, TickType, ThisTickFunction);
@@ -113,11 +148,20 @@ void UBTAgentComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAct
 		return;
 	}
 
+	UBlackboardComponent* Blackboard = BlackboardComp.Get();
+	if (!Blackboard)
+	{
+		// The owner can still be valid even when its Blackboard is gone, allowing
+		// active tasks to release their gameplay state without dereferencing it.
+		AbortActiveTree();
+		return;
+	}
+
 	FBTContext Context;
 	Context.Owner       = GetOwner();
 	Context.DeltaTime   = DeltaTime;
 	Context.FrameNumber = ++FrameCounter;   // 1 부터 시작 (0 은 초기 미평가 상태)
-	Context.Blackboard  = BlackboardComp ? &BlackboardComp->GetBlackboard() : nullptr;
+	Context.Blackboard  = &Blackboard->GetBlackboard();
 
 	Tree->Behave(Context);
 	PublishSnapshot(Context.FrameNumber);

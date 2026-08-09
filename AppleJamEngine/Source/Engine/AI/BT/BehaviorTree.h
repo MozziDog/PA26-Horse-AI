@@ -47,6 +47,12 @@ public:
 
 	EBTResult Execute(FBTContext& Context)
 	{
+		if (!bActive)
+		{
+			bActive = true;
+			OnEnter(Context);
+		}
+
 		// 실제 동작 수행
 		EBTResult Result = OnBehave(Context);
 
@@ -62,7 +68,25 @@ public:
 
 		Debug.LastResult         = Result;
 		Debug.LastEvaluatedFrame = Context.FrameNumber;
+
+		if (Result != EBTResult::Running)
+		{
+			OnExit(Context);
+			bActive = false;
+		}
 		return Result;
+	}
+
+	// Reactive parent node가 현재 Running child를 선점할 때 호출한다.
+	// 일반 종료(OnExit)와 달리 기존 활성 subtree 전체에 cleanup을 전파해서 정리할 여지를 줌
+	void Abort(FBTContext& Context)
+	{
+		if (!bActive)
+		{
+			return;
+		}
+		OnAbort(Context);
+		bActive = false;
 	}
 
 	// 이번 프레임에 평가됐고 Running 이면 root→leaf 실행 체인의 일부(active path)
@@ -79,17 +103,22 @@ public:
 	virtual TArray<const FBehaviorNode*> GetChildrenForDebug() const { return {}; }
 
 protected:
+	virtual void OnEnter(FBTContext& Context) { (void)Context; }
+	virtual void OnAbort(FBTContext& Context) { (void)Context; }
+	virtual void OnExit(FBTContext& Context) { (void)Context; }
 	virtual EBTResult OnBehave(FBTContext& Context) = 0;
 
 	FBTDebugInfo Debug;
 	FName        DebugLabel;
+	bool         bActive = false;
 };
 
 class FBehaviorTree
 {
 public:
 	explicit FBehaviorTree(std::unique_ptr<FBehaviorNode> InRootNode) : Root(std::move(InRootNode)) { }
-	EBTResult Behave(FBTContext& Context) { return Root->Execute(Context); }
+	EBTResult Behave(FBTContext& Context) { return Root ? Root->Execute(Context) : EBTResult::Fail; }
+	void Abort(FBTContext& Context) { if (Root) Root->Abort(Context); }
 
 	const FBehaviorNode* GetRootForDebug() const { return Root.get(); }
 private:
@@ -101,17 +130,27 @@ private:
 class FBehaviorTask : public FBehaviorNode
 {
 public:
-	FBehaviorTask(FName InName, std::function<EBTResult(FBTContext&)> InFunc)
-		: Func(std::move(InFunc)) { DebugLabel = InName; }
+	using FTaskFn = std::function<EBTResult(FBTContext&)>;
+	using FLifecycleFn = std::function<void(FBTContext&)>;
+
+	FBehaviorTask(FName InName, FTaskFn InFunc, FLifecycleFn InOnEnter = {}, FLifecycleFn InOnAbort = {}, FLifecycleFn InOnExit = {})
+		: Func(std::move(InFunc)), EnterFunc(std::move(InOnEnter)), AbortFunc(std::move(InOnAbort)), ExitFunc(std::move(InOnExit)) { DebugLabel = InName; }
 
 	const char* GetNodeTypeName() const override { return "Task"; }
 protected:
+	void OnEnter(FBTContext& Context) override { if (EnterFunc) EnterFunc(Context); }
+	void OnAbort(FBTContext& Context) override { if (AbortFunc) AbortFunc(Context); }
+	void OnExit(FBTContext& Context) override { if (ExitFunc) ExitFunc(Context); }
+
 	EBTResult OnBehave(FBTContext& Context) override
 	{
-		return Func(Context);
+		return Func ? Func(Context) : EBTResult::Fail;
 	}
 private:
-	std::function<EBTResult(FBTContext&)> Func;
+	FTaskFn      Func;
+	FLifecycleFn EnterFunc;
+	FLifecycleFn AbortFunc;
+	FLifecycleFn ExitFunc;
 };
 
 class FConditional : public FBehaviorNode
@@ -124,7 +163,7 @@ public:
 protected:
 	EBTResult OnBehave(FBTContext& Context) override
 	{
-		return Func(Context) ? EBTResult::Success : EBTResult::Fail;
+		return Func && Func(Context) ? EBTResult::Success : EBTResult::Fail;
 	}
 private:
 	std::function<bool(FBTContext&)> Func;
@@ -147,49 +186,152 @@ public:
 		return Out;
 	}
 protected:
+	void OnAbort(FBTContext& Context) override
+	{
+		for (const std::unique_ptr<FBehaviorNode>& Child : Children)
+		{
+			Child->Abort(Context);
+		}
+	}
+
 	TArray<std::unique_ptr<FBehaviorNode>> Children;
 };
 
+// Reactive composites reevaluate children from the first child each tick.  Only
+// the child that was Running on the previous tick needs an explicit abort when
+// a higher-priority child takes over.
+class FReactiveCompositeNode : public FCompositeNode
+{
+protected:
+	using FCompositeNode::FCompositeNode;
+
+	void TransitionActiveChild(FBTContext& Context, int NewActiveChild)
+	{
+		if (ActiveChildIndex >= 0 && ActiveChildIndex != NewActiveChild)
+		{
+			Children[ActiveChildIndex]->Abort(Context);
+		}
+		ActiveChildIndex = NewActiveChild;
+	}
+
+	void OnAbort(FBTContext& Context) override
+	{
+		FCompositeNode::OnAbort(Context);
+		ActiveChildIndex = -1;
+	}
+
+private:
+	int ActiveChildIndex = -1;
+};
+
 // NOTE: Sequence는 진행 중이던 자식을 기억하지 않음 (=> Reactive node)
-class FSequence : public FCompositeNode
+class FSequence : public FReactiveCompositeNode
 {
 public:
 	explicit FSequence(TArray<std::unique_ptr<FBehaviorNode>> InChildren)
-		: FCompositeNode(std::move(InChildren)) { DebugLabel = FName("Sequence"); }
+		: FReactiveCompositeNode(std::move(InChildren)) { DebugLabel = FName("Sequence"); }
 
 	const char* GetNodeTypeName() const override { return "Sequence"; }
 protected:
 	EBTResult OnBehave(FBTContext& Context) override
 	{
-		for (const std::unique_ptr<FBehaviorNode>& Child : Children)
+		int NewActiveChild = -1;
+		for (int Index = 0; Index < static_cast<int>(Children.size()); ++Index)
 		{
-			EBTResult ChildResult = Child->Execute(Context);
+			EBTResult ChildResult = Children[Index]->Execute(Context);
 			if (ChildResult != EBTResult::Success)
+			{
+				if (ChildResult == EBTResult::Running)
+				{
+					NewActiveChild = Index;
+				}
+				TransitionActiveChild(Context, NewActiveChild);
 				return ChildResult;
+			}
 		}
+		TransitionActiveChild(Context, -1);
 		return EBTResult::Success;
 	}
+
+};
+
+// 성공한 child의 위치를 보존하는 stateful sequence. Reactive selector가 이 subtree를
+// 선점하면 현재 Running child만 Abort되고, 다음 진입은 첫 child부터 시작한다.
+class FStatefulSequence : public FCompositeNode
+{
+public:
+	explicit FStatefulSequence(TArray<std::unique_ptr<FBehaviorNode>> InChildren)
+		: FCompositeNode(std::move(InChildren)) { DebugLabel = FName("StatefulSequence"); }
+
+	const char* GetNodeTypeName() const override { return "StatefulSequence"; }
+
+protected:
+	EBTResult OnBehave(FBTContext& Context) override
+	{
+		while (CurrentChildIndex < static_cast<int>(Children.size()))
+		{
+			EBTResult ChildResult = Children[CurrentChildIndex]->Execute(Context);
+			if (ChildResult == EBTResult::Running)
+			{
+				return EBTResult::Running;
+			}
+			if (ChildResult == EBTResult::Fail)
+			{
+				CurrentChildIndex = 0;
+				return EBTResult::Fail;
+			}
+			++CurrentChildIndex;
+		}
+
+		CurrentChildIndex = 0;
+		return EBTResult::Success;
+	}
+
+	void OnAbort(FBTContext& Context) override
+	{
+		FCompositeNode::OnAbort(Context);
+		CurrentChildIndex = 0;
+	}
+
+	void OnExit(FBTContext& Context) override
+	{
+		(void)Context;
+		CurrentChildIndex = 0;
+	}
+
+private:
+	int CurrentChildIndex = 0;
 };
 
 // NOTE: Selector도 진행 중이던 자식을 기억하지 않음 (=> Reactive node)
-class FSelector : public FCompositeNode
+class FSelector : public FReactiveCompositeNode
 {
 public:
 	explicit FSelector(TArray<std::unique_ptr<FBehaviorNode>> InChildren)
-		: FCompositeNode(std::move(InChildren)) { DebugLabel = FName("Selector"); }
+		: FReactiveCompositeNode(std::move(InChildren)) { DebugLabel = FName("Selector"); }
 
 	const char* GetNodeTypeName() const override { return "Selector"; }
 protected:
 	EBTResult OnBehave(FBTContext& Context) override
 	{
-		for (const std::unique_ptr<FBehaviorNode>& Child : Children)
+		int NewActiveChild = -1;
+		for (int Index = 0; Index < static_cast<int>(Children.size()); ++Index)
 		{
-			EBTResult ChildResult = Child->Execute(Context);
+			EBTResult ChildResult = Children[Index]->Execute(Context);
 			if (ChildResult != EBTResult::Fail)
+			{
+				if (ChildResult == EBTResult::Running)
+				{
+					NewActiveChild = Index;
+				}
+				TransitionActiveChild(Context, NewActiveChild);
 				return ChildResult;
+			}
 		}
+		TransitionActiveChild(Context, -1);
 		return EBTResult::Fail;
 	}
+
 };
 
 // ===== Decorator Nodes =====
@@ -203,6 +345,11 @@ public:
 		return { Child.get() };
 	}
 protected:
+	void OnAbort(FBTContext& Context) override
+	{
+		Child->Abort(Context);
+	}
+
 	std::unique_ptr<FBehaviorNode> Child;
 };
 

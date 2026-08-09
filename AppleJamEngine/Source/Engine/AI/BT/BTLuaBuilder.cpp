@@ -26,6 +26,7 @@ function BT.task(name_or_fn, label)
 end
 function BT.condition(name) return { kind = 'condition', name = name } end
 function BT.sequence(t)     t.kind = 'sequence'; return t end
+function BT.stateful_sequence(t) t.kind = 'stateful_sequence'; return t end
 function BT.selector(t)     t.kind = 'selector'; return t end
 function BT.force_success(child, label) return { kind = 'force_success', child = child, label = label } end
 function BT.invert(child, label)        return { kind = 'invert', child = child, label = label } end
@@ -135,11 +136,12 @@ function BT.invert(child, label)        return { kind = 'invert', child = child,
 			// 이름 참조 — C++ 레지스트리의 안정화된 behavior.
 			const std::string Name = Desc.get_or("name", std::string());
 			const FName NameKey(Name.c_str());
-			if (const FBTBehaviorRegistry::FTaskFn* Fn = FBTBehaviorRegistry::FindTask(NameKey))
+			if (const FBTBehaviorRegistry::FTaskDefinition* Definition = FBTBehaviorRegistry::FindTask(NameKey);
+				Definition && Definition->IsValid())
 			{
-				return std::make_unique<FBehaviorTask>(NameKey, *Fn);
+				return std::make_unique<FBehaviorTask>(NameKey, Definition->Tick, Definition->OnEnter, Definition->OnAbort, Definition->OnExit);
 			}
-			UE_LOG("[BT] 등록되지 않은 task: '%s' — Fail 노드로 대체", Name.c_str());
+			UE_LOG("[BT] 등록되지 않았거나 Tick이 없는 task: '%s' — Fail 노드로 대체", Name.c_str());
 			return std::make_unique<FBehaviorTask>(NameKey, [](FBTContext&) { return EBTResult::Fail; });
 		}
 
@@ -157,7 +159,7 @@ function BT.invert(child, label)        return { kind = 'invert', child = child,
 		}
 
 		// --- Composite ---
-		if (Kind == "sequence" || Kind == "selector")
+		if (Kind == "sequence" || Kind == "stateful_sequence" || Kind == "selector")
 		{
 			TArray<std::unique_ptr<FBehaviorNode>> Children;
 			for (std::size_t Index = 1; ; ++Index)   // 배열 파트(1-based)만 자식으로, label 등 해시 키는 제외
@@ -180,6 +182,10 @@ function BT.invert(child, label)        return { kind = 'invert', child = child,
 			if (Kind == "sequence")
 			{
 				Node = std::make_unique<FSequence>(std::move(Children));
+			}
+			else if (Kind == "stateful_sequence")
+			{
+				Node = std::make_unique<FStatefulSequence>(std::move(Children));
 			}
 			else
 			{

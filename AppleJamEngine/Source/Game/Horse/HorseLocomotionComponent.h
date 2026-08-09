@@ -38,17 +38,15 @@ struct FSteerContext
 	int     BestIdx = -1;                      // 최고점 slot (0보다 작으면 미결정)
 };
 
-// 조향 arbitration 입력 — GatherSteeringInfluences 가 blackboard 에서 수집한 소스.
+// 조향 arbitration 입력 — guidance와 로컬 road 선호도를 blackboard에서 수집한다.
 struct FHorseSteeringInfluence
 {
-	FVector UserDir = FVector(0.0f, 0.0f, 0.0f);	// 유저 입력 방향 (수평, 정규화)
-	float   UserMag = 0.0f;							// 유저 입력 강도 [0,1]
+	FVector GuidanceDir = FVector::ZeroVector;
+	float   GuidanceWeight = 0.0f;
+	bool    bGuidance = false;
 	FVector RoadDir = FVector(0.0f, 0.0f, 0.0f);	// 도로 방향(수평, 정규화)
 	bool    bRoad = false;                      // 유효한 도로 방향 존재 여부
-	float   RoadWeightEff = 0.0f;               // 거리 감쇠 및 유저 입력 시의 yield 반영한 도로추종 가중치
-	FVector NavigationDir = FVector::ZeroVector;
-	bool    bNavigation = false;
-	bool    bNavigationAligning = false;
+	float   RoadWeightEff = 0.0f;               // 거리 감쇠를 적용한 도로추종 가중치
 };
 
 UCLASS()
@@ -95,18 +93,20 @@ public:
 
 protected:
 	float GetGaitScaledSpeed() const; // 목표속도 / Movement MaxSpeed 를 [0,1] 로
-	void UpdateStrafeMode();          // 평행이동 진입(정지 상태 한정)/이탈 전이 판정
-	void UpdateGait(float DeltaTime); // BT에서 요청한 DesiredGait를 쿨타임 등 고려 후 실제 Gait에 반영
+	void UpdateStrafeMode(bool bEnabled); // policy가 허용할 때만 평행이동 진입/유지
+	void UpdateGait(FBlackboard& Blackboard, float DeltaTime); // BT에서 요청한 DesiredGait를 쿨타임 등 고려 후 실제 Gait에 반영
 	void  ClampGaitToEnvelope();
 	bool GetPlanarForward(const AActor& Owner, FVector& OutForward) const;   // 수평 forward, degenerate 면 false
-	FHorseSteeringInfluence GatherSteeringInfluences(FBlackboard& BB) const; // UserInput/Road 등 입력 수집
+	FHorseSteeringInfluence GatherSteeringInfluences(FBlackboard& BB) const;
+	bool IsPolicyEnabled(FBlackboard& BB, FName Key, bool bDefault) const;
 	void UpdateJumpGate(FBlackboard& BB, float DeltaTime);
 	void UpdateContextSteering(FBlackboard& BB, const AActor& Owner, const FVector& Forward, const FHorseSteeringInfluence& Influence, float DeltaTime);
+	void RelaxSteeringToNeutral(const FVector& Forward, float DeltaTime);
 	// UpdateContextSteering 하위 루틴
 	void UpdateUTurnState(const FVector& Forward, const FHorseSteeringInfluence& Influence);
-	void BuildDangerField(FBlackboard& BB, const FVector& Forward, float DeltaTime, FSteerContext& Field);   // 슬롯 별 danger/hard-block 산출
-	void ScoreSlots(const FVector& Forward, const FHorseSteeringInfluence& Influence, FSteerContext& Field) const;   // 슬롯 별 최종 스코어 계산
-	void ApplySteering(const FVector& Forward, const FSteerContext& Field, float DeltaTime);				// 보간까지 거친 후 Movement에 전달
+	void BuildDangerField(FBlackboard& BB, const FVector& Forward, float DeltaTime, bool bContextAvoidance, FSteerContext& Field);
+	void ScoreSlots(const AActor& Owner, const FVector& Forward, const FHorseSteeringInfluence& Influence, FSteerContext& Field) const;   // 슬롯 별 최종 스코어 계산
+	void ApplySteering(const AActor& Owner, const FVector& Forward, const FSteerContext& Field, float DeltaTime);				// 보간까지 거친 후 Movement에 전달
 
 	TWeakObjectPtr<UHorseMovementComponent> Movement = nullptr;
 	TWeakObjectPtr<UBlackboardComponent> BlackboardComp = nullptr;
@@ -127,27 +127,16 @@ protected:
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Forward Lane Guard", Min=0.0f, Max=1.0f, Speed=0.02f)
 	float ForwardLaneGuard = 1.0f;   // 정면 slot 에서 걷어낼 spread 오염 비율(1=완전 제거, 0=off). 통로 탈출 시 과민 조향(lurch) 억제.
 	
-	// ── context-steering 튜닝 : 유저 입력 관련 ──────────────────────────────────────────────────────────
-	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="User Weight", Min=0.0f, Max=10.0f, Speed=0.05f)
-	float UserWeight = 2.0f;      // 유저 입력 방향 interest 가중(최상위 — 우회 좌/우 tie-break).
-	// 낭떠러지 slot 개방 조건 — 유저가 그 방향으로 밀 때만 열어(→ 가장자리 정지), 그 외엔 hard-block 처럼 회피.
-	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Cliff Override Input", Min=0.0f, Max=1.0f, Speed=0.02f)
-	float CliffOverrideMinInput = 0.3f;   // 이 이상의 유저 입력 강도에서만 낭떠러지 slot 개방.
-
 	// ── context-steering 튜닝 : 도로 관련 ───────────────────────────────────────────────────────────────
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Road Weight", Min=0.0f, Max=10.0f, Speed=0.05f)
 	float RoadWeight = 1.0f;      // 도로 방향 interest 가중.
-	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Road User Yield", Min=0.0f, Max=1.0f, Speed=0.02f)
-	float RoadUserYield = 1.0f;   // 유저 입력 강도에 비례해 도로 추종을 약화하는 비율(1=최대 입력에서 도로 방향 무시)
 	// 도로에서 멀어질수록 추종 약화, 블랙보드에 RoadDist 없으면 RoadDist == INF으로 간주.
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Road Near Distance", Min=0.0f, Max=50.0f, Speed=0.05f)
 	float RoadNearDistance = 3.0f;
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Road Far Distance", Min=0.0f, Max=50.0f, Speed=0.05f)
 	float RoadFarDistance = 14.0f;
 
-	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Navigation Weight", Min=0.0f, Max=20.0f, Speed=0.05f)
-	float NavigationWeight = 4.0f;
-	// 호출 네비게이션 목표가 전방 sensor fan 밖으로 크게 벗어나면 유턴 상태에 진입
+	// guidance 목표가 전방 sensor fan 밖으로 크게 벗어나면 유턴 상태에 진입
 	// 진입/해제 각도를 분리해 경계에서 유턴↔정지로 상태가 떨리는 것 방지
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="U-Turn Enter Angle", Min=0.0f, Max=180.0f, Speed=1.0f)
 	float UTurnEnterAngle = 65.0f;
@@ -173,6 +162,9 @@ protected:
 	bool  bSmoothSteering = true;
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Steer Rate Limit", Min=0.0f, Max=720.0f, Speed=1.0f)
 	float SteerRateLimit = 90.0f;     // 조향각 변화 상한치(deg/s) — 자연스러운 조향 변화 연출용
+	// 정지 상태에서 guidance가 사라졌을 때 마지막 조향값이 다음 입력에 섞이지 않도록 0도로 감쇠한다.
+	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Neutral Steering Return Speed", Min=0.0f, Max=30.0f, Speed=0.1f)
+	float NeutralSteeringReturnSpeed = 8.0f;
 
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Draw Steering Debug")
 	bool  bDrawSteeringDebug = true;
@@ -218,7 +210,7 @@ protected:
 	FVector    SteerDir      = FVector(0.0f, 0.0f, 0.0f);   // 직전 프레임에 선택한 회피 heading(커밋 히스테리시스용). 0=미초기화.
 	float      PrevDanger[HORSE_MAX_FAN_SLOTS] = {};   // slot 별 직전 프레임 danger(slow-release 감쇠용).
 	float      SteerAngle    = 0.0f;   // 현재 조향각(forward 기준 deg). 목표각으로 slew 되는 상태값.
-	bool       bUTurnActive = false;   // 호출 네비게이션 전용 Walk 유턴 상태.
+	bool       bUTurnActive = false;   // guidance 기반 generic U-turn 상태.
 	int        UTurnExtraSlotIndex = -1; // 유턴 중 고정할 좌/우 ExtraSlot.
 	bool       bJumpPerformed = false;   // 이번 점프 요청에 실제로 점프했는지 여부 (무한 점프 방지)
 	float      JumpCandidateTime = 0.0f; // 현재 점프 후보가 연속으로 유지된 시간.
