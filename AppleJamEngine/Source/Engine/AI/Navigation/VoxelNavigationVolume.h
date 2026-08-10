@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "AI/Navigation/VoxelNavigationGrid.h"
 #include "GameFramework/AActor.h"
@@ -75,4 +75,6 @@ private:
 	int32 DebugRejectedClearance = 0;
 	UPROPERTY(Edit, ReadOnly, Transient, Category="Navigation|Stats", DisplayName="Build Time Ms")
 	float DebugBuildTimeMs = 0.0f;
+	UPROPERTY(Edit, ReadOnly, Transient, Category = "Navigation|Stats", DisplayName = "Peak Memory MB")
+	float DebugPeakMemoryMB = 0.0f;
 };

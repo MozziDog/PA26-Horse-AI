@@ -95,10 +95,11 @@ bool AVoxelNavigationVolume::RebuildNavigation()
 	DebugRejectedSlope = Stats.NumRejectedSlope;
 	DebugRejectedClearance = Stats.NumRejectedClearance;
 	DebugBuildTimeMs = Stats.BuildTimeMs;
+	DebugPeakMemoryMB = static_cast<float>(Stats.PeakMemoryBytes) / (1024.0f * 1024.0f);
 
-	UE_LOG("[VoxelNavigation] Build Volume=%s Success=%d Cells=%d Nodes=%d Edges=%d SlopeRejected=%d ClearanceRejected=%d TimeMs=%.3f",
+	UE_LOG("[VoxelNavigation] Build Volume=%s Success=%d Cells=%d Nodes=%d Edges=%d SlopeRejected=%d ClearanceRejected=%d TimeMs=%.3f PeakMemoryBytes=%llu",
 		GetName().c_str(), bSuccess ? 1 : 0, DebugSampledCells, DebugWalkableNodes, DebugDirectedEdges,
-		DebugRejectedSlope, DebugRejectedClearance, DebugBuildTimeMs);
+		DebugRejectedSlope, DebugRejectedClearance, DebugBuildTimeMs, static_cast<unsigned long long>(Stats.PeakMemoryBytes));
 	return bSuccess;
 }
 

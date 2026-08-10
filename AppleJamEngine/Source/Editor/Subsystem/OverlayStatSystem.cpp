@@ -199,6 +199,7 @@ void FOverlayStatSystem::BuildMemoryLines(TArray<FString>& OutLines) const
 		{ "VertexBuffer Memory",   MemoryStats::GetVertexBufferMemory() },
 		{ "IndexBuffer Memory",    MemoryStats::GetIndexBufferMemory() },
 		{ "StaticMesh CPU Memory", MemoryStats::GetStaticMeshCPUMemory() },
+		{ "Voxel Navigation Memory",  MemoryStats::GetVoxelNavigationMemory() },
 		{ "Texture Memory",        MemoryStats::GetTextureMemory() },
 	};
 

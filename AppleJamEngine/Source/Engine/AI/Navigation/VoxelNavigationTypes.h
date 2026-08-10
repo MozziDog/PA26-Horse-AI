@@ -30,6 +30,7 @@ struct FVoxelNavigationBuildStats
 	int32 NumWalkableNodes = 0;
 	int32 NumDirectedEdges = 0;
 	float BuildTimeMs = 0.0f;
+	uint64 PeakMemoryBytes = 0;
 };
 
 struct FVoxelNavigationNode

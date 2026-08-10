@@ -10,6 +10,11 @@ class UWorld;
 class FVoxelNavigationGrid
 {
 public:
+	FVoxelNavigationGrid() = default;
+	~FVoxelNavigationGrid();
+	FVoxelNavigationGrid(const FVoxelNavigationGrid&) = delete;
+	FVoxelNavigationGrid& operator=(const FVoxelNavigationGrid&) = delete;
+
 	bool Build(
 		UWorld* World,
 		const FVector& BoundsCenter,
@@ -39,6 +44,10 @@ private:
 	bool CanTraverse(UWorld* World, int32 FromNode, int32 ToNode, const AActor* QueryOwner) const;
 	bool HasCardinalBridge(int32 FromNode, int32 ToNode, int32 BridgeX, int32 BridgeY) const;
 	void AddDirectedEdge(int32 FromNode, int32 ToNode);
+	uint64 CalculateTrackedMemoryBytes() const;
+	void RefreshTrackedMemory();
+	void AddTrackedMemory(uint64 Size);
+	void UpdateBuildPeakMemory(uint64 TemporaryMemoryBytes = 0);
 
 	FVector BoundsCenter = FVector::ZeroVector;
 	FVector BoundsExtent = FVector::ZeroVector;
@@ -51,4 +60,5 @@ private:
 	bool bBuilt = false;
 	TArray<FVoxelNavigationNode> Nodes;
 	TArray<TArray<int32>> ColumnNodes;
+	uint64 TrackedMemoryBytes = 0;
 };

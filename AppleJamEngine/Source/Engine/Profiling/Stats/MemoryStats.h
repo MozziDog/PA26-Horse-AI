@@ -43,6 +43,10 @@ public:
 	static void AddSkeletalMeshCPUMemory(uint64 Size) { SkeletalMeshCPUMemory += Size; }
 	static void SubSkeletalMeshCPUMemory(uint64 Size) { SkeletalMeshCPUMemory -= Size; }
 
+	// Voxel Navigation CPU
+	static void AddVoxelNavigationMemory(uint64 Size) { VoxelNavigationMemory += Size; }
+	static void SubVoxelNavigationMemory(uint64 Size) { VoxelNavigationMemory -= Size; }
+
 	static uint64 GetTotalAllocationBytes() { return TotalAllocationBytes; }
 	static uint32 GetTotalAllocationCount() { return TotalAllocationCount; }
 	static uint64 GetPixelShaderMemory() { return PixelShaderMemory; }
@@ -52,6 +56,7 @@ public:
 	static uint64 GetIndexBufferMemory() { return IndexBufferMemory; }
 	static uint64 GetStaticMeshCPUMemory() { return StaticMeshCPUMemory; }
 	static uint64 GetSkeletalMeshCPUMemory() { return SkeletalMeshCPUMemory; }
+	static uint64 GetVoxelNavigationMemory() { return VoxelNavigationMemory; }
 
 	static uint64 CalculateTextureMemory(ID3D11Resource* Resource);
 
@@ -65,4 +70,5 @@ private:
 	static uint64 IndexBufferMemory;
 	static uint64 StaticMeshCPUMemory;
 	static uint64 SkeletalMeshCPUMemory;
+	static uint64 VoxelNavigationMemory;
 };

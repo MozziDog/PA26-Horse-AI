@@ -5,6 +5,7 @@
 #include "Core/Types/CollisionTypes.h"
 #include "GameFramework/World.h"
 #include "Math/Quat.h"
+#include "Profiling/Stats/MemoryStats.h"
 #include "Profiling/Stats/Stats.h"
 
 #include <chrono>
@@ -33,6 +34,11 @@ namespace
 	}
 }
 
+FVoxelNavigationGrid::~FVoxelNavigationGrid()
+{
+	MemoryStats::SubVoxelNavigationMemory(TrackedMemoryBytes);
+}
+
 bool FVoxelNavigationGrid::Build(
 	UWorld* World,
 	const FVector& InBoundsCenter,
@@ -48,6 +54,8 @@ bool FVoxelNavigationGrid::Build(
 	ColumnNodes.clear();
 	BuildStats = FVoxelNavigationBuildStats();
 	BuildSettings = Settings;
+	RefreshTrackedMemory();
+	UpdateBuildPeakMemory();
 
 	if (!World || Settings.CellSize <= NavEpsilon || Settings.AgentRadius <= NavEpsilon ||
 		Settings.AgentHeight <= Settings.AgentRadius * 2.0f ||
@@ -63,6 +71,7 @@ bool FVoxelNavigationGrid::Build(
 	SizeY = (std::max)(1, static_cast<int32>(std::ceil(BoundsExtent.Y * 2.0f / Settings.CellSize)));
 	SizeZ = (std::max)(1, static_cast<int32>(std::ceil(BoundsExtent.Z * 2.0f / Settings.CellSize)));
 	ColumnNodes.resize(static_cast<size_t>(SizeX * SizeY));
+	RefreshTrackedMemory();
 
 	const uint32 StaticMask = ObjectTypeBit(ECollisionChannel::WorldStatic);
 	const float SlopeCos = std::cos(Settings.MaxWalkableSlopeDegrees * 3.14159265358979323846f / 180.0f);
@@ -135,9 +144,16 @@ bool FVoxelNavigationGrid::Build(
 					Node.Position = StandingPoint;
 					Node.GroundNormal = GroundNormal;
 					const int32 NodeIndex = static_cast<int32>(Nodes.size());
+					const size_t PreviousNodeCapacity = Nodes.capacity();
+					TArray<int32>& Column = ColumnNodes[static_cast<size_t>(FlattenColumn(X, Y))];
+					const size_t PreviousColumnCapacity = Column.capacity();
 					Nodes.push_back(Node);
-					ColumnNodes[static_cast<size_t>(FlattenColumn(X, Y))].push_back(NodeIndex);
+					Column.push_back(NodeIndex);
+					AddTrackedMemory(
+						static_cast<uint64>(Nodes.capacity() - PreviousNodeCapacity) * sizeof(FVoxelNavigationNode) +
+						static_cast<uint64>(Column.capacity() - PreviousColumnCapacity) * sizeof(int32));
 					AcceptedGroundHeights.push_back(StandingPoint.Z);
+					UpdateBuildPeakMemory(static_cast<uint64>(AcceptedGroundHeights.capacity()) * sizeof(float));
 				}
 			}
 		}
@@ -388,7 +404,58 @@ void FVoxelNavigationGrid::AddDirectedEdge(int32 FromNode, int32 ToNode)
 	TArray<int32>& Neighbors = Nodes[static_cast<size_t>(FromNode)].Neighbors;
 	if (std::find(Neighbors.begin(), Neighbors.end(), ToNode) == Neighbors.end())
 	{
+		const size_t PreviousNeighborCapacity = Neighbors.capacity();
 		Neighbors.push_back(ToNode);
+		AddTrackedMemory(static_cast<uint64>(Neighbors.capacity() - PreviousNeighborCapacity) * sizeof(int32));
 		++BuildStats.NumDirectedEdges;
 	}
+}
+
+uint64 FVoxelNavigationGrid::CalculateTrackedMemoryBytes() const
+{
+	uint64 TotalBytes =
+		static_cast<uint64>(Nodes.capacity()) * sizeof(FVoxelNavigationNode) +
+		static_cast<uint64>(ColumnNodes.capacity()) * sizeof(TArray<int32>);
+
+	for (const FVoxelNavigationNode& Node : Nodes)
+	{
+		TotalBytes += static_cast<uint64>(Node.Neighbors.capacity()) * sizeof(int32);
+	}
+	for (const TArray<int32>& Column : ColumnNodes)
+	{
+		TotalBytes += static_cast<uint64>(Column.capacity()) * sizeof(int32);
+	}
+	return TotalBytes;
+}
+
+void FVoxelNavigationGrid::RefreshTrackedMemory()
+{
+	const uint64 NewTrackedMemoryBytes = CalculateTrackedMemoryBytes();
+	if (NewTrackedMemoryBytes > TrackedMemoryBytes)
+	{
+		MemoryStats::AddVoxelNavigationMemory(NewTrackedMemoryBytes - TrackedMemoryBytes);
+	}
+	else if (NewTrackedMemoryBytes < TrackedMemoryBytes)
+	{
+		MemoryStats::SubVoxelNavigationMemory(TrackedMemoryBytes - NewTrackedMemoryBytes);
+	}
+	TrackedMemoryBytes = NewTrackedMemoryBytes;
+	UpdateBuildPeakMemory();
+}
+
+void FVoxelNavigationGrid::AddTrackedMemory(uint64 Size)
+{
+	if (Size == 0)
+	{
+		return;
+	}
+
+	TrackedMemoryBytes += Size;
+	MemoryStats::AddVoxelNavigationMemory(Size);
+	UpdateBuildPeakMemory();
+}
+
+void FVoxelNavigationGrid::UpdateBuildPeakMemory(uint64 TemporaryMemoryBytes)
+{
+	BuildStats.PeakMemoryBytes = (std::max)(BuildStats.PeakMemoryBytes, TrackedMemoryBytes + TemporaryMemoryBytes);
 }
