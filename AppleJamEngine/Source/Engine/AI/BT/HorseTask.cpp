@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 
 #include "AI/BT/BTBehaviorRegistry.h"
 #include "AI/Blackboard.h"
@@ -11,6 +11,8 @@
 #include "GameFramework/AActor.h"
 #include "Runtime/EngineInitHooks.h"
 
+// HorseBT.lua에서 참조하는 BT task들
+// FEngineInitHooks 로 엔진 부팅 시 1회 자동 등록 → BeginPlay 시점에 이미 등록되어있음 보장
 namespace
 {
 	void SetDesiredGait(FBTContext& Context, EHorseGait Gait)
@@ -21,21 +23,21 @@ namespace
 		}
 	}
 
-	void WriteControlProfile(FBTContext& Context, bool bRoadAssist, bool bContextAvoidance, bool bAutoJump, bool bStrafe)
+	void PublishControlPolicy(FBTContext& Context, bool bRoadAssist, bool bIgnoreContextAvoidance, bool bAutoJump, bool bStrafe)
 	{
 		if (!Context.Blackboard)
 		{
 			return;
 		}
 		Context.Blackboard->SetBool(HorseBBKeys::ControlEnableRoadAssist, bRoadAssist);
-		Context.Blackboard->SetBool(HorseBBKeys::ControlEnableContextAvoidance, bContextAvoidance);
+		Context.Blackboard->SetBool(HorseBBKeys::ControlIgnoreContextAvoidance, bIgnoreContextAvoidance);
 		Context.Blackboard->SetBool(HorseBBKeys::ControlEnableAutoJump, bAutoJump);
 		Context.Blackboard->SetBool(HorseBBKeys::ControlEnableStrafe, bStrafe);
 	}
 
-	void WriteCallControlProfile(FBTContext& Context)
+	void PublishHorseCallControlPolicy(FBTContext& Context)
 	{
-		WriteControlProfile(Context, false, true, false, false);
+		PublishControlPolicy(Context, false, false, false, false);
 	}
 
 	void SetCallRequested(FBTContext& Context, bool bRequested)
@@ -90,7 +92,7 @@ namespace
 		{
 			Navigation->ClearGuidance();
 		}
-		WriteCallControlProfile(Context);
+		PublishHorseCallControlPolicy(Context);
 	}
 
 	void AbortCall(FBTContext& Context)
@@ -146,7 +148,7 @@ namespace
 				{
 					return EBTResult::Fail;
 				}
-				WriteControlProfile(Context, true, true, true, true);
+				PublishControlPolicy(Context, true, false, true, true);
 				SetDesiredGait(Context, EHorseGait::None);
 				return EBTResult::Running;
 			};
@@ -156,7 +158,7 @@ namespace
 				{
 					Guidance->SetGuidanceActive(false);
 				}
-				WriteCallControlProfile(Context);
+				PublishHorseCallControlPolicy(Context);
 			};
 		RiderControl.OnExit = RiderControl.OnAbort;
 		FBTBehaviorRegistry::RegisterTask(FName("RiderControlGuidance"), std::move(RiderControl));
@@ -164,7 +166,7 @@ namespace
 		FBTBehaviorRegistry::RegisterTask(FName("PlanCallPath"), MakeCallTask(
 			[](FBTContext& Context)
 			{
-				WriteControlProfile(Context, false, true, false, false);
+				PublishControlPolicy(Context, false, false, false, false);
 				SetDesiredGait(Context, EHorseGait::Stop);
 				UHorseCallNavigationComponent* Navigation = GetNavigation(Context);
 				if (!Navigation)
@@ -195,7 +197,7 @@ namespace
 		FBTBehaviorRegistry::RegisterTask(FName("AlignToPathStart"), MakeCallTask(
 			[](FBTContext& Context)
 			{
-				WriteCallControlProfile(Context);
+				PublishHorseCallControlPolicy(Context);
 				SetDesiredGait(Context, EHorseGait::Stop);
 				const EHorseCallNavigationStatus Status = GetCallStatus(Context);
 				if (Status == EHorseCallNavigationStatus::Following)
@@ -220,7 +222,7 @@ namespace
 		FBTBehaviorRegistry::RegisterTask(FName("FollowCallPath"), MakeCallTask(
 			[](FBTContext& Context)
 			{
-				WriteCallControlProfile(Context);
+				PublishHorseCallControlPolicy(Context);
 				UHorseCallNavigationComponent* Navigation = GetNavigation(Context);
 				if (!Navigation)
 				{
@@ -262,7 +264,7 @@ namespace
 		};
 		Idle.Tick = [](FBTContext& Context)
 		{
-			WriteCallControlProfile(Context);
+			PublishHorseCallControlPolicy(Context);
 			SetDesiredGait(Context, EHorseGait::Stop);
 			return EBTResult::Running;
 		};

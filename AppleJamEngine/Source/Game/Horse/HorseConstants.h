@@ -45,13 +45,15 @@ namespace HorseBBKeys
 	inline const FName RoadDir     = FName("Road.Dir");      // FVector(world), 추종할 도로 방향. RoadSensor 산출.
 	inline const FName RoadDist    = FName("Road.Dist");     // float, 도로 센서와 검출된 지점 간의 거리. 멀수록 도로 추종 약화.
 
-	// 활성 guidance producer가 locomotion에 전달하는 단일 방향/가중치 계약.
+	// 활성 Guidance producer가 locomotion에 전달하는 '가고 싶은 방향' + 가중치
 	inline const FName GuidanceDirection = FName("Guidance.Direction"); // FVector(world), 수평 정규화 방향
 	inline const FName GuidanceWeight    = FName("Guidance.Weight");    // float, 0 이하면 guidance 없음
 
-	// 활성 BT task/rider state가 locomotion 기능을 profile 단위로 제어한다.
+	// 상위 계층(BT task / rider state)에서 하위 계층 locomotion 기능을 제어하기 위한 기능 단위 '정책' 플래그
+	// NOTE: 로보틱스 방식의 접근법대로라면 상위 계층에서 하위 계층의 일을 모르는 게 맞지만
+	//       Strafe 모드 등 수동과 자동이 혼합된 프로젝트 특성을 고려해서 하위 계층을 플래그로 컨트롤할 수 있게 제공
 	inline const FName ControlEnableRoadAssist       = FName("Control.EnableRoadAssist");
-	inline const FName ControlEnableContextAvoidance = FName("Control.EnableContextAvoidance");
+	inline const FName ControlIgnoreContextAvoidance = FName("Control.IgnoreContextAvoidance");
 	inline const FName ControlEnableAutoJump         = FName("Control.EnableAutoJump");
 	inline const FName ControlEnableStrafe           = FName("Control.EnableStrafe");
 

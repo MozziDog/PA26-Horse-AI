@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "HorseCharacter.h"
 
 #include "Animation/Graph/AnimGraphManager.h"
@@ -81,7 +81,7 @@ namespace
 		return NormalizeCameraAngle(Current + Delta * Alpha);
 	}
 
-	void WriteControlProfile(UBlackboardComponent* BlackboardComponent, bool bRoadAssist, bool bContextAvoidance, bool bAutoJump, bool bStrafe)
+	void WriteControlProfile(UBlackboardComponent* BlackboardComponent, bool bRoadAssist, bool bIgnoreContextAvoidance, bool bAutoJump, bool bStrafe)
 	{
 		if (!BlackboardComponent)
 		{
@@ -90,7 +90,7 @@ namespace
 
 		FBlackboard& Blackboard = BlackboardComponent->GetBlackboard();
 		Blackboard.SetBool(HorseBBKeys::ControlEnableRoadAssist, bRoadAssist);
-		Blackboard.SetBool(HorseBBKeys::ControlEnableContextAvoidance, bContextAvoidance);
+		Blackboard.SetBool(HorseBBKeys::ControlIgnoreContextAvoidance, bIgnoreContextAvoidance);
 		Blackboard.SetBool(HorseBBKeys::ControlEnableAutoJump, bAutoJump);
 		Blackboard.SetBool(HorseBBKeys::ControlEnableStrafe, bStrafe);
 	}
@@ -99,7 +99,8 @@ namespace
 void AHorseCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 {
 	// Root: Empty SceneComponent
-	// Root motion이 골반을 pivot으로 삼 것 고려, 콜라이더와 메시에 offset 주기 위해 empty root 사용
+	// 캡슐 컴포넌트가 local Z 방향으로 고정인 점, 스켈레톤 root가 골반 위치인 점 등을 고려, 
+	// 어느 쪽도 Root로 삼기 애매해서 별도의 empty root 사용
 	RootSceneComponent = AddComponent<USceneComponent>();
 	SetRootComponent(RootSceneComponent);
 
@@ -118,10 +119,10 @@ void AHorseCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 	CollisionComponent->SetKinematic(true);
 	CollisionComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 
-	// 하체 충돌 box — 몸통 캡슐 아래쪽 판정용
+	// Leg box — 몸통 캡슐 아래쪽 판정용
 	// NOTE: 겹친 상태의 sweep으로 MTD(최소 탈출 벡터)를 계산하여 측면 충돌만 처리하는데, 
 	// 충돌 판정이 장애물 윗면을 품고 있으면 MTD가 위방향 → 측면 충돌만 필터링하는 로직에 의해 투과됨
-	// 따라서 충돌판정을 가능한 얇게 유지하여 상하방향 충돌로 오인 완화
+	// 따라서 충돌판정을 Z방향으로 가능한 얇게 유지하여 상하방향 충돌로 오인 완화
 	// (완전한 방지는 안됨. 구현 상의 사각지대로 유지)
 	StepBlockComponent = AddComponent<UBoxComponent>();
 	StepBlockComponent->AttachToComponent(RootSceneComponent);
@@ -158,12 +159,20 @@ void AHorseCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 	}
 
 	// ── AI 관련 ──
-	// 플레이어/BT 입력을 받아 매 tick MovementComponent 로 라우팅.
-	LocomotionComponent = AddComponent<UHorseLocomotionComponent>(); 
-	BlackboardComponent = AddComponent<UBlackboardComponent>();
-	CallNavigationComponent = AddComponent<UHorseCallNavigationComponent>();
+	// Decision Layer: 어떠한 동작을 취할지 결정
+	BTAgentComponent = AddComponent<UBTAgentComponent>();
+	if (BTAgentComponent)
+	{
+		BTAgentComponent->SetBehaviorTreeScript("BT/HorseBT.lua");
+	}
+
+	// Guidance Layer: 어떠한 방향으로 나아갈지 결정
 	UserGuidanceComponent = AddComponent<UHorseUserGuidanceComponent>();
-	// 골반쪽에 pivot이 형성되는 점을 고려, 센서류에 +0.5씩 추가 x offset 부여
+	CallNavigationComponent = AddComponent<UHorseCallNavigationComponent>();
+
+	// Reactive Layer: 상위 계층의 요청에 따라 실질적인 움직임 수행
+	BlackboardComponent = AddComponent<UBlackboardComponent>();
+	LocomotionComponent = AddComponent<UHorseLocomotionComponent>(); 
 	ObstacleFanSensorComponent = AddComponent<UObstacleFanSensorComponent>();
 	if(ObstacleFanSensorComponent)
 	{
@@ -188,12 +197,8 @@ void AHorseCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 		RoadSensorComponent->AttachToComponent(RootSceneComponent);
 		RoadSensorComponent->SetRelativeLocation(FVector(10.0f, 0.0f, 0.0f));
 	}
-	BTAgentComponent = AddComponent<UBTAgentComponent>();
-	if (BTAgentComponent)
-	{
-		BTAgentComponent->SetBehaviorTreeScript("BT/HorseBT.lua");
-	}
 
+	// ── 카메라 관련 ──
 	SpringArmComponent = AddComponent<USpringArmComponent>();
 	SpringArmComponent->AttachToComponent(RootSceneComponent);   // root 기준으로 카메라 추종
 	SpringArmComponent->TargetArmLength = 7.0f;
@@ -363,7 +368,7 @@ void AHorseCharacter::ApplyRiderControlState()
 		}
 	}
 	WriteControlProfile(BlackboardComponent.Get(),
-		bRiderMounted, true, bRiderMounted, bRiderMounted);
+		bRiderMounted, false, bRiderMounted, bRiderMounted);
 }
 
 void AHorseCharacter::Tick(float DeltaTime)

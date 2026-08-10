@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "GameFramework/Pawn/Pawn.h"
 #include "Object/Ptr/WeakObjectPtr.h"
 
@@ -140,7 +140,7 @@ protected:
 	// 횡방향 입력. 현재 2군데서 사용
 	// 1. 카메라 자동복귀의 '입력 활성' 판정 (조향은 Actor forward 기준이므로 카메라가 뒤에 있어야 조작 용이)
 	// 2. 평행이동 모드에서 횡방향 입력으로 사용
-	// 통상 주행 조향은 HorseUserGuidanceComponent가 Guidance.*로 변환한다.
+	// 통상 주행 조향은 HorseUserGuidanceComponent가 Guidance.*로 BT에 전달한다.
 	float LastSteeringInput = 0.0f;
 
 	bool bRiderMounted = false;

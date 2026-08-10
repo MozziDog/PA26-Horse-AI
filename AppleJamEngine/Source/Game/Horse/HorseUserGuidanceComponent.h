@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "Component/ActorComponent.h"
 #include "Object/Ptr/WeakObjectPtr.h"
@@ -7,7 +7,7 @@
 
 class UBlackboardComponent;
 
-// 탑승 조향 입력을 Guidance.* Blackboard 계약으로 변환하는 단일 producer.
+// 탑승(Mount)상태에서 유저의 조향 입력을 Blackboard에 전달하는 Guidance producer
 UCLASS()
 class UHorseUserGuidanceComponent : public UActorComponent
 {

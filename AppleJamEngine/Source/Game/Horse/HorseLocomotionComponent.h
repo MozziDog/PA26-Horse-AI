@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "Component/ActorComponent.h"
 
@@ -38,14 +38,15 @@ struct FSteerContext
 	int     BestIdx = -1;                      // 최고점 slot (0보다 작으면 미결정)
 };
 
-// 조향 arbitration 입력 — guidance와 로컬 road 선호도를 blackboard에서 수집한다.
+// 조향 입력 플러스 요소 — GatherSteeringInfluences에서 수집한 소스
 struct FHorseSteeringInfluence
 {
+	// Guidance: 상위 계층에서 생산한 '가고자하는 방향'
 	FVector GuidanceDir = FVector::ZeroVector;
 	float   GuidanceWeight = 0.0f;
 	bool    bGuidance = false;
 	FVector RoadDir = FVector(0.0f, 0.0f, 0.0f);	// 도로 방향(수평, 정규화)
-	bool    bRoad = false;                      // 유효한 도로 방향 존재 여부
+	bool    bRoad = false;                      // 도로 추종 적용 여부 (유효한 도로 방향 존재 + 도로 추종 활성화됨)
 	float   RoadWeightEff = 0.0f;               // 거리 감쇠를 적용한 도로추종 가중치
 };
 
@@ -98,10 +99,10 @@ protected:
 	void  ClampGaitToEnvelope();
 	bool GetPlanarForward(const AActor& Owner, FVector& OutForward) const;   // 수평 forward, degenerate 면 false
 	FHorseSteeringInfluence GatherSteeringInfluences(FBlackboard& BB) const;
-	bool IsPolicyEnabled(FBlackboard& BB, FName Key, bool bDefault) const;
+	bool IsPolicyEnabled(FBlackboard& BB, FName Key) const;
 	void UpdateJumpGate(FBlackboard& BB, float DeltaTime);
 	void UpdateContextSteering(FBlackboard& BB, const AActor& Owner, const FVector& Forward, const FHorseSteeringInfluence& Influence, float DeltaTime);
-	void RelaxSteeringToNeutral(const FVector& Forward, float DeltaTime);
+	void SmoothSteeringToNeutral(const FVector& Forward, float DeltaTime); // 정지 상태에서 입력 없더라도 조향각 smoothing은 계속 진행
 	// UpdateContextSteering 하위 루틴
 	void UpdateUTurnState(const FVector& Forward, const FHorseSteeringInfluence& Influence);
 	void BuildDangerField(FBlackboard& BB, const FVector& Forward, float DeltaTime, bool bContextAvoidance, FSteerContext& Field);
@@ -123,9 +124,9 @@ protected:
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Danger Weight", Min=0.0f, Max=20.0f, Speed=0.05f)
 	float DangerWeight = 3.0f;    // danger 가 interest 를 깎는 강도. interest 합보다 커야 실제로 회피한다.
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Danger Spread", Min=0.0f, Max=1.0f, Speed=0.02f)
-	float DangerSpread = 0.5f;    // 이웃 slot 으로 번지는 danger 비율(0=번짐 없음). danger field 를 공간적으로 매끄럽게 해 판단 떨림 완화.
+	float DangerSpread = 0.5f;    // 이웃 slot 으로 번지는 danger 비율(0=번짐 없음). context steering의 판단 떨림 완화용
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Forward Lane Guard", Min=0.0f, Max=1.0f, Speed=0.02f)
-	float ForwardLaneGuard = 1.0f;   // 정면 slot 에서 걷어낼 spread 오염 비율(1=완전 제거, 0=off). 통로 탈출 시 과민 조향(lurch) 억제.
+	float ForwardLaneGuard = 1.0f;   // 정면 slot에서 DangerSpread 억제(1=완전 제거, 0=off). 터널 탈출 시 어느쪽부터 빠져나오냐에 따라 조향 떨림 억제용
 	
 	// ── context-steering 튜닝 : 도로 관련 ───────────────────────────────────────────────────────────────
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Road Weight", Min=0.0f, Max=10.0f, Speed=0.05f)
@@ -148,16 +149,14 @@ protected:
 	float InertiaWeight = 0.5f;   // 현재 진행(forward) 유지 관성 가중(최하위).
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Commit Weight", Min=0.0f, Max=10.0f, Speed=0.05f)
 	float CommitWeight = 0.75f;   // 직전 선택 heading 을 유지하려는 히스테리시스. 좌/우 argmax 핑퐁(떨림) 억제.
-	// danger persistence(fast-attack/slow-release): 
-	// 회전 중 장애물이 sweep 경계를 들락거려 clearance 가 튈 때, danger를 천천히 감소시켜 조향 떨림을 억제,
-	// danger의 증가는 장애물 회피 반응성 고려해서 즉시 반영되는 상태 유지
+	// 회전 중 장애물이 센서 경계를 들락거려 clearance가 튈 때, danger를 천천히 감소시켜 조향 떨림을 억제,
+	// danger의 증가는 장애물 회피 반응성 고려해서 즉시 반영
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Danger Persistence")
 	bool  bDangerPersistence = true;
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Danger Release Rate", Min=0.0f, Max=20.0f, Speed=0.05f)
-	float DangerReleaseRate = 3.0f;   // danger/sec — danger 가 내려갈 때 초당 감쇠량. 클수록 빨리 잊음(0=영구 유지).
-	// 조향각 slew — 목표 heading(상대 조향각)이 튀어도 초당 SteerRateLimit 이하로만 바꿔 Movement 가 쫓는
-	// 레퍼런스를 매끄럽게 한다. 장애물이 sweep 에 "나타나는" 순간의 잔여 떨림을 뭉갠다. 
-	// 낮출수록 반응성↓·스무딩↑
+	float DangerReleaseRate = 3.0f;   // danger/sec — danger 가 내려갈 때 초당 감쇠량. 클수록 빨리 잊음(0=영구 유지)
+	// 조향각 스무딩 — 목표 조향각(heading)이 튀어도 초당 SteerRateLimit 이하로만 바꿔
+	// 장애물이 센서에 걸리기 시작하는 순간의 조향각 튐을 뭉갠다. 낮출수록 반응성↓·튐억제↑
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Smooth Steering")
 	bool  bSmoothSteering = true;
 	UPROPERTY(Edit, Save, Category="Locomotion|Steering", DisplayName="Steer Rate Limit", Min=0.0f, Max=720.0f, Speed=1.0f)
@@ -194,13 +193,11 @@ protected:
 	UPROPERTY(Edit, Save, Category = "Locomotion|Jump", DisplayName = "Gallop Jump Trigger Dist", Min = 0.0f, Max = 20.0f, Speed = 0.05f)
 	float GallopJumpTriggerDist = 7.0f;
 
-	// 한 프레임짜리 센서 hit로 점프가 래치되지 않도록 후보가 유지되어야 하는 시간.
 	UPROPERTY(Edit, Save, Category = "Locomotion|Jump", DisplayName = "Jump Confirm Time", Min = 0.0f, Max = 1.0f, Speed = 0.01f)
-	float JumpConfirmTime = 0.05f;
+	float JumpConfirmTime = 0.05f; 	// 짧은 센서 노이즈로 점프가 발동되지 않도록하는 최소 '점프 조건 만족' 유지시간
 
-	// 정지/후진 중 스쳐 지나가는 hit로 점프하지 않도록 하는 최소 전진 속도.
 	UPROPERTY(Edit, Save, Category = "Locomotion|Jump", DisplayName = "Min Jump Approach Speed", Min = 0.0f, Max = 20.0f, Speed = 0.05f)
-	float MinJumpApproachSpeed = 0.5f;
+	float MinJumpApproachSpeed = 0.5f; // 점프를 위한 최소 전진 속도. 정지/후진 등에서 점프 발동되는 것 방지용
 
 
 	// ── runtime states ──────────────────────────────────────────────────────────────────────────────────

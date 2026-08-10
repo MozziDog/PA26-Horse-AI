@@ -1,4 +1,4 @@
-#include "HorseLocomotionComponent.h"
+﻿#include "HorseLocomotionComponent.h"
 
 #include "HorseMovementComponent.h"
 #include "Game/Horse/HorseConstants.h"
@@ -98,6 +98,8 @@ void UHorseLocomotionComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 		return;
 	}
 
+	// NOTE: 블랙보드 참조를 미리 보관하고 있으면 actory destroy 시점에 댕글링 포인터 참조 문제 발생 가능
+	//       WeakPtr로 BlackboardComp 참조 + 매 프레임 가져오는 것으로 회피
 	FBlackboard* BB = BlackboardComp ? &BlackboardComp->GetBlackboard() : nullptr;
 	if (!BB)	// 이하 blackboard는 무조건 valid하다고 전제
 	{
@@ -105,7 +107,7 @@ void UHorseLocomotionComponent::TickComponent(float DeltaTime, ELevelTick TickTy
 	}
 
 	// 평행이동은 별도 direct input 경로지만 policy가 명시적으로 허용할 때만 소비한다.
-	const bool bEnableStrafe = IsPolicyEnabled(*BB, HorseBBKeys::ControlEnableStrafe, false);
+	const bool bEnableStrafe = IsPolicyEnabled(*BB, HorseBBKeys::ControlEnableStrafe);
 	UpdateStrafeMode(bEnableStrafe);
 	if (bStrafeMode)
 	{
@@ -154,7 +156,7 @@ FHorseSteeringInfluence UHorseLocomotionComponent::GatherSteeringInfluences(FBla
 		}
 	}
 
-	if (IsPolicyEnabled(BB, HorseBBKeys::ControlEnableRoadAssist, false) && Gait != EHorseGait::Stop
+	if (IsPolicyEnabled(BB, HorseBBKeys::ControlEnableRoadAssist) && Gait != EHorseGait::Stop
 		&& BB.TryGetVector(HorseBBKeys::RoadDir, Temp) && !Temp.IsNearlyZero())
 	{
 		Temp.Z = 0.0f;
@@ -175,9 +177,9 @@ FHorseSteeringInfluence UHorseLocomotionComponent::GatherSteeringInfluences(FBla
 	return Inf;
 }
 
-bool UHorseLocomotionComponent::IsPolicyEnabled(FBlackboard& BB, FName Key, bool bDefault) const
+bool UHorseLocomotionComponent::IsPolicyEnabled(FBlackboard& BB, FName Key) const
 {
-	bool bValue = bDefault;
+	bool bValue = false;
 	BB.TryGetBool(Key, bValue);
 	return bValue;
 }
@@ -186,7 +188,7 @@ bool UHorseLocomotionComponent::IsPolicyEnabled(FBlackboard& BB, FName Key, bool
 // 이미 bJumpPerformed인 경우에는 다시 점프 안함. (제자리 혹은 점프 후 연속 점프 방지)
 void UHorseLocomotionComponent::UpdateJumpGate(FBlackboard& BB, float DeltaTime)
 {
-	if (!IsPolicyEnabled(BB, HorseBBKeys::ControlEnableAutoJump, false))
+	if (!IsPolicyEnabled(BB, HorseBBKeys::ControlEnableAutoJump))
 	{
 		JumpCandidateTime = 0.0f;
 		bJumpPerformed = false;
@@ -241,11 +243,11 @@ void UHorseLocomotionComponent::UpdateContextSteering(FBlackboard& BB, const AAc
 		SteerDir = Forward;
 	}
 
-	// Stop + 무입력에서는 회전 입력을 Movement로 보내지 않는다. 다만 이전 입력의
-	// smoothing 상태는 중립으로 감쇠시켜 다음 반대 방향 입력이 stale angle에서 시작하지 않게 한다.
+	// Stop + 무입력에서는 회전 입력을 Movement로 보내지 않더라도
+	// 조향각 smoothing은 중립으로 계속 진행해서 다음 반대 방향 입력이 이상한 각도에서 시작하지 않게 함
 	if (GetGait() == EHorseGait::Stop && !Influence.bGuidance)
 	{
-		RelaxSteeringToNeutral(Forward, DeltaTime);
+		SmoothSteeringToNeutral(Forward, DeltaTime);
 		bUTurnActive = false;
 		UTurnExtraSlotIndex = -1;
 		return;
@@ -263,7 +265,7 @@ void UHorseLocomotionComponent::UpdateContextSteering(FBlackboard& BB, const AAc
 	}
 
 	UpdateUTurnState(Forward, Influence);
-	const bool bContextAvoidance = IsPolicyEnabled(BB, HorseBBKeys::ControlEnableContextAvoidance, true);
+	const bool bContextAvoidance = !IsPolicyEnabled(BB, HorseBBKeys::ControlIgnoreContextAvoidance);
 	BuildDangerField(BB, Forward, DeltaTime, bContextAvoidance, Field);
 	ScoreSlots(Owner, Forward, Influence, Field);
 
@@ -297,7 +299,7 @@ void UHorseLocomotionComponent::UpdateContextSteering(FBlackboard& BB, const AAc
 	}
 }
 
-void UHorseLocomotionComponent::RelaxSteeringToNeutral(const FVector& Forward, float DeltaTime)
+void UHorseLocomotionComponent::SmoothSteeringToNeutral(const FVector& Forward, float DeltaTime)
 {
 	if (DeltaTime <= 0.0f || NeutralSteeringReturnSpeed <= 0.0f)
 	{

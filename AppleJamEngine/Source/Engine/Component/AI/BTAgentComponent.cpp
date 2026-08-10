@@ -81,8 +81,7 @@ void UBTAgentComponent::BeginPlay()
 
 void UBTAgentComponent::EndPlay()
 {
-	// Abort, reset, and unregister are all idempotent. UActorComponent can route
-	// EndPlay again from BeginDestroy, so no component-local lifecycle flag is needed.
+	// NOTE: EndPlay가 1번 호출된다는 보장 없음. 그러나 이하 모두 idempotent하므로 무관
 	AbortActiveTree();
 	Tree.reset();
 	BlackboardComp.Reset();
@@ -126,9 +125,8 @@ void UBTAgentComponent::AbortActiveTree()
 	}
 
 	FBTContext Context;
-	// Blackboard is a sibling component and can disappear before this one
-	// during teardown. Keep the owner when it is still valid so Abort handlers
-	// can release gameplay state even if Blackboard cleanup happened first.
+	// NOTE: 게임 종료 시에 BlackboardComponent가 먼저 소멸되면 Blackboard 댕글링 참조 발생 가능
+	//       따라서 WeakPtr로 BlackboardComp 참조하고 그쪽을 통해 블랙보드 가져오는 방식 사용
 	Context.Owner = GetOwner();
 	if (UBlackboardComponent* Blackboard = BlackboardComp.Get())
 	{
@@ -151,8 +149,7 @@ void UBTAgentComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAct
 	UBlackboardComponent* Blackboard = BlackboardComp.Get();
 	if (!Blackboard)
 	{
-		// The owner can still be valid even when its Blackboard is gone, allowing
-		// active tasks to release their gameplay state without dereferencing it.
+		// 블랙보드가 없다면 대개 액터 destroy 등의 상황 → 현재의 동작 중단
 		AbortActiveTree();
 		return;
 	}
