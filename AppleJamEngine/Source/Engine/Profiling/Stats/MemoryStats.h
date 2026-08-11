@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "Core/Types/CoreTypes.h"
 
 struct ID3D11Resource;
@@ -46,6 +46,8 @@ public:
 	// Voxel Navigation CPU
 	static void AddVoxelNavigationMemory(uint64 Size) { VoxelNavigationMemory += Size; }
 	static void SubVoxelNavigationMemory(uint64 Size) { VoxelNavigationMemory -= Size; }
+	// 복셀은 VoxelGrid에서 중앙집중식으로 관리하는 점을 고려해서 예외적으로 Set 형태 허용
+	static void SetVoxelNavigationMemory(uint64 Size) { VoxelNavigationMemory = Size; }
 
 	static uint64 GetTotalAllocationBytes() { return TotalAllocationBytes; }
 	static uint32 GetTotalAllocationCount() { return TotalAllocationCount; }

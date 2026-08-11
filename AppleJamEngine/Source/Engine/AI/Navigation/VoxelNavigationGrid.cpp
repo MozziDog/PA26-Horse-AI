@@ -1,7 +1,8 @@
-#include "pch.h"
+﻿#include "pch.h"
 
 #include "AI/Navigation/VoxelNavigationGrid.h"
 
+#include "Core/Logging/Log.h"
 #include "Core/Types/CollisionTypes.h"
 #include "GameFramework/World.h"
 #include "Math/Quat.h"
@@ -12,14 +13,24 @@
 #include <cmath>
 #include <limits>
 #include <queue>
+#include <tuple>
 
 namespace
 {
-	constexpr float NavEpsilon = 1.e-4f;
+	constexpr float INF = FLT_MAX;
+	constexpr float Epsilon = 1.e-4f;
 
+	constexpr uint8 FullNeighborMask = 0xffu; // = 0b11111111, 8방향으로 연결된 상태
+	constexpr int NeighborOffsets[8][2] =
+	{
+		{ 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 },
+		{ 1, 1 }, { 1, -1 }, { -1, 1 }, { -1, -1 },
+	};
+
+	// A*에서 priority_queue의 원소. {index, score}와 동일
 	struct FOpenNode
 	{
-		int32 NodeIndex = -1;
+		int Index = -1;
 		float Score = 0.0f;
 
 		bool operator<(const FOpenNode& Other) const
@@ -28,11 +39,53 @@ namespace
 		}
 	};
 
+	struct FCrossingCandidate
+	{
+		int NodeA = -1;
+		int NodeB = -1;
+		int ChunkA = -1;
+		int ChunkB = -1;
+		int CellA = -1;
+		int CellB = -1;
+		int SubareaA = -1;
+		int SubareaB = -1;
+	};
+
 	float ElapsedMilliseconds(const std::chrono::steady_clock::time_point& Start)
 	{
 		return std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - Start).count();
 	}
-}
+
+	bool ContainsIndex(const TArray<int>& Values, int Value)
+	{
+		return std::find(Values.begin(), Values.end(), Value) != Values.end();
+	}
+
+	int DirectionBit(int DeltaX, int DeltaY)
+	{
+		for (int Index = 0; Index < 8; ++Index)
+		{
+			if (NeighborOffsets[Index][0] == DeltaX && NeighborOffsets[Index][1] == DeltaY)
+			{
+				return Index;
+			}
+		}
+		return -1;
+	}
+
+	bool AreCrossingsAdjacent(
+		const FCrossingCandidate& A,
+		const FCrossingCandidate& B,
+		const TArray<FVoxelNavigationNode>& Nodes)
+	{
+		const FVoxelCoord& A0 = Nodes[A.NodeA].Coord;
+		const FVoxelCoord& A1 = Nodes[A.NodeB].Coord;
+		const FVoxelCoord& B0 = Nodes[B.NodeA].Coord;
+		const FVoxelCoord& B1 = Nodes[B.NodeB].Coord;
+		return std::abs(A0.X - B0.X) <= 1 && std::abs(A0.Y - B0.Y) <= 1 
+				&& std::abs(A1.X - B1.X) <= 1 && std::abs(A1.Y - B1.Y) <= 1;
+	}
+} // namespace
 
 FVoxelNavigationGrid::~FVoxelNavigationGrid()
 {
@@ -47,66 +100,144 @@ bool FVoxelNavigationGrid::Build(
 	const AActor* QueryOwner)
 {
 	SCOPE_STAT_CAT("VoxelNav.BuildGrid", "Navigation");
+	// 통계 초기화
 	const auto StartTime = std::chrono::steady_clock::now();
+	int TestedL1ChunkCount = 0;
+	int EmptyL1ChunkCount = 0;
 
+	// 데이터 초기화
 	bBuilt = false;
 	Nodes.clear();
-	ColumnNodes.clear();
+	XYToNodesLookup.clear();
+	L1Chunks.clear();
+	L1ChunkLookup.clear();
+	Portals.clear();
+	NodeToChunkLookup.clear();
+	NodeToLocalCellIdxLookup.clear();
+	ChunkCellToNodeLookup.clear();
 	BuildStats = FVoxelNavigationBuildStats();
 	BuildSettings = Settings;
 	RefreshTrackedMemory();
-	UpdateBuildPeakMemory();
 
-	if (!World || Settings.CellSize <= NavEpsilon || Settings.AgentRadius <= NavEpsilon ||
-		Settings.AgentHeight <= Settings.AgentRadius * 2.0f ||
-		InBoundsExtent.X <= NavEpsilon || InBoundsExtent.Y <= NavEpsilon || InBoundsExtent.Z <= NavEpsilon)
+	if (!World)
 	{
+		UE_LOG("[VoxelNavigationGrid] Build rejected: Cannot approach physics query");
+		return false;
+	}
+	if (Settings.AgentRadius <= Epsilon || Settings.AgentHeight <= Settings.AgentRadius * 2.0f 
+		|| InBoundsExtent.X <= Epsilon || InBoundsExtent.Y <= Epsilon || InBoundsExtent.Z <= Epsilon)
+	{
+		UE_LOG("[VoxelNavigationGrid] Build rejected: Invalid build settings");
 		return false;
 	}
 
 	BoundsCenter = InBoundsCenter;
 	BoundsExtent = InBoundsExtent;
 	BoundsMin = BoundsCenter - BoundsExtent;
-	SizeX = (std::max)(1, static_cast<int32>(std::ceil(BoundsExtent.X * 2.0f / Settings.CellSize)));
-	SizeY = (std::max)(1, static_cast<int32>(std::ceil(BoundsExtent.Y * 2.0f / Settings.CellSize)));
-	SizeZ = (std::max)(1, static_cast<int32>(std::ceil(BoundsExtent.Z * 2.0f / Settings.CellSize)));
-	ColumnNodes.resize(static_cast<size_t>(SizeX * SizeY));
+	CellCountX = (std::max)(1, static_cast<int>(std::ceil(BoundsExtent.X * 2.0f / NavVoxelCellSize)));
+	CellCountY = (std::max)(1, static_cast<int>(std::ceil(BoundsExtent.Y * 2.0f / NavVoxelCellSize)));
+	CellCountZ = (std::max)(1, static_cast<int>(std::ceil(BoundsExtent.Z * 2.0f / NavVoxelCellSize)));
+	L1ChunkCountX = (CellCountX + NavL1ChunkCellsPerAxis - 1) / NavL1ChunkCellsPerAxis;
+	L1ChunkCountY = (CellCountY + NavL1ChunkCellsPerAxis - 1) / NavL1ChunkCellsPerAxis;
+	L1ChunkCountZ = (CellCountZ + NavL1ChunkCellsPerAxis - 1) / NavL1ChunkCellsPerAxis;
+	XYToNodesLookup.resize(static_cast<size_t>(CellCountX) * static_cast<size_t>(CellCountY));
+	L1ChunkLookup.assign(L1ChunkCountX * L1ChunkCountY * L1ChunkCountZ, -1);
 	RefreshTrackedMemory();
 
-	const uint32 StaticMask = ObjectTypeBit(ECollisionChannel::WorldStatic);
-	const float SlopeCos = std::cos(Settings.MaxWalkableSlopeDegrees * 3.14159265358979323846f / 180.0f);
-	const float ProbeInset = std::clamp(Settings.GroundProbeInset, 0.001f, Settings.CellSize * 0.25f);
+	// NOTE: Navigation 빌드시에는 WorldStatic만 고려
+	constexpr uint32 LayerMask = ObjectTypeBit(ECollisionChannel::WorldStatic);
+	const float SlopeCos = std::cos(Settings.MaxWalkableSlopeDegrees * FMath::DegToRad);
+	const float ProbeMargin = std::clamp(Settings.GroundProbeInset, 0.001f, NavVoxelCellSize * 0.25f);
 	const FCollisionShape ClearanceShape = FCollisionShape::MakeCapsule(Settings.AgentRadius, Settings.AgentHeight * 0.5f);
 
+	// L1 청크 단위로 1차 검사 (broad phase): 약간의 여유분 추가해서 보수적으로 검사 수행
+	TArray<bool> L1TestResult(L1ChunkCountX * L1ChunkCountY * L1ChunkCountZ, false);
+	const float OverlapPadding = (std::max)(ProbeMargin, 0.01f);
+	const auto L1OverlapStartTime = std::chrono::steady_clock::now();
+	for (int ChunkZ = 0; ChunkZ < L1ChunkCountZ; ++ChunkZ)
+	{
+		for (int ChunkY = 0; ChunkY < L1ChunkCountY; ++ChunkY)
+		{
+			for (int ChunkX = 0; ChunkX < L1ChunkCountX; ++ChunkX)
+			{
+				const int CellMinX = ChunkX * NavL1ChunkCellsPerAxis;
+				const int CellMinY = ChunkY * NavL1ChunkCellsPerAxis;
+				const int CellMinZ = ChunkZ * NavL1ChunkCellsPerAxis;
+				const int CellMaxX = (std::min)(CellCountX, CellMinX + NavL1ChunkCellsPerAxis);
+				const int CellMaxY = (std::min)(CellCountY, CellMinY + NavL1ChunkCellsPerAxis);
+				const int CellMaxZ = (std::min)(CellCountZ, CellMinZ + NavL1ChunkCellsPerAxis);
+				const FVector Min = BoundsMin + FVector(CellMinX * NavVoxelCellSize,
+														CellMinY * NavVoxelCellSize,
+														CellMinZ * NavVoxelCellSize);
+				const FVector Max = BoundsMin + FVector(CellMaxX * NavVoxelCellSize,
+														CellMaxY * NavVoxelCellSize,
+														CellMaxZ * NavVoxelCellSize);
+				const FVector Center = (Min + Max) * 0.5f;
+				const FVector Extent = (Max - Min) * 0.5f + FVector(OverlapPadding, OverlapPadding, OverlapPadding);
+				const int FlatChunk = FlattenL1Chunk(ChunkX, ChunkY, ChunkZ);
+				TestedL1ChunkCount++;
+				if (World->PhysicsOverlapAnyByObjectTypes(
+					Center, FQuat::Identity, FCollisionShape::MakeBox(Extent), LayerMask, QueryOwner))
+				{
+					L1TestResult[FlatChunk] = true;
+				}
+				else
+				{
+					EmptyL1ChunkCount++;
+					BuildStats.NumSkippedCellsByL1Overlap +=
+						(CellMaxX - CellMinX) * (CellMaxY - CellMinY) * (CellMaxZ - CellMinZ);
+				}
+			}
+		}
+	}
+	const float L1OverlapTimeMs = ElapsedMilliseconds(L1OverlapStartTime);
+	UE_LOG("[VoxelNavigationGrid] L1Overlap finished in %f ms. Tested %d chunks, %d was empty.", 
+			L1OverlapTimeMs, TestedL1ChunkCount, EmptyL1ChunkCount);
+	UpdateBuildPeakMemory(L1TestResult.capacity() * sizeof(uint8));
+
+	// 각 복셀에 대해 서있을 수 있는 경사인지 검사
 	{
 		SCOPE_STAT_CAT("VoxelNav.ClassifyStandable", "Navigation");
-		for (int32 Y = 0; Y < SizeY; ++Y)
+		for (int Y = 0; Y < CellCountY; ++Y)
 		{
-			for (int32 X = 0; X < SizeX; ++X)
+			for (int X = 0; X < CellCountX; ++X)
 			{
+				// (X,Y) column 내에서 밑에서 위로 훑으면서 서 있을 수 있는 복셀이 있나 체크
 				TArray<float> AcceptedGroundHeights;
-				for (int32 Z = 0; Z < SizeZ; ++Z)
+				for (int Z = 0; Z < CellCountZ; ++Z)
 				{
-					++BuildStats.NumSampledCells;
-					const float CellCenterX = BoundsMin.X + (static_cast<float>(X) + 0.5f) * Settings.CellSize;
-					const float CellCenterY = BoundsMin.Y + (static_cast<float>(Y) + 0.5f) * Settings.CellSize;
-					const float SlabBottom = BoundsMin.Z + static_cast<float>(Z) * Settings.CellSize;
-					const float SlabTop = SlabBottom + Settings.CellSize;
-					const FVector RayStart(CellCenterX, CellCenterY, SlabTop - ProbeInset);
+					// 만약 해당 복셀이 '아무것도 없는 것으로 판정된' 청크에 속해있다면 not-walkable이 확실하니 스킵
+					const int FlatChunk = FlattenL1Chunk(
+						X / NavL1ChunkCellsPerAxis,
+						Y / NavL1ChunkCellsPerAxis,
+						Z / NavL1ChunkCellsPerAxis);
+					if (L1TestResult[FlatChunk] == 0)
+					{
+						continue;
+					}
 
+					++BuildStats.NumSampledCells;
+					const float CellCenterX = BoundsMin.X + ((X + 0.5f) * NavVoxelCellSize);
+					const float CellCenterY = BoundsMin.Y + ((Y + 0.5f) * NavVoxelCellSize);
+					const float SlabBottom = BoundsMin.Z + (Z * NavVoxelCellSize);
+					const float SlabTop = SlabBottom + NavVoxelCellSize;
+					const FVector RayStart(CellCenterX, CellCenterY, SlabTop - ProbeMargin);
+
+					// 지면 존재 여부 검사
 					FHitResult GroundHit;
 					if (!World->PhysicsRaycastByObjectTypes(
-						RayStart, FVector::DownVector, Settings.CellSize - ProbeInset + NavEpsilon,
-						GroundHit, StaticMask, QueryOwner))
+						RayStart, FVector::DownVector, NavVoxelCellSize - ProbeMargin + Epsilon,
+						GroundHit, LayerMask, QueryOwner))
 					{
 						++BuildStats.NumNoGroundCells;
 						continue;
 					}
 
+					// 높이로 중복 검사: ProbeMargin 여유분 때문에 청크 경계에서 동일 지면이 중복 카운트되는 것 방지 
 					bool bDuplicateHeight = false;
 					for (float ExistingHeight : AcceptedGroundHeights)
 					{
-						if (std::abs(ExistingHeight - GroundHit.WorldHitLocation.Z) <= ProbeInset * 2.0f)
+						if (std::abs(ExistingHeight - GroundHit.WorldHitLocation.Z) <= ProbeMargin * 2.0f)
 						{
 							bDuplicateHeight = true;
 							break;
@@ -117,104 +248,252 @@ bool FVoxelNavigationGrid::Build(
 						continue;
 					}
 
+					// 지면이 서있을만한 각도인지 검사
 					FVector GroundNormal = GroundHit.WorldNormal;
-					if (GroundNormal.IsNearlyZero())
-					{
-						GroundNormal = GroundHit.ImpactNormal;
-					}
+					if (GroundNormal.IsNearlyZero()) GroundNormal = GroundHit.ImpactNormal;
 					GroundNormal.Normalize();
-					if (GroundNormal.Dot(FVector::UpVector) + NavEpsilon < SlopeCos)
+					if (GroundNormal.Dot(FVector::UpVector) + Epsilon < SlopeCos)
 					{
 						++BuildStats.NumRejectedSlope;
 						continue;
 					}
 
+					// 벽과 너무 딱붙은 곳 등 에이전트가 서있을 수 없는 곳 필터링
 					const FVector StandingPoint(CellCenterX, CellCenterY, GroundHit.WorldHitLocation.Z);
 					const FVector CapsuleCenter = StandingPoint + FVector::UpVector *
 						(Settings.AgentHeight * 0.5f + Settings.ClearanceOffset);
 					if (World->PhysicsOverlapAnyByObjectTypes(
-						CapsuleCenter, FQuat::Identity, ClearanceShape, StaticMask, QueryOwner))
+						CapsuleCenter, FQuat::Identity, ClearanceShape, LayerMask, QueryOwner))
 					{
 						++BuildStats.NumRejectedClearance;
 						continue;
 					}
 
+					// 모든 검사 통과했으면 노드 추가 + 메모리 프로파일링 정보 업데이트
 					FVoxelNavigationNode Node;
 					Node.Coord = { X, Y, Z };
 					Node.Position = StandingPoint;
 					Node.GroundNormal = GroundNormal;
-					const int32 NodeIndex = static_cast<int32>(Nodes.size());
+					const int NodeIndex = static_cast<int>(Nodes.size());
 					const size_t PreviousNodeCapacity = Nodes.capacity();
-					TArray<int32>& Column = ColumnNodes[static_cast<size_t>(FlattenColumn(X, Y))];
-					const size_t PreviousColumnCapacity = Column.capacity();
 					Nodes.push_back(Node);
+					TArray<int>& Column = XYToNodesLookup[FlattenColumn(X, Y)];
+					const size_t PreviousColumnCapacity = Column.capacity();
 					Column.push_back(NodeIndex);
-					AddTrackedMemory(
-						static_cast<uint64>(Nodes.capacity() - PreviousNodeCapacity) * sizeof(FVoxelNavigationNode) +
-						static_cast<uint64>(Column.capacity() - PreviousColumnCapacity) * sizeof(int32));
 					AcceptedGroundHeights.push_back(StandingPoint.Z);
-					UpdateBuildPeakMemory(static_cast<uint64>(AcceptedGroundHeights.capacity()) * sizeof(float));
+					AddTrackedMemory(
+						static_cast<size_t>(Nodes.capacity() - PreviousNodeCapacity) * sizeof(FVoxelNavigationNode) +
+						static_cast<size_t>(Column.capacity() - PreviousColumnCapacity) * sizeof(int));
+					UpdateBuildPeakMemory(static_cast<size_t>(AcceptedGroundHeights.capacity()) * sizeof(float));
 				}
 			}
 		}
 	}
+	BuildStats.NumRawWalkableNodes = Nodes.size();
 
-	// Cardinal edges first. Diagonals are added only when both adjacent cardinal
-	// columns can support the same transition, preventing corner cutting.
-	const int32 CardinalOffsets[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };
-	for (int32 NodeIndex = 0; NodeIndex < static_cast<int32>(Nodes.size()); ++NodeIndex)
+	// 하나의 복셀(X,Y)에서 이웃한 복셀로 이동가능한지 체크 (경사 및 단차 검사)
+	const int CardinalOffsets[4][2] = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } };	// 십자 방향
+	for (int NodeIndex = 0; NodeIndex < Nodes.size(); ++NodeIndex)
 	{
-		const FVoxelNavigationNode& Node = Nodes[static_cast<size_t>(NodeIndex)];
+		const FVoxelNavigationNode& Node = Nodes[NodeIndex];
 		for (const auto& Offset : CardinalOffsets)
 		{
-			const int32 NX = Node.Coord.X + Offset[0];
-			const int32 NY = Node.Coord.Y + Offset[1];
-			if (!IsValidColumn(NX, NY)) continue;
+			const int NX = Node.Coord.X + Offset[0];
+			const int NY = Node.Coord.Y + Offset[1];
+			if (!IsValidColumn(NX, NY)) 
+				continue;
 
-			for (int32 Candidate : ColumnNodes[static_cast<size_t>(FlattenColumn(NX, NY))])
+			for (int Candidate : XYToNodesLookup[FlattenColumn(NX, NY)])
 			{
-				if (std::abs(Nodes[static_cast<size_t>(Candidate)].Position.Z - Node.Position.Z) <= Settings.MaxNeighborHeightDelta + NavEpsilon &&
-					CanTraverse(World, NodeIndex, Candidate, QueryOwner))
+				const float HeightDifference = std::abs(Nodes[Candidate].Position.Z - Node.Position.Z);
+				if (HeightDifference <= Settings.MaxNeighborHeightDelta + Epsilon
+					 && CanTraverse(World, NodeIndex, Candidate, QueryOwner))
 				{
 					AddDirectedEdge(NodeIndex, Candidate);
 				}
 			}
 		}
 	}
-
-	const int32 DiagonalOffsets[4][2] = { { 1, 1 }, { 1, -1 }, { -1, 1 }, { -1, -1 } };
-	for (int32 NodeIndex = 0; NodeIndex < static_cast<int32>(Nodes.size()); ++NodeIndex)
+	const int DiagonalOffsets[4][2] = { { 1, 1 }, { 1, -1 }, { -1, 1 }, { -1, -1 } }; // 대각선 방향
+	for (int NodeIndex = 0; NodeIndex < Nodes.size(); ++NodeIndex)
 	{
-		const FVoxelNavigationNode& Node = Nodes[static_cast<size_t>(NodeIndex)];
+		const FVoxelNavigationNode& Node = Nodes[NodeIndex];
 		for (const auto& Offset : DiagonalOffsets)
 		{
-			const int32 NX = Node.Coord.X + Offset[0];
-			const int32 NY = Node.Coord.Y + Offset[1];
-			if (!IsValidColumn(NX, NY)) continue;
-
-			for (int32 Candidate : ColumnNodes[static_cast<size_t>(FlattenColumn(NX, NY))])
+			const int NX = Node.Coord.X + Offset[0];
+			const int NY = Node.Coord.Y + Offset[1];
+			if (!IsValidColumn(NX, NY)) 
+				continue;
+			for (int Candidate : XYToNodesLookup[FlattenColumn(NX, NY)])
 			{
-				const float CandidateZ = Nodes[static_cast<size_t>(Candidate)].Position.Z;
-				if (std::abs(CandidateZ - Node.Position.Z) > Settings.MaxNeighborHeightDelta + NavEpsilon)
-				{
+				if (std::abs(Nodes[Candidate].Position.Z - Node.Position.Z) >
+					Settings.MaxNeighborHeightDelta + Epsilon)
 					continue;
-				}
-				if (!HasCardinalBridge(NodeIndex, Candidate, Node.Coord.X + Offset[0], Node.Coord.Y) ||
-					!HasCardinalBridge(NodeIndex, Candidate, Node.Coord.X, Node.Coord.Y + Offset[1]))
-				{
+				if (!HasCardinalBridge(NodeIndex, Candidate, Node.Coord.X + Offset[0], Node.Coord.Y) 
+					|| !HasCardinalBridge(NodeIndex, Candidate, Node.Coord.X, Node.Coord.Y + Offset[1]))
 					continue;
-				}
-				if (CanTraverse(World, NodeIndex, Candidate, QueryOwner))
-				{
+
+				if (CanTraverse(World, NodeIndex, Candidate, QueryOwner)) 
 					AddDirectedEdge(NodeIndex, Candidate);
-				}
 			}
 		}
 	}
 
-	BuildStats.NumWalkableNodes = static_cast<int32>(Nodes.size());
+	// 8방향으로 연결된 노드만 남기고 필터링 (mark and sweep)
+	TArray<uint8> RetainedNodes(Nodes.size(), 0);
+	for (int NodeIndex = 0; NodeIndex < Nodes.size(); ++NodeIndex)
+	{
+		const FVoxelNavigationNode& Node = Nodes[NodeIndex];
+		uint8 DirectionMask = 0;
+		for (int Neighbor : Node.Neighbors)
+		{
+			if (Neighbor < 0
+				|| Neighbor >= Nodes.size()
+				|| !ContainsIndex(Nodes[Neighbor].Neighbors, NodeIndex))
+			{
+				continue;
+			}
+
+			const FVoxelCoord& OtherCoord = Nodes[Neighbor].Coord;
+			const int Bit = DirectionBit(OtherCoord.X - Node.Coord.X, OtherCoord.Y - Node.Coord.Y);
+			if (Bit >= 0) DirectionMask |= static_cast<uint8>(1u << Bit);
+		}
+		RetainedNodes[NodeIndex] = (DirectionMask == FullNeighborMask ? 1 : 0);
+	}
+
+	NodeToChunkLookup.assign(Nodes.size(), -1);
+	NodeToLocalCellIdxLookup.assign(Nodes.size(), -1);
+	bool bXYCollision = false;
+	int CollidedX = 0;
+	int CollidedY = 0;
+	for (int NodeIndex = 0; NodeIndex < Nodes.size(); ++NodeIndex)
+	{
+		if (RetainedNodes[NodeIndex] == 0) 
+			continue;
+
+		const FVoxelNavigationNode& Node = Nodes[NodeIndex];
+		const int ChunkX = Node.Coord.X / NavL1ChunkCellsPerAxis;
+		const int ChunkY = Node.Coord.Y / NavL1ChunkCellsPerAxis;
+		const int ChunkZ = Node.Coord.Z / NavL1ChunkCellsPerAxis;
+		const int FlatChunk = FlattenL1Chunk(ChunkX, ChunkY, ChunkZ);
+		int ChunkIndex = L1ChunkLookup[FlatChunk];
+		if (ChunkIndex < 0)
+		{
+			ChunkIndex = L1Chunks.size();
+			FVoxelNavigationL1Chunk Chunk;
+			Chunk.Coord = { ChunkX, ChunkY, ChunkZ };
+			L1Chunks.push_back(Chunk);
+			TStaticArray<int, NavL1ChunkCellCount> CellToNode;
+			CellToNode.fill(-1);
+			ChunkCellToNodeLookup.push_back(CellToNode);
+			L1ChunkLookup[FlatChunk] = ChunkIndex;
+		}
+
+		const int LocalX = Node.Coord.X % NavL1ChunkCellsPerAxis;
+		const int LocalY = Node.Coord.Y % NavL1ChunkCellsPerAxis;
+		const int LocalCell = LocalY * NavL1ChunkCellsPerAxis + LocalX;
+		FVoxelNavigationL1Chunk& Chunk = L1Chunks[ChunkIndex];
+		if (Chunk.Cells[LocalCell] != 0)
+		{
+			// 이웃한 지면과의 연결성으로 필터링했음에도 불구하고
+			// 청크 내에 XY를 공유하는 복수의 청크가 존재하여 height map으로 옮기기 실패
+			// → 빌드 거부
+			bXYCollision = true;
+			CollidedX = LocalX;
+			CollidedY = LocalY;
+			break;
+		}
+		const float ChunkBottom = BoundsMin.Z + (ChunkZ * NavL1ChunkSize);
+		const float RelativeHeight = std::clamp(
+			(Node.Position.Z - ChunkBottom) / NavL1ChunkSize, 0.0f, 1.0f);
+		Chunk.Cells[LocalCell] = static_cast<uint8>(1 + static_cast<int>(std::round(RelativeHeight * 254.0f)));
+		NodeToChunkLookup[NodeIndex] = ChunkIndex;
+		NodeToLocalCellIdxLookup[NodeIndex] = LocalCell;
+		ChunkCellToNodeLookup[ChunkIndex][LocalCell] = NodeIndex;
+	}
+
+	if (bXYCollision)
+	{
+		UE_LOG("[VoxelNavigationGrid] Build rejected: more than one nodes in chunk share (%d, %d) after erosion.",
+				CollidedX, CollidedY);
+		Nodes.clear();
+		XYToNodesLookup.clear();
+		L1Chunks.clear();
+		L1ChunkLookup.assign(L1ChunkLookup.size(), -1);
+		Portals.clear();
+		NodeToChunkLookup.clear();
+		NodeToLocalCellIdxLookup.clear();
+		ChunkCellToNodeLookup.clear();
+		RefreshTrackedMemory();
+		return false;
+	}
+
+	// 기존 연결 그래프를 heightmap으로 압축했을 때 정보 손실 있는지 검사 (이웃한 노드간에 연결성이 담보되는지)
+	for (int NodeIndex = 0; NodeIndex < Nodes.size(); ++NodeIndex)
+	{
+		if (RetainedNodes[NodeIndex] == 0) continue;
+		const int ChunkIndex = NodeToChunkLookup[NodeIndex];
+		const int LocalCell = NodeToLocalCellIdxLookup[NodeIndex];
+		const int LocalX = LocalCell % NavL1ChunkCellsPerAxis;
+		const int LocalY = LocalCell / NavL1ChunkCellsPerAxis;
+		for (const auto& Offset : NeighborOffsets)
+		{
+			const int NX = LocalX + Offset[0];
+			const int NY = LocalY + Offset[1];
+			if (NX < 0 || NX >= NavL1ChunkCellsPerAxis ||
+				NY < 0 || NY >= NavL1ChunkCellsPerAxis) continue;
+			const int NeighborCell = NY * NavL1ChunkCellsPerAxis + NX;
+			const int NeighborNode = ChunkCellToNodeLookup[ChunkIndex][NeighborCell];
+			if (NeighborNode < 0) continue;
+			if (!ContainsIndex(Nodes[NodeIndex].Neighbors, NeighborNode) ||
+				!ContainsIndex(Nodes[NeighborNode].Neighbors, NodeIndex))
+			{
+				UE_LOG("[VoxelNavigationGrid] Build rejected: fixed8 occupancy would infer an invalid local edge.");
+				Nodes.clear();
+				XYToNodesLookup.clear();
+				L1Chunks.clear();
+				L1ChunkLookup.assign(L1ChunkLookup.size(), -1);
+				Portals.clear();
+				NodeToChunkLookup.clear();
+				NodeToLocalCellIdxLookup.clear();
+				ChunkCellToNodeLookup.clear();
+				RefreshTrackedMemory();
+				return false;
+			}
+		}
+	}
+
+	// 프로파일링 정보 업데이트
+	BuildStats.NumWalkableNodes = 0;
+	for (uint8 bRetained : RetainedNodes)
+	{
+		BuildStats.NumWalkableNodes += bRetained != 0 ? 1 : 0;
+	}
+	BuildStats.NumErodedNodes = BuildStats.NumRawWalkableNodes - BuildStats.NumWalkableNodes;
+	BuildStats.NumBuiltL1Chunks = L1Chunks.size();
+
+	// HPA* 계층 구성
+	BuildAbstractGraph(RetainedNodes);
+
+	// 프로파일링 정보 업데이트
+	BuildStats.NumAbstractNodes =Portals.size();
+	BuildStats.NumAbstractEdges = 0;
+	for (const FVoxelNavigationPortal& Portal : Portals)
+	{
+		BuildStats.NumAbstractEdges += Portal.Edges.size();
+	}
+	RefreshTrackedMemory();
+
+	// 계산 과정에 썼던 임시 배열들 정리
+	TArray<FVoxelNavigationNode>().swap(Nodes);
+	TArray<TArray<int>>().swap(XYToNodesLookup);
+	TArray<int>().swap(NodeToChunkLookup);
+	TArray<int>().swap(NodeToLocalCellIdxLookup);
+	TArray<TStaticArray<int, NavL1ChunkCellCount>>().swap(ChunkCellToNodeLookup);
+	RefreshTrackedMemory();
+
 	BuildStats.BuildTimeMs = ElapsedMilliseconds(StartTime);
-	bBuilt = !Nodes.empty();
+	bBuilt = BuildStats.NumWalkableNodes > 0;
 	return bBuilt;
 }
 
@@ -229,101 +508,245 @@ FVoxelNavigationPathResult FVoxelNavigationGrid::FindPath(
 	const auto StartTime = std::chrono::steady_clock::now();
 	FVoxelNavigationPathResult Result;
 
-	const int32 StartNode = FindNearestNode(Start, MaxStartSnapDistance);
-	const int32 GoalNode = FindNearestNode(Goal);
-	if (!bBuilt || StartNode < 0)
+	if (!bBuilt || !Contains(Start) || !Contains(Goal))
+	{
+		Result.Failure = FVoxelNavigationPathResult::EFailure::NoData;
+		Result.SearchTimeMs = ElapsedMilliseconds(StartTime);
+		return Result;
+	}
+
+	const FCellRef StartCell = FindNearestCell(Start, MaxStartSnapDistance);
+	const FCellRef GoalCell = FindNearestCell(Goal);
+	if (!StartCell.IsValid())
 	{
 		Result.Failure = FVoxelNavigationPathResult::EFailure::NoStart;
 		Result.SearchTimeMs = ElapsedMilliseconds(StartTime);
 		return Result;
 	}
-	if (GoalNode < 0)
+	if (!GoalCell.IsValid())
 	{
 		Result.Failure = FVoxelNavigationPathResult::EFailure::NoPath;
 		Result.SearchTimeMs = ElapsedMilliseconds(StartTime);
 		return Result;
 	}
 
-	const size_t NodeCount = Nodes.size();
-	const float Infinity = (std::numeric_limits<float>::max)();
-	TArray<float> Cost(NodeCount, Infinity);
-	TArray<int32> Parent(NodeCount, -1);
-	TArray<bool> Closed(NodeCount, false);
-	std::priority_queue<FOpenNode> Open;
-
-	Cost[static_cast<size_t>(StartNode)] = 0.0f;
-	Open.push({ StartNode, FVector::Distance(Nodes[static_cast<size_t>(StartNode)].Position, Goal) });
-	int32 BestReachable = StartNode;
-	float BestGoalDistance = FVector::Distance(Nodes[static_cast<size_t>(StartNode)].Position, Goal);
-	bool bReachedGoalNode = false;
-
-	while (!Open.empty())
+	TArray<FCellRef> ConcreteCells;	// 최종 계산된 경로 노드 리스트 (마지막에 FVector로 변환되어서 반환됨)
+	if (StartCell.ChunkIndex == GoalCell.ChunkIndex)	// 만약 목적지가 같은 청크 안에 있다면
 	{
-		const int32 Current = Open.top().NodeIndex;
-		Open.pop();
-		if (Current < 0 || Closed[static_cast<size_t>(Current)]) continue;
-		Closed[static_cast<size_t>(Current)] = true;
-		++Result.NumExpandedNodes;
-
-		const float DistanceToGoal = FVector::Distance(Nodes[static_cast<size_t>(Current)].Position, Goal);
-		if (DistanceToGoal < BestGoalDistance)
+		const float DirectCost = FindLocalPath(StartCell, GoalCell, &ConcreteCells);
+		if (DirectCost < (std::numeric_limits<float>::max)() &&
+			(MaxPathLength <= 0.0f || DirectCost <= MaxPathLength))
 		{
-			BestGoalDistance = DistanceToGoal;
-			BestReachable = Current;
+			for (const FCellRef& Cell : ConcreteCells) Result.Points.push_back(GetCellPosition(Cell));
+			Result.PathLength = DirectCost;
+			Result.bSuccess = true;
+			Result.bPartial = FVector::Distance(Result.Points.back(), Goal) > GoalAcceptanceRadius;
+			Result.SearchTimeMs = ElapsedMilliseconds(StartTime);
+			return Result;
 		}
-		if (Current == GoalNode)
-		{
-			BestReachable = Current;
-			bReachedGoalNode = true;
+		// NOTE: 같은 청크 안에 있어도 벽에 막히는 등 경로가 없을 수 있음
+	}
+
+	// 경로의 마지막 간선 미리 구해두기: '목적지를 포함한 청크' 내에서 포탈과 목적지간의 거리
+	TArray<float> GoalPortalCosts(Portals.size(), INF);
+	for (int PortalIndex : L1Chunks[GoalCell.ChunkIndex].PortalIndices)
+	{
+		const FCellRef PortalCell{ Portals[PortalIndex].ChunkIndex, Portals[PortalIndex].LocalCell };
+		GoalPortalCosts[PortalIndex] = FindLocalPath(PortalCell, GoalCell);
+	}
+
+	// abstract graph 상에서 A* 수행
+	TArray<float> Cost(Portals.size(), INF);
+	TArray<int> Parent(Portals.size(), -1);	// 경로 복구용으로 부모 기록
+											// -1: 미기록, -2: 없음으로 명시적 표시
+	TArray<uint8> Visited(Portals.size(), 0);
+	std::priority_queue<FOpenNode> PriorityQue;
+	for (int PortalIndex : L1Chunks[StartCell.ChunkIndex].PortalIndices)
+	{
+		const FCellRef PortalCell{ Portals[PortalIndex].ChunkIndex, Portals[PortalIndex].LocalCell };
+		const float StartCost = FindLocalPath(StartCell, PortalCell);
+		if (StartCost >= INF || (MaxPathLength > 0.0f && StartCost > MaxPathLength)) 
+			continue;
+
+		Cost[PortalIndex] = StartCost;
+		Parent[PortalIndex] = -2;
+		PriorityQue.push({ PortalIndex, StartCost + FVector::Distance(GetCellPosition(PortalCell), Goal) });
+	}
+	// 경로 산출 불가능할 때 그나마 가장 가까운 위치로 가기 위해 BestGoal과 별개로 BestReachable 기록
+	int BestGoalPortal = -1; 
+	float BestGoalCost = INF;
+	int BestReachablePortal = -1;
+	float BestReachableDistance = FVector::Distance(GetCellPosition(StartCell), Goal);
+	while (!PriorityQue.empty())
+	{
+		const FOpenNode NextNode = PriorityQue.top();
+		PriorityQue.pop();
+		if (NextNode.Score >= BestGoalCost) 
 			break;
-		}
 
-		for (int32 Neighbor : Nodes[static_cast<size_t>(Current)].Neighbors)
+		const int CurNodeId = NextNode.Index;
+		if (CurNodeId < 0 || Visited[CurNodeId] != 0) 
+			continue;
+
+		Visited[CurNodeId] = 1;
+		++Result.NumExpandedNodes;
+		const FVoxelNavigationPortal& CurrentPortal = Portals[CurNodeId];
+		const FVector CurrentPortalLocation = GetCellPosition({ CurrentPortal.ChunkIndex, CurrentPortal.LocalCell });
+		const float ReachableDistance = FVector::Distance(CurrentPortalLocation, Goal);
+		if (ReachableDistance < BestReachableDistance)
 		{
-			if (Neighbor < 0 || Closed[static_cast<size_t>(Neighbor)]) continue;
-			const float EdgeCost = FVector::Distance(
-				Nodes[static_cast<size_t>(Current)].Position,
-				Nodes[static_cast<size_t>(Neighbor)].Position);
-			const float NewCost = Cost[static_cast<size_t>(Current)] + EdgeCost;
-			if ((MaxPathLength > 0.0f && NewCost > MaxPathLength) || NewCost >= Cost[static_cast<size_t>(Neighbor)])
-			{
-				continue;
-			}
+			BestReachableDistance = ReachableDistance;
+			BestReachablePortal = CurNodeId;
+		}
 
-			Cost[static_cast<size_t>(Neighbor)] = NewCost;
-			Parent[static_cast<size_t>(Neighbor)] = Current;
-			const float Heuristic = FVector::Distance(Nodes[static_cast<size_t>(Neighbor)].Position, Goal);
-			Open.push({ Neighbor, NewCost + Heuristic });
+		const float GoalTail = GoalPortalCosts[CurNodeId];
+		if (GoalTail < INF)
+		{
+			const float Total = Cost[CurNodeId] + GoalTail;
+			if ((MaxPathLength <= 0.0f || Total <= MaxPathLength) && Total < BestGoalCost)
+			{
+				BestGoalCost = Total;
+				BestGoalPortal = CurNodeId;
+			}
+		}
+
+		for (const FVoxelNavigationAbstractEdge& Edge : Portals[CurNodeId].Edges)
+		{
+			if (Edge.ToPortal < 0 || Visited[Edge.ToPortal] != 0) 
+				continue;
+
+			const float NewCost = Cost[CurNodeId] + Edge.Cost;
+			if ( (MaxPathLength > 0.0f && NewCost > MaxPathLength) 
+				|| NewCost >= Cost[Edge.ToPortal] )
+				continue;
+
+			Cost[Edge.ToPortal] = NewCost;
+			Parent[Edge.ToPortal] = CurNodeId;
+			const FVoxelNavigationPortal& NextPortal = Portals[Edge.ToPortal];
+			const FCellRef NextCell{ NextPortal.ChunkIndex, NextPortal.LocalCell };
+			const float Heuristic = FVector::Distance(GetCellPosition(NextCell), Goal);
+			PriorityQue.push({ Edge.ToPortal, NewCost + Heuristic });
 		}
 	}
 
-	if (BestReachable < 0)
+	bool bAbstractPartial = false;
+	if (BestGoalPortal < 0 && BestReachablePortal >= 0)
+	{
+		BestGoalPortal = BestReachablePortal;
+		bAbstractPartial = true;
+	}
+	if (BestGoalPortal < 0) // Abstract graph 상에서는 Partial path조차 못찾은 경우
+	{
+		// 청크 안에서 그나마 goal과 가까운 쪽으로 가는 경로를 결과로 반환
+		const float PartialCost = FindLocalPath(StartCell, StartCell, &ConcreteCells, true, &Goal);
+		if (PartialCost >= INF || (MaxPathLength > 0.0f && PartialCost > MaxPathLength))
+		{
+			Result.Failure = FVoxelNavigationPathResult::EFailure::NoPath;
+			Result.SearchTimeMs = ElapsedMilliseconds(StartTime);
+			return Result;
+		}
+		for (const FCellRef& Cell : ConcreteCells)
+		{
+			Result.Points.push_back(GetCellPosition(Cell));
+		}
+		Result.PathLength = PartialCost;
+		Result.bSuccess = true;
+		Result.bPartial = true;
+		Result.SearchTimeMs = ElapsedMilliseconds(StartTime);
+		return Result;
+	}
+
+	// Parent를 사용하여 경로 복구 (백트래킹)
+	TArray<int> ReversePortalPath;
+	for (int Current = BestGoalPortal; Current >= 0; Current = Parent[Current])
+	{
+		ReversePortalPath.push_back(Current);
+		if (Parent[Current] == -2) break;
+	}
+	if (ReversePortalPath.empty() || Parent[ReversePortalPath.back()] != -2)
 	{
 		Result.Failure = FVoxelNavigationPathResult::EFailure::NoPath;
 		Result.SearchTimeMs = ElapsedMilliseconds(StartTime);
 		return Result;
 	}
+	TArray<int> PortalPath(ReversePortalPath.rbegin(), ReversePortalPath.rend());
 
-	TArray<FVector> ReversePoints;
-	for (int32 Current = BestReachable; Current >= 0; Current = Parent[static_cast<size_t>(Current)])
+	auto AppendSegment = [&ConcreteCells](const TArray<FCellRef>& Segment)
 	{
-		ReversePoints.push_back(Nodes[static_cast<size_t>(Current)].Position);
-		if (Current == StartNode) break;
-	}
-	if (ReversePoints.empty() || FVector::Distance(ReversePoints.back(), Nodes[static_cast<size_t>(StartNode)].Position) > NavEpsilon)
+		for (const FCellRef& Cell : Segment)
+		{
+			if (ConcreteCells.empty() || !(ConcreteCells.back() == Cell)) ConcreteCells.push_back(Cell);
+		}
+	};
+
+	TArray<FCellRef> Segment;
+	FCellRef FirstPortalCell{ Portals[PortalPath.front()].ChunkIndex,
+		Portals[PortalPath.front()].LocalCell };
+	if (FindLocalPath(StartCell, FirstPortalCell, &Segment) >= INF)
 	{
 		Result.Failure = FVoxelNavigationPathResult::EFailure::NoPath;
 		Result.SearchTimeMs = ElapsedMilliseconds(StartTime);
 		return Result;
 	}
+	AppendSegment(Segment);
 
-	Result.Points.assign(ReversePoints.rbegin(), ReversePoints.rend());
+	for (size_t Index = 1; Index < PortalPath.size(); ++Index)
+	{
+		const FVoxelNavigationPortal& Previous = Portals[PortalPath[Index - 1]];
+		const FVoxelNavigationPortal& Current = Portals[PortalPath[Index]];
+		const FCellRef PreviousCell{ Previous.ChunkIndex, Previous.LocalCell };
+		const FCellRef CurrentCell{ Current.ChunkIndex, Current.LocalCell };
+		Segment.clear();
+		if (Previous.ChunkIndex == Current.ChunkIndex)
+		{
+			if (FindLocalPath(PreviousCell, CurrentCell, &Segment) >= INF)
+			{
+				Result.Failure = FVoxelNavigationPathResult::EFailure::NoPath;
+				Result.SearchTimeMs = ElapsedMilliseconds(StartTime);
+				return Result;
+			}
+		}
+		else
+		{
+			Segment.push_back(PreviousCell);
+			Segment.push_back(CurrentCell);
+		}
+		AppendSegment(Segment);
+	}
+
+	const FVoxelNavigationPortal& LastPortal = Portals[PortalPath.back()];
+	Segment.clear();
+	const FCellRef LastPortalCell{ LastPortal.ChunkIndex, LastPortal.LocalCell };
+	const float TailCost = bAbstractPartial
+		? FindLocalPath(LastPortalCell, LastPortalCell, &Segment, true, &Goal)
+		: FindLocalPath(LastPortalCell, GoalCell, &Segment);
+	if (TailCost >= INF)
+	{
+		Result.Failure = FVoxelNavigationPathResult::EFailure::NoPath;
+		Result.SearchTimeMs = ElapsedMilliseconds(StartTime);
+		return Result;
+	}
+	AppendSegment(Segment);
+
+	for (const FCellRef& Cell : ConcreteCells)
+	{
+		Result.Points.push_back(GetCellPosition(Cell));
+	}
 	for (size_t Index = 1; Index < Result.Points.size(); ++Index)
 	{
 		Result.PathLength += FVector::Distance(Result.Points[Index - 1], Result.Points[Index]);
 	}
+	if (MaxPathLength > 0.0f && Result.PathLength > MaxPathLength + Epsilon)
+	{
+		Result.Points.clear();
+		Result.PathLength = 0.0f;
+		Result.Failure = FVoxelNavigationPathResult::EFailure::NoPath;
+		Result.SearchTimeMs = ElapsedMilliseconds(StartTime);
+		return Result;
+	}
+
 	Result.bSuccess = true;
-	Result.bPartial = !bReachedGoalNode || FVector::Distance(Result.Points.back(), Goal) > GoalAcceptanceRadius;
+	Result.bPartial = bAbstractPartial || FVector::Distance(Result.Points.back(), Goal) > GoalAcceptanceRadius;
 	Result.SearchTimeMs = ElapsedMilliseconds(StartTime);
 	return Result;
 }
@@ -336,42 +759,474 @@ bool FVoxelNavigationGrid::Contains(const FVector& Point) const
 		Point.Z >= BoundsMin.Z && Point.Z <= Max.Z;
 }
 
-int32 FVoxelNavigationGrid::FlattenColumn(int32 X, int32 Y) const
+void FVoxelNavigationGrid::GatherDebugGeometry(
+	int MaxNodes,
+	TArray<FVector>& OutNodes,
+	TArray<TPair<FVector, FVector>>& OutEdges) const
 {
-	return Y * SizeX + X;
-}
+	OutNodes.clear();
+	OutEdges.clear();
+	if (MaxNodes <= 0) return;
 
-bool FVoxelNavigationGrid::IsValidColumn(int32 X, int32 Y) const
-{
-	return X >= 0 && X < SizeX && Y >= 0 && Y < SizeY;
-}
-
-int32 FVoxelNavigationGrid::FindNearestNode(const FVector& Point, float MaxDistance) const
-{
-	int32 BestNode = -1;
-	float BestDistanceSquared = (std::numeric_limits<float>::max)();
-	for (int32 Index = 0; Index < static_cast<int32>(Nodes.size()); ++Index)
+	for (int ChunkIndex = 0; ChunkIndex < L1Chunks.size() && OutNodes.size() < MaxNodes; ++ChunkIndex)
 	{
-		const float DistanceSquared = FVector::DistSquared(Nodes[static_cast<size_t>(Index)].Position, Point);
-		if (DistanceSquared < BestDistanceSquared)
+		for (int LocalCell = 0; LocalCell < NavL1ChunkCellCount && OutNodes.size() < MaxNodes; ++LocalCell)
 		{
-			BestDistanceSquared = DistanceSquared;
-			BestNode = Index;
+			if (!IsCellWalkable(ChunkIndex, LocalCell)) 
+				continue;
+
+			OutNodes.push_back(GetCellPosition({ ChunkIndex, LocalCell }));
+			const int X = LocalCell % NavL1ChunkCellsPerAxis;
+			const int Y = LocalCell / NavL1ChunkCellsPerAxis;
+			const int DebugOffsets[4][2] = { { 1, 0 }, { 0, 1 }, { 1, 1 }, { -1, 1 } };
+			for (const auto& Offset : DebugOffsets)
+			{
+				const int NX = X + Offset[0];
+				const int NY = Y + Offset[1];
+				if (NX < 0 || NX >= NavL1ChunkCellsPerAxis ||
+					NY < 0 || NY >= NavL1ChunkCellsPerAxis) 
+					continue;
+
+				const int NeighborCell = NY * NavL1ChunkCellsPerAxis + NX;
+				if (IsCellWalkable(ChunkIndex, NeighborCell))
+				{
+					OutEdges.push_back({ GetCellPosition({ ChunkIndex, LocalCell }),
+						GetCellPosition({ ChunkIndex, NeighborCell }) });
+				}
+			}
 		}
 	}
-	if (MaxDistance > 0.0f && BestDistanceSquared > MaxDistance * MaxDistance)
+
+	for (int PortalIndex = 0; PortalIndex <Portals.size(); ++PortalIndex)
 	{
-		return -1;
+		const FVoxelNavigationPortal& Portal = Portals[PortalIndex];
+		for (const FVoxelNavigationAbstractEdge& Edge : Portal.Edges)
+		{
+			if (Edge.ToPortal <= PortalIndex) 
+				continue;
+
+			const FVoxelNavigationPortal& Other = Portals[Edge.ToPortal];
+			if (Portal.ChunkIndex == Other.ChunkIndex) 
+				continue;
+
+			OutEdges.push_back({ GetCellPosition({ Portal.ChunkIndex, Portal.LocalCell }),
+				GetCellPosition({ Other.ChunkIndex, Other.LocalCell }) });
+		}
 	}
-	return BestNode;
 }
 
-bool FVoxelNavigationGrid::CanTraverse(UWorld* World, int32 FromNode, int32 ToNode, const AActor* QueryOwner) const
+int FVoxelNavigationGrid::FlattenColumn(int X, int Y) const
 {
-	if (!World || FromNode < 0 || ToNode < 0) return false;
+	return Y * CellCountX + X;
+}
+
+bool FVoxelNavigationGrid::IsValidColumn(int X, int Y) const
+{
+	return X >= 0 && X < CellCountX && Y >= 0 && Y < CellCountY;
+}
+
+int FVoxelNavigationGrid::FlattenL1Chunk(int X, int Y, int Z) const
+{
+	return (Z * L1ChunkCountY + Y) * L1ChunkCountX + X;
+}
+
+bool FVoxelNavigationGrid::IsValidL1Chunk(int X, int Y, int Z) const
+{
+	return X >= 0 && X < L1ChunkCountX && Y >= 0 && Y < L1ChunkCountY && Z >= 0 && Z < L1ChunkCountZ;
+}
+
+FVoxelNavigationGrid::FCellRef FVoxelNavigationGrid::FindNearestCell(const FVector& Point, float MaxDistance) const
+{
+	FCellRef BestCell;
+	float BestDistSquared = MaxDistance > 0.0f ? MaxDistance * MaxDistance : INF;
+	TArray<uint8> ChunkVisited(L1Chunks.size(), 0);
+
+	auto FindNearestCellInChunk = [&](int ChunkIndex)
+	{
+		if (ChunkIndex < 0 || ChunkIndex >= L1Chunks.size() ||
+			ChunkVisited[ChunkIndex] != 0) 
+			return;
+
+		ChunkVisited[ChunkIndex] = 1;
+		for (int LocalCell = 0; LocalCell < NavL1ChunkCellCount; ++LocalCell)
+		{
+			if (!IsCellWalkable(ChunkIndex, LocalCell)) 
+				continue;
+
+			const float DistanceSquared = FVector::DistSquared(GetCellPosition({ ChunkIndex, LocalCell }), Point);
+			if (DistanceSquared < BestDistSquared)
+			{
+				BestDistSquared = DistanceSquared;
+				BestCell = { ChunkIndex, LocalCell };
+			}
+		}
+	};
+
+	const int HomeX = static_cast<int>(std::floor((Point.X - BoundsMin.X) / NavL1ChunkSize));
+	const int HomeY = static_cast<int>(std::floor((Point.Y - BoundsMin.Y) / NavL1ChunkSize));
+	const int HomeZ = static_cast<int>(std::floor((Point.Z - BoundsMin.Z) / NavL1ChunkSize));
+	for (int Z = HomeZ - 1; Z <= HomeZ + 1; ++Z)
+	{
+		for (int Y = HomeY - 1; Y <= HomeY + 1; ++Y)
+		{
+			for (int X = HomeX - 1; X <= HomeX + 1; ++X)
+			{
+				if (!IsValidL1Chunk(X, Y, Z)) 
+					continue;
+
+				FindNearestCellInChunk(L1ChunkLookup[FlattenL1Chunk(X, Y, Z)]);
+			}
+		}
+	}
+
+	for (int ChunkIndex = 0; ChunkIndex < L1Chunks.size(); ++ChunkIndex)
+	{
+		if (ChunkVisited[ChunkIndex] != 0) 
+			continue;
+
+		const FVoxelCoord& Coord = L1Chunks[ChunkIndex].Coord;
+		const FVector Min = BoundsMin + FVector(Coord.X, Coord.Y, Coord.Z) * NavL1ChunkSize;
+		const FVector Max = Min + FVector::OneVector * NavL1ChunkSize;
+		const float DX = Point.X < Min.X ? Min.X - Point.X : (Point.X > Max.X ? Point.X - Max.X : 0.0f);
+		const float DY = Point.Y < Min.Y ? Min.Y - Point.Y : (Point.Y > Max.Y ? Point.Y - Max.Y : 0.0f);
+		const float DZ = Point.Z < Min.Z ? Min.Z - Point.Z : (Point.Z > Max.Z ? Point.Z - Max.Z : 0.0f);
+		if (DX * DX + DY * DY + DZ * DZ > BestDistSquared) 
+			continue;
+
+		FindNearestCellInChunk(ChunkIndex);
+	}
+	return BestCell;
+}
+
+FVector FVoxelNavigationGrid::GetCellPosition(const FCellRef& Cell) const
+{
+	if (!Cell.IsValid() || Cell.ChunkIndex >= L1Chunks.size()) 
+		return FVector::ZeroVector;
+
+	const FVoxelNavigationL1Chunk& Chunk = L1Chunks[Cell.ChunkIndex];
+	const uint8 HeightCode = Chunk.Cells[Cell.LocalCell];
+	if (HeightCode == 0) 
+		return FVector::ZeroVector;
+
+	const int LocalX = Cell.LocalCell % NavL1ChunkCellsPerAxis;
+	const int LocalY = Cell.LocalCell / NavL1ChunkCellsPerAxis;
+	const int GlobalX = Chunk.Coord.X * NavL1ChunkCellsPerAxis + LocalX;
+	const int GlobalY = Chunk.Coord.Y * NavL1ChunkCellsPerAxis + LocalY;
+	const float ChunkBottom = BoundsMin.Z + (Chunk.Coord.Z * NavL1ChunkSize);
+	return FVector(
+		BoundsMin.X + (GlobalX + 0.5f) * NavVoxelCellSize,
+		BoundsMin.Y + (GlobalY + 0.5f) * NavVoxelCellSize,
+		ChunkBottom + (HeightCode - 1.0f) * (NavL1ChunkSize / 254.0f));
+}
+
+bool FVoxelNavigationGrid::IsCellWalkable(int ChunkIndex, int LocalCell) const
+{
+	return ChunkIndex >= 0 && ChunkIndex < L1Chunks.size() 
+		&& LocalCell >= 0 && LocalCell < NavL1ChunkCellCount
+		&& L1Chunks[ChunkIndex].Cells[LocalCell] != 0;
+}
+
+float FVoxelNavigationGrid::FindLocalPath(const FCellRef& Start, const FCellRef& Goal,
+										TArray<FCellRef>* OutPath,
+										bool bAllowPartial, const FVector* PartialTarget) const
+{
+	if (!Start.IsValid() || !Goal.IsValid() || Start.ChunkIndex != Goal.ChunkIndex ||
+		!IsCellWalkable(Start.ChunkIndex, Start.LocalCell) || !IsCellWalkable(Goal.ChunkIndex, Goal.LocalCell))
+	{
+		return INF;
+	}
+
+	TStaticArray<float, NavL1ChunkCellCount> Cost;
+	TStaticArray<int, NavL1ChunkCellCount> Parent;
+	TStaticArray<uint8, NavL1ChunkCellCount> Visited = {0, };
+	Cost.fill(INF);
+	Parent.fill(-1);
+	std::priority_queue<FOpenNode> PriorityQue;
+	Cost[Start.LocalCell] = 0.0f;
+	const FVector SearchTarget = PartialTarget ? *PartialTarget : GetCellPosition(Goal);
+	PriorityQue.push({ Start.LocalCell, FVector::Distance(GetCellPosition(Start), SearchTarget) });
+	int BestCell = Start.LocalCell;
+	float BestTargetDistance = PartialTarget
+		? FVector::Distance(GetCellPosition(Start), *PartialTarget)
+		: FVector::Distance(GetCellPosition(Start), GetCellPosition(Goal));
+
+	while (!PriorityQue.empty())
+	{
+		const int Current = PriorityQue.top().Index;
+		PriorityQue.pop();
+		if (Visited[Current] != 0) 
+			continue;
+
+		Visited[Current] = 1;
+		const FCellRef CurrentRef{ Start.ChunkIndex, Current };
+		const float TargetDistance = PartialTarget
+			? FVector::Distance(GetCellPosition(CurrentRef), *PartialTarget)
+			: FVector::Distance(GetCellPosition(CurrentRef), GetCellPosition(Goal));
+		if (TargetDistance < BestTargetDistance)
+		{
+			BestTargetDistance = TargetDistance;
+			BestCell = Current;
+		}
+		if (Current == Goal.LocalCell && !bAllowPartial)
+		{
+			BestCell = Current;
+			break;
+		}
+
+		const int X = Current % NavL1ChunkCellsPerAxis;
+		const int Y = Current / NavL1ChunkCellsPerAxis;
+		for (const auto& Offset : NeighborOffsets)
+		{
+			const int NX = X + Offset[0];
+			const int NY = Y + Offset[1];
+			if (NX < 0 || NX >= NavL1ChunkCellsPerAxis ||
+				NY < 0 || NY >= NavL1ChunkCellsPerAxis) 
+				continue;
+
+			const int Neighbor = NY * NavL1ChunkCellsPerAxis + NX;
+			if (!IsCellWalkable(Start.ChunkIndex, Neighbor) || Visited[Neighbor] != 0) 
+				continue;
+
+			const FCellRef NeighborRef{ Start.ChunkIndex, Neighbor };
+			const float NewCost = Cost[Current] +
+				FVector::Distance(GetCellPosition(CurrentRef), GetCellPosition(NeighborRef));
+			if (NewCost >= Cost[Neighbor]) 
+				continue;
+
+			Cost[Neighbor] = NewCost;
+			Parent[Neighbor] = Current;
+			PriorityQue.push({ Neighbor, NewCost + FVector::Distance(GetCellPosition(NeighborRef), SearchTarget) });
+		}
+	}
+
+	if (BestCell != Goal.LocalCell && !bAllowPartial)
+	{
+		return INF;
+	}
+
+	if (OutPath)
+	{
+		TArray<FCellRef> ReversePath;
+		for (int Current = BestCell; Current >= 0; Current = Parent[Current])
+		{
+			ReversePath.push_back({ Start.ChunkIndex, Current });
+			if (Current == Start.LocalCell) 
+				break;
+		}
+		if (ReversePath.empty() || ReversePath.back().LocalCell != Start.LocalCell)
+		{
+			return INF;
+		}
+		OutPath->assign(ReversePath.rbegin(), ReversePath.rend());
+	}
+	return Cost[BestCell];
+}
+
+void FVoxelNavigationGrid::BuildAbstractGraph(const TArray<uint8>& RetainedNodes)
+{
+	Portals.clear();
+
+	if (L1Chunks.empty()) 
+		return;
+
+	for (FVoxelNavigationL1Chunk& Chunk : L1Chunks)
+	{
+		Chunk.PortalIndices.clear();
+	}
+
+	// 청크 내에서 연속된 부분 합치기
+	TArray<TStaticArray<int16, NavL1ChunkCellCount>> Subareas(L1Chunks.size());
+	for (int ChunkIndex = 0; ChunkIndex < L1Chunks.size(); ++ChunkIndex)
+	{
+		Subareas[ChunkIndex].fill(-1);
+		int16 NextComponent = 0;
+		for (int Seed = 0; Seed < NavL1ChunkCellCount; ++Seed)
+		{
+			if (!IsCellWalkable(ChunkIndex, Seed) || Subareas[ChunkIndex][Seed] >= 0) continue;
+			TArray<int> Queue = { Seed };
+			Subareas[ChunkIndex][Seed] = NextComponent;
+			for (size_t QueueIndex = 0; QueueIndex < Queue.size(); ++QueueIndex)
+			{
+				const int Current = Queue[QueueIndex];
+				const int X = Current % NavL1ChunkCellsPerAxis;
+				const int Y = Current / NavL1ChunkCellsPerAxis;
+				for (const auto& Offset : NeighborOffsets)
+				{
+					const int NX = X + Offset[0];
+					const int NY = Y + Offset[1];
+					if (NX < 0 || NX >= NavL1ChunkCellsPerAxis ||
+						NY < 0 || NY >= NavL1ChunkCellsPerAxis) 
+						continue;
+
+					const int Neighbor = NY * NavL1ChunkCellsPerAxis + NX;
+					if (!IsCellWalkable(ChunkIndex, Neighbor) ||
+						Subareas[ChunkIndex][Neighbor] >= 0) 
+						continue;
+
+					Subareas[ChunkIndex][Neighbor] = NextComponent;
+					Queue.push_back(Neighbor);
+				}
+			}
+			++NextComponent;
+		}
+	}
+
+	// 이웃한 노드가 서로 다른 청크에 있을 경우 후보로 추가
+	// (이 단계에서는 중복된 subarea 쌍이 포함될 수 있음)
+	TArray<FCrossingCandidate> Crossings;
+	for (int NodeIndex = 0; NodeIndex < Nodes.size(); ++NodeIndex)
+	{
+		if (RetainedNodes[NodeIndex] == 0) 
+			continue;
+
+		for (int Neighbor : Nodes[NodeIndex].Neighbors)
+		{
+			if (Neighbor <= NodeIndex || RetainedNodes[Neighbor] == 0 ||
+				!ContainsIndex(Nodes[Neighbor].Neighbors, NodeIndex)) 
+				continue;
+
+			int ChunkA = NodeToChunkLookup[NodeIndex];
+			int ChunkB = NodeToChunkLookup[Neighbor];
+			if (ChunkA < 0 || ChunkB < 0 || ChunkA == ChunkB) 
+				continue;
+
+			int NodeA = NodeIndex;
+			int NodeB = Neighbor;
+			int CellA = NodeToLocalCellIdxLookup[NodeIndex];
+			int CellB = NodeToLocalCellIdxLookup[Neighbor];
+			if (ChunkB < ChunkA)
+			{
+				std::swap(ChunkA, ChunkB);
+				std::swap(NodeA, NodeB);
+				std::swap(CellA, CellB);
+			}
+			Crossings.push_back({ NodeA, NodeB, ChunkA, ChunkB, CellA, CellB,
+				Subareas[ChunkA][CellA],
+				Subareas[ChunkB][CellB] });
+		}
+	}
+
+	std::sort(Crossings.begin(), Crossings.end(), [](const FCrossingCandidate& A, const FCrossingCandidate& B)
+	{
+		return std::tie(A.ChunkA, A.SubareaA, A.ChunkB, A.SubareaB, A.CellA, A.CellB) <
+			std::tie(B.ChunkA, B.SubareaA, B.ChunkB, B.SubareaB, B.CellA, B.CellB);
+	});
+
+	// 정렬된 Crossing 리스트에서 같은 portal을 가리키는 {chunk, subarea} 쌍은 묶고 중복되지 않은 portal만 추가
+	for (size_t GroupBegin = 0; GroupBegin < Crossings.size(); )
+	{
+		size_t GroupEnd = GroupBegin + 1;
+		while (GroupEnd < Crossings.size() &&
+			Crossings[GroupEnd].ChunkA == Crossings[GroupBegin].ChunkA &&
+			Crossings[GroupEnd].ChunkB == Crossings[GroupBegin].ChunkB &&
+			Crossings[GroupEnd].SubareaA == Crossings[GroupBegin].SubareaA &&
+			Crossings[GroupEnd].SubareaB == Crossings[GroupBegin].SubareaB)
+		{
+			++GroupEnd;
+		}
+
+		// 서로 같은 Subarea 쌍을 가리키더라도 서로 다른 portal일 수 있음
+		// e.g.) 경계에 작은 장애물이 걸쳐져 있는 경우
+		TArray<uint8> Visited(GroupEnd - GroupBegin, 0);
+		for (size_t LocalSeed = 0; LocalSeed < Visited.size(); ++LocalSeed)
+		{
+			if (Visited[LocalSeed] != 0) 
+				continue;
+
+			TArray<size_t> Run = { LocalSeed };
+			Visited[LocalSeed] = 1;
+			for (size_t QueueIndex = 0; QueueIndex < Run.size(); ++QueueIndex)
+			{
+				for (size_t Candidate = 0; Candidate < Visited.size(); ++Candidate)
+				{
+					if (Visited[Candidate] != 0) 
+						continue;
+
+					if (AreCrossingsAdjacent(Crossings[GroupBegin + Run[QueueIndex]],
+						Crossings[GroupBegin + Candidate], Nodes))
+					{
+						Visited[Candidate] = 1;
+						Run.push_back(Candidate);
+					}
+				}
+			}
+
+			const FCrossingCandidate& Chosen = Crossings[GroupBegin + Run[Run.size() / 2]];
+			const int PortalA = FindOrAddPortal(Chosen.ChunkA, Chosen.CellA);
+			const int PortalB = FindOrAddPortal(Chosen.ChunkB, Chosen.CellB);
+			const float CrossingCost = FVector::Distance(
+				GetCellPosition({ Chosen.ChunkA, Chosen.CellA }),
+				GetCellPosition({ Chosen.ChunkB, Chosen.CellB }));
+			AddAbstractEdge(PortalA, PortalB, CrossingCost);
+			AddAbstractEdge(PortalB, PortalA, CrossingCost);
+		}
+		GroupBegin = GroupEnd;
+	}
+
+	// 청크 내부 간선 추가
+	for (const FVoxelNavigationL1Chunk& Chunk : L1Chunks)
+	{
+		for (size_t A = 0; A < Chunk.PortalIndices.size(); ++A)
+		{
+			for (size_t B = A + 1; B < Chunk.PortalIndices.size(); ++B)
+			{
+				const int PortalA = Chunk.PortalIndices[A];
+				const int PortalB = Chunk.PortalIndices[B];
+				const float Cost = FindLocalPath(
+					{ Portals[PortalA].ChunkIndex, Portals[PortalA].LocalCell },
+					{ Portals[PortalB].ChunkIndex, Portals[PortalB].LocalCell });
+				if (Cost >= INF) 
+					continue;
+
+				AddAbstractEdge(PortalA, PortalB, Cost);
+				AddAbstractEdge(PortalB, PortalA, Cost);
+			}
+		}
+	}
+}
+
+int FVoxelNavigationGrid::FindOrAddPortal(int ChunkIndex, int LocalCell)
+{
+	FVoxelNavigationL1Chunk& Chunk = L1Chunks[ChunkIndex];
+	for (int PortalIndex : Chunk.PortalIndices)
+	{
+		if (Portals[PortalIndex].LocalCell == LocalCell) 
+			return PortalIndex;
+	}
+	const int PortalIndex = static_cast<int>(Portals.size());
+	FVoxelNavigationPortal Portal;
+	Portal.ChunkIndex = ChunkIndex;
+	Portal.LocalCell = static_cast<uint8>(LocalCell);
+	Portals.push_back(Portal);
+	Chunk.PortalIndices.push_back(PortalIndex);
+	return PortalIndex;
+}
+
+void FVoxelNavigationGrid::AddAbstractEdge(int FromPortal, int ToPortal, float Cost)
+{
+	if (FromPortal < 0 || ToPortal < 0 || FromPortal == ToPortal) 
+		return;
+
+	TArray<FVoxelNavigationAbstractEdge>& Edges = Portals[FromPortal].Edges;
+	for (FVoxelNavigationAbstractEdge& Edge : Edges)
+	{
+		if (Edge.ToPortal != ToPortal) 
+			continue;
+
+		Edge.Cost = (std::min)(Edge.Cost, Cost);
+		return;
+	}
+	Edges.push_back({ ToPortal, Cost });
+}
+
+bool FVoxelNavigationGrid::CanTraverse(UWorld* World, int FromNode, int ToNode, const AActor* QueryOwner) const
+{
+	if (!World || FromNode < 0 || ToNode < 0) 
+		return false;
+
 	const FVector Lift = FVector::UpVector * (BuildSettings.AgentHeight * 0.5f + BuildSettings.ClearanceOffset);
-	const FVector Start = Nodes[static_cast<size_t>(FromNode)].Position + Lift;
-	const FVector End = Nodes[static_cast<size_t>(ToNode)].Position + Lift;
+	const FVector Start = Nodes[FromNode].Position + Lift;
+	const FVector End = Nodes[ToNode].Position + Lift;
 	const FCollisionShape Shape = FCollisionShape::MakeCapsule(BuildSettings.AgentRadius, BuildSettings.AgentHeight * 0.5f);
 	FHitResult Hit;
 	return !World->PhysicsSweepByObjectTypes(
@@ -379,77 +1234,79 @@ bool FVoxelNavigationGrid::CanTraverse(UWorld* World, int32 FromNode, int32 ToNo
 		ObjectTypeBit(ECollisionChannel::WorldStatic), QueryOwner);
 }
 
-bool FVoxelNavigationGrid::HasCardinalBridge(int32 FromNode, int32 ToNode, int32 BridgeX, int32 BridgeY) const
+bool FVoxelNavigationGrid::HasCardinalBridge(int FromNode, int ToNode, int BridgeX, int BridgeY) const
 {
-	if (FromNode < 0 || ToNode < 0 || !IsValidColumn(BridgeX, BridgeY)) return false;
-	const TArray<int32>& FromNeighbors = Nodes[static_cast<size_t>(FromNode)].Neighbors;
-	for (int32 BridgeNode : ColumnNodes[static_cast<size_t>(FlattenColumn(BridgeX, BridgeY))])
+	if (FromNode < 0 || ToNode < 0 || !IsValidColumn(BridgeX, BridgeY)) 
+		return false;
+
+	const TArray<int>& FromNeighbors = Nodes[FromNode].Neighbors;
+	for (int BridgeNode : XYToNodesLookup[FlattenColumn(BridgeX, BridgeY)])
 	{
-		if (std::find(FromNeighbors.begin(), FromNeighbors.end(), BridgeNode) == FromNeighbors.end())
-		{
+		if (!ContainsIndex(FromNeighbors, BridgeNode)) 
 			continue;
-		}
-		const TArray<int32>& BridgeNeighbors = Nodes[static_cast<size_t>(BridgeNode)].Neighbors;
-		if (std::find(BridgeNeighbors.begin(), BridgeNeighbors.end(), ToNode) != BridgeNeighbors.end())
-		{
+
+		if (ContainsIndex(Nodes[BridgeNode].Neighbors, ToNode)) 
 			return true;
-		}
 	}
 	return false;
 }
 
-void FVoxelNavigationGrid::AddDirectedEdge(int32 FromNode, int32 ToNode)
+void FVoxelNavigationGrid::AddDirectedEdge(int FromNode, int ToNode)
 {
-	if (FromNode < 0 || ToNode < 0 || FromNode == ToNode) return;
-	TArray<int32>& Neighbors = Nodes[static_cast<size_t>(FromNode)].Neighbors;
-	if (std::find(Neighbors.begin(), Neighbors.end(), ToNode) == Neighbors.end())
+	if (FromNode < 0 || ToNode < 0 || FromNode == ToNode) 
+		return;
+
+	TArray<int>& Neighbors = Nodes[FromNode].Neighbors;
+	if (!ContainsIndex(Neighbors, ToNode))
 	{
-		const size_t PreviousNeighborCapacity = Neighbors.capacity();
+		const size_t PreviousCapacity = Neighbors.capacity();
 		Neighbors.push_back(ToNode);
-		AddTrackedMemory(static_cast<uint64>(Neighbors.capacity() - PreviousNeighborCapacity) * sizeof(int32));
+		AddTrackedMemory((Neighbors.capacity() - PreviousCapacity) * sizeof(int));
 		++BuildStats.NumDirectedEdges;
 	}
-}
-
-uint64 FVoxelNavigationGrid::CalculateTrackedMemoryBytes() const
-{
-	uint64 TotalBytes =
-		static_cast<uint64>(Nodes.capacity()) * sizeof(FVoxelNavigationNode) +
-		static_cast<uint64>(ColumnNodes.capacity()) * sizeof(TArray<int32>);
-
-	for (const FVoxelNavigationNode& Node : Nodes)
-	{
-		TotalBytes += static_cast<uint64>(Node.Neighbors.capacity()) * sizeof(int32);
-	}
-	for (const TArray<int32>& Column : ColumnNodes)
-	{
-		TotalBytes += static_cast<uint64>(Column.capacity()) * sizeof(int32);
-	}
-	return TotalBytes;
 }
 
 void FVoxelNavigationGrid::RefreshTrackedMemory()
 {
 	const uint64 NewTrackedMemoryBytes = CalculateTrackedMemoryBytes();
-	if (NewTrackedMemoryBytes > TrackedMemoryBytes)
-	{
-		MemoryStats::AddVoxelNavigationMemory(NewTrackedMemoryBytes - TrackedMemoryBytes);
-	}
-	else if (NewTrackedMemoryBytes < TrackedMemoryBytes)
-	{
-		MemoryStats::SubVoxelNavigationMemory(TrackedMemoryBytes - NewTrackedMemoryBytes);
-	}
+	MemoryStats::SetVoxelNavigationMemory(NewTrackedMemoryBytes);
 	TrackedMemoryBytes = NewTrackedMemoryBytes;
 	UpdateBuildPeakMemory();
 }
 
-void FVoxelNavigationGrid::AddTrackedMemory(uint64 Size)
+size_t FVoxelNavigationGrid::CalculateTrackedMemoryBytes() const
 {
-	if (Size == 0)
+	size_t TotalBytes = 0;
+	TotalBytes += Nodes.capacity() * sizeof(FVoxelNavigationNode);
+	TotalBytes += XYToNodesLookup.capacity() * sizeof(TArray<int>);
+	TotalBytes += L1Chunks.capacity() * sizeof(FVoxelNavigationL1Chunk);
+	TotalBytes += L1ChunkLookup.capacity() * sizeof(int);
+	TotalBytes += Portals.capacity() * sizeof(FVoxelNavigationPortal);
+	TotalBytes += NodeToChunkLookup.capacity() * sizeof(int);
+	TotalBytes += NodeToLocalCellIdxLookup.capacity() * sizeof(int);
+	TotalBytes += ChunkCellToNodeLookup.capacity() * sizeof(TStaticArray<int, NavL1ChunkCellCount>);
+	for (const FVoxelNavigationNode& Node : Nodes)
 	{
-		return;
+		TotalBytes += Node.Neighbors.capacity() * sizeof(int);
 	}
+	for (const TArray<int>& Column : XYToNodesLookup)
+	{
+		TotalBytes += Column.capacity() * sizeof(int);
+	}
+	for (const FVoxelNavigationL1Chunk& Chunk : L1Chunks)
+	{
+		TotalBytes += Chunk.PortalIndices.capacity() * sizeof(int);
+	}
+	for (const FVoxelNavigationPortal& Portal : Portals)
+	{
+		TotalBytes += Portal.Edges.capacity() * sizeof(FVoxelNavigationAbstractEdge);
+	}
+	return TotalBytes;
+}
 
+void FVoxelNavigationGrid::AddTrackedMemory(size_t Size)
+{
+	if (Size == 0) return;
 	TrackedMemoryBytes += Size;
 	MemoryStats::AddVoxelNavigationMemory(Size);
 	UpdateBuildPeakMemory();

@@ -25,6 +25,7 @@ enum class EHorseCallNavigationStatus : uint8
 	FailedNoVolume,
 	FailedNoStart,
 	FailedNoPath,
+	FailedNoData,
 };
 
 inline bool IsCompletedCallNavigationStatus(EHorseCallNavigationStatus Status)
@@ -40,6 +41,7 @@ inline bool IsTerminalCallNavigationStatus(EHorseCallNavigationStatus Status)
 		Status == EHorseCallNavigationStatus::AbortedStuck ||
 		Status == EHorseCallNavigationStatus::AbortedAlignment ||
 		Status == EHorseCallNavigationStatus::FailedNoVolume ||
+		Status == EHorseCallNavigationStatus::FailedNoData ||
 		Status == EHorseCallNavigationStatus::FailedNoStart ||
 		Status == EHorseCallNavigationStatus::FailedNoPath;
 }

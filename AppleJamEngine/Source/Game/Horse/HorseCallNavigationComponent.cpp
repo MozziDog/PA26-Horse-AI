@@ -18,6 +18,13 @@
 
 namespace
 {
+	float PlanarDistance(const FVector& A, const FVector& B)
+	{
+		const float DX = A.X - B.X;
+		const float DY = A.Y - B.Y;
+		return std::sqrt(DX * DX + DY * DY);
+	}
+
 	const char* ToString(EHorseCallNavigationStatus Status)
 	{
 		switch (Status)
@@ -32,6 +39,7 @@ namespace
 		case EHorseCallNavigationStatus::AbortedStuck: return "AbortedStuck";
 		case EHorseCallNavigationStatus::AbortedAlignment: return "AbortedAlignment";
 		case EHorseCallNavigationStatus::FailedNoVolume: return "FailedNoVolume";
+		case EHorseCallNavigationStatus::FailedNoData: return "FailedNoData";
 		case EHorseCallNavigationStatus::FailedNoStart: return "FailedNoStart";
 		case EHorseCallNavigationStatus::FailedNoPath: return "FailedNoPath";
 		default: return "Unknown";
@@ -168,10 +176,18 @@ bool UHorseCallNavigationComponent::BeginPlan()
 	const FVoxelNavigationPathResult Path = Volume->FindPath(OwnerHorse->GetActorLocation(), RawTarget);
 	if (!Path.bSuccess)
 	{
-		StopAtTerminalStatus(
-			Path.Failure == FVoxelNavigationPathResult::EFailure::NoStart
-				? EHorseCallNavigationStatus::FailedNoStart
-				: EHorseCallNavigationStatus::FailedNoPath);
+		EHorseCallNavigationStatus FailureStatus = EHorseCallNavigationStatus::FailedNoPath;
+		if (Path.Failure == FVoxelNavigationPathResult::EFailure::NoData)
+		{
+			FailureStatus = EHorseCallNavigationStatus::FailedNoData;
+		}
+		else if (Path.Failure == FVoxelNavigationPathResult::EFailure::NoStart)
+		{
+			FailureStatus = EHorseCallNavigationStatus::FailedNoStart;
+		}
+		UE_LOG("[HorseCallNavigation] Plan failed Horse=%s Failure=%d",
+			OwnerHorse->GetName().c_str(), static_cast<int32>(Path.Failure));
+		StopAtTerminalStatus(FailureStatus);
 		return false;
 	}
 
@@ -382,7 +398,12 @@ void UHorseCallNavigationComponent::AdvanceFollowing(float DeltaTime)
 
 	while (HasValidCurrentWaypoint())
 	{
-		if (FVector::Distance(HorseLocation, PathPoints[CurrentWaypoint]) > GetCurrentWaypointAcceptanceRadius())
+		const bool bIsExactFinalWaypoint =
+			CurrentWaypoint == static_cast<int>(PathPoints.size()) - 1 && !bPlannedPartial;
+		const float WaypointDistance = bIsExactFinalWaypoint
+			? FVector::Distance(HorseLocation, PathPoints[CurrentWaypoint])
+			: PlanarDistance(HorseLocation, PathPoints[CurrentWaypoint]);
+		if (WaypointDistance > GetCurrentWaypointAcceptanceRadius())
 		{
 			break;
 		}
@@ -403,7 +424,7 @@ void UHorseCallNavigationComponent::AdvanceFollowing(float DeltaTime)
 	UpdatePurePursuitRecommendedGait(HorseLocation, LookaheadPoint);
 	PublishGuidance(Direction);
 
-	if (FVector::Distance(HorseLocation, ProgressAnchor) >= MinProgressDist)
+	if (PlanarDistance(HorseLocation, ProgressAnchor) >= MinProgressDist)
 	{
 		ProgressAnchor = HorseLocation;
 		NoProgressTime = 0.0f;
@@ -432,7 +453,7 @@ FVector UHorseCallNavigationComponent::GetLookaheadPoint(const FVector& HorseLoc
 	{
 		const FVector SegmentEnd = PathPoints[Index];
 		const FVector Segment = SegmentEnd - SegmentStart;
-		const float SegmentLength = Segment.Length();
+		const float SegmentLength = PlanarDistance(SegmentEnd, SegmentStart);
 		if (SegmentLength > RemainingDistance)
 		{
 			return SegmentStart + Segment * (RemainingDistance / SegmentLength);
