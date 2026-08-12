@@ -28,6 +28,10 @@ public:
 	// chunk identities and edges, without invoking any physics query.
 	bool SaveReferenceJson(const FString& Path) const;
 	bool LoadReferenceJson(const FString& Path);
+	// Production transport.  The payload is an explicitly field-serialized,
+	// indexed little-endian stream; no C++ struct layout is persisted.
+	bool SaveNavigationAsset(const FString& Path, const FString& SourceScenePath) const;
+	bool LoadNavigationAsset(const FString& Path);
 	bool HasLoadedNavigationAt(const FVector& Point) const;
 	bool IsNavigationReadyFor(const FVector& Start, const FVector& Goal) const
 	{

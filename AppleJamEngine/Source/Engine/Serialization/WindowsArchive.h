@@ -11,6 +11,7 @@ class FWindowsBinWriter : public FArchive
 {
 private:
 	std::ofstream FileStream;
+	bool bHasError = false;
 	struct FTaggedPropertyWriteRecord
 	{
 		FString Name;
@@ -38,7 +39,29 @@ public:
 	}
 
 	// 파일이 정상적으로 열렸는지 확인
-	bool IsValid() const { return FileStream.is_open() && FileStream.good(); }
+	bool IsValid() const { return FileStream.is_open() && !bHasError && FileStream.good(); }
+
+	uint64 Tell() override
+	{
+		if (!FileStream.is_open()) return 0;
+		const std::streampos Position = FileStream.tellp();
+		if (Position < 0) { bHasError = true; return 0; }
+		return static_cast<uint64>(Position);
+	}
+
+	bool Seek(uint64 AbsoluteOffset) override
+	{
+		if (!FileStream.is_open()) return false;
+		FileStream.clear();
+		FileStream.seekp(static_cast<std::streamoff>(AbsoluteOffset), std::ios::beg);
+		if (!FileStream.good()) bHasError = true;
+		return !bHasError;
+	}
+
+	uint64 Size() override
+	{
+		return Tell();
+	}
 
 	void BeginObject() override
 	{
@@ -122,7 +145,9 @@ public:
 		if (FileStream.is_open())
 		{
 			FileStream.write(static_cast<const char*>(Data), Num);
+			if (!FileStream.good()) bHasError = true;
 		}
+		else bHasError = true;
 	}
 };
 
@@ -130,6 +155,7 @@ class FWindowsBinReader : public FArchive
 {
 private:
 	std::ifstream FileStream;
+	bool bHasError = false;
 	struct FTaggedObjectReadScope
 	{
 		TMap<FString, TArray<uint8>> Properties;
@@ -155,7 +181,37 @@ public:
 		if (FileStream.is_open()) FileStream.close();
 	}
 
-	bool IsValid() const { return FileStream.is_open() && FileStream.good(); }
+	bool IsValid() const { return FileStream.is_open() && !bHasError && FileStream.good(); }
+
+	uint64 Tell() override
+	{
+		if (!FileStream.is_open()) return 0;
+		const std::streampos Position = FileStream.tellg();
+		if (Position < 0) { bHasError = true; return 0; }
+		return static_cast<uint64>(Position);
+	}
+
+	bool Seek(uint64 AbsoluteOffset) override
+	{
+		if (!FileStream.is_open()) return false;
+		FileStream.clear();
+		FileStream.seekg(static_cast<std::streamoff>(AbsoluteOffset), std::ios::beg);
+		if (!FileStream.good()) bHasError = true;
+		return !bHasError;
+	}
+
+	uint64 Size() override
+	{
+		if (!FileStream.is_open()) return 0;
+		const std::streampos Saved = FileStream.tellg();
+		FileStream.clear();
+		FileStream.seekg(0, std::ios::end);
+		const std::streampos End = FileStream.tellg();
+		FileStream.clear();
+		FileStream.seekg(Saved, std::ios::beg);
+		if (End < 0 || !FileStream.good()) { bHasError = true; return 0; }
+		return static_cast<uint64>(End);
+	}
 
 	bool AtEnd() override
 	{
@@ -282,6 +338,8 @@ public:
 		if (FileStream.is_open())
 		{
 			FileStream.read(static_cast<char*>(Data), Num);
+			if (FileStream.gcount() != static_cast<std::streamsize>(Num)) bHasError = true;
 		}
+		else bHasError = true;
 	}
 };

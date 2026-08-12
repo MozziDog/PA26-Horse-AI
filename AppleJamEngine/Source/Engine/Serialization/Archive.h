@@ -25,6 +25,11 @@ public:
 	inline bool IsLoading() const { return bIsLoading; }
 	inline bool IsSaving() const { return bIsSaving; }
 	virtual bool IsValid() const { return true; }
+	// Binary assets with an index need explicit absolute positioning.  Backends
+	// that do not represent a seekable stream keep the safe default failure.
+	virtual uint64 Tell() { return 0; }
+	virtual bool Seek(uint64 /*AbsoluteOffset*/) { return false; }
+	virtual uint64 Size() { return 0; }
 	// 로드 스트림이 끝에 도달했는지 — 포맷 뒤에 append 된 하위호환 필드의 로드 가드용.
 	// (구버전 파일은 EOF → 필드 skip 후 default 유지) 저장 모드/미구현 백엔드는 false.
 	virtual bool AtEnd() { return false; }

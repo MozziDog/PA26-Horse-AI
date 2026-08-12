@@ -21,9 +21,9 @@ public:
 	void PostDuplicate() override;
 	void OnPostLoad(FArchive& Ar) override;
 
-	// Editor bake service only.  Runtime navigation must use LoadNavigationReference.
-	bool BakeNavigationReference(const FString& OutputPath);
-	bool LoadNavigationReference(const FString& InputPath);
+	// 에디터 타임 Bake & 런타임 Load, 런타임에는 Bake 수행 X
+	bool BakeNavigationAsset(const FString& OutputPath, const FString& SourceScenePath);
+	bool LoadNavigationAsset(const FString& InputPath);
 
 	bool Contains(const FVector& Point) const;
 	FVoxelNavigationPathResult FindPath(const FVector& Start, const FVector& Goal) const;
@@ -39,7 +39,7 @@ private:
 
 	TWeakObjectPtr<UBoxComponent> VolumeBox = nullptr;
 	FVoxelNavigationGrid Grid;
-	UPROPERTY(Edit, Save, Category="Navigation|Baked Data", DisplayName="Reference JSON Path")
+	UPROPERTY(Edit, Save, Category="Navigation|Baked Data", DisplayName="Navigation Asset Path")
 	FString ReferenceDataPath;
 
 	UPROPERTY(Edit, Save, Category="Navigation|Agent", DisplayName="Agent Radius", Min=0.1f, Max=5.0f, Speed=0.05f)

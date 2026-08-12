@@ -35,16 +35,16 @@ bool FNavigationBakeService::Bake(UWorld* EditorWorld, const FString& ScenePath)
 	bool bSuccess = !Volumes.empty();
 	for (AVoxelNavigationVolume* Volume : Volumes)
 	{
-		bSuccess = Volume->BakeNavigationReference(GetReferenceOutputPath(ScenePath, *Volume)) && bSuccess;
+		bSuccess = Volume->BakeNavigationAsset(GetAssetOutputPath(ScenePath, *Volume), ScenePath) && bSuccess;
 	}
 	UE_LOG("[VoxelNavigation] Bake %s. Volumes=%d", bSuccess ? "succeeded" : "failed", static_cast<int>(Volumes.size()));
 	return bSuccess;
 }
 
-FString FNavigationBakeService::GetReferenceOutputPath(const FString& ScenePath, const AVoxelNavigationVolume& Volume)
+FString FNavigationBakeService::GetAssetOutputPath(const FString& ScenePath, const AVoxelNavigationVolume& Volume)
 {
 	const std::filesystem::path SourcePath(FPaths::ToWide(ScenePath));
 	const std::filesystem::path OutputPath = SourcePath.parent_path() / L"Navigation" /
-		std::filesystem::path(FPaths::ToWide(Volume.GetName() + ".reference.json"));
+		std::filesystem::path(FPaths::ToWide(Volume.GetName() + ".uasset"));
 	return FPaths::ToUtf8(OutputPath.wstring());
 }

@@ -21,6 +21,7 @@ enum class EAssetPackageType : uint32
 	PhysicsAsset,
 	UI,
 	Prefab,
+	VoxelNavigation,
 };
 
 enum class EAssetPackageSerializationVersion : uint32

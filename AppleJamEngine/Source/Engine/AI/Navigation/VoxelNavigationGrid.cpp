@@ -2,6 +2,7 @@
 
 #include "AI/Navigation/VoxelNavigationGrid.h"
 
+#include "Asset/AssetPackage.h"
 #include "Core/Logging/Log.h"
 #include "Core/Types/CollisionTypes.h"
 #include "GameFramework/World.h"
@@ -10,6 +11,7 @@
 #include "Profiling/Stats/Stats.h"
 #include "SimpleJSON/json.hpp"
 #include "Platform/Paths.h"
+#include "Serialization/WindowsArchive.h"
 
 #include <chrono>
 #include <cmath>
@@ -18,11 +20,23 @@
 #include <limits>
 #include <queue>
 #include <tuple>
+#include <Windows.h>
 
 namespace
 {
 	constexpr float INF = FLT_MAX;
 	constexpr float Epsilon = 1.e-4f;
+	constexpr uint32 NavigationAssetFormatVersion = 1;
+	constexpr uint32 NavigationAssetByteOrder = 0x01020304u;
+	constexpr uint32 MaxNavigationAssetChunks = 1u << 20;
+	constexpr uint32 MaxNavigationAssetEdgesPerChunk = 1u << 20;
+
+	struct FNavigationChunkIndexEntry
+	{
+		FVoxelCoord Coord;
+		uint64 Offset = 0;
+		uint32 Size = 0;
+	};
 
 	constexpr uint8 FullNeighborMask = 0xffu; // = 0b11111111, 8방향으로 연결된 상태
 	constexpr int NeighborOffsets[8][2] =
@@ -88,6 +102,77 @@ namespace
 		const FVoxelCoord& B1 = Nodes[B.NodeB].Coord;
 		return std::abs(A0.X - B0.X) <= 1 && std::abs(A0.Y - B0.Y) <= 1 
 				&& std::abs(A1.X - B1.X) <= 1 && std::abs(A1.Y - B1.Y) <= 1;
+	}
+
+	bool IsCoordLess(const FVoxelCoord& A, const FVoxelCoord& B)
+	{
+		return std::tie(A.X, A.Y, A.Z) < std::tie(B.X, B.Y, B.Z);
+	}
+
+	bool WriteChunkIndexEntry(FArchive& Ar, const FNavigationChunkIndexEntry& Entry)
+	{
+		int32 X = Entry.Coord.X;
+		int32 Y = Entry.Coord.Y;
+		int32 Z = Entry.Coord.Z;
+		uint64 Offset = Entry.Offset;
+		uint32 Size = Entry.Size;
+		Ar << X << Y << Z << Offset << Size;
+		return Ar.IsValid();
+	}
+
+	bool ReadChunkIndexEntry(FArchive& Ar, FNavigationChunkIndexEntry& OutEntry)
+	{
+		Ar << OutEntry.Coord.X << OutEntry.Coord.Y << OutEntry.Coord.Z << OutEntry.Offset << OutEntry.Size;
+		return Ar.IsValid();
+	}
+
+	bool WriteNavigationChunk(FArchive& Ar, const FBakedVoxelNavigationChunk& Chunk)
+	{
+		Ar.Serialize(const_cast<uint8*>(Chunk.Cells.data()), Chunk.Cells.size());
+		uint32 IntraCount = static_cast<uint32>(Chunk.IntraEdges.size());
+		Ar << IntraCount;
+		for (const FBakedVoxelNavigationIntraEdge& Edge : Chunk.IntraEdges)
+		{
+			uint8 PortalA = Edge.PortalA;
+			uint8 PortalB = Edge.PortalB;
+			float Cost = Edge.Cost;
+			Ar << PortalA << PortalB << Cost;
+		}
+		uint32 ExternalCount = static_cast<uint32>(Chunk.ExternalLinks.size());
+		Ar << ExternalCount;
+		for (const FBakedVoxelNavigationExternalLink& Link : Chunk.ExternalLinks)
+		{
+			uint8 LocalPortal = Link.LocalPortalId;
+			uint8 Delta = Link.PackedNeighborChunkDelta;
+			uint8 NeighborPortal = Link.NeighborPortalId;
+			float Cost = Link.Cost;
+			Ar << LocalPortal << Delta << NeighborPortal << Cost;
+		}
+		return Ar.IsValid();
+	}
+
+	bool ReadNavigationChunk(FArchive& Ar, FBakedVoxelNavigationChunk& OutChunk)
+	{
+		Ar.Serialize(OutChunk.Cells.data(), OutChunk.Cells.size());
+		uint32 IntraCount = 0;
+		Ar << IntraCount;
+		if (!Ar.IsValid() || IntraCount > MaxNavigationAssetEdgesPerChunk) return false;
+		OutChunk.IntraEdges.resize(IntraCount);
+		for (FBakedVoxelNavigationIntraEdge& Edge : OutChunk.IntraEdges)
+		{
+			Ar << Edge.PortalA << Edge.PortalB << Edge.Cost;
+			if (!Ar.IsValid()) return false;
+		}
+		uint32 ExternalCount = 0;
+		Ar << ExternalCount;
+		if (!Ar.IsValid() || ExternalCount > MaxNavigationAssetEdgesPerChunk) return false;
+		OutChunk.ExternalLinks.resize(ExternalCount);
+		for (FBakedVoxelNavigationExternalLink& Link : OutChunk.ExternalLinks)
+		{
+			Ar << Link.LocalPortalId << Link.PackedNeighborChunkDelta << Link.NeighborPortalId << Link.Cost;
+			if (!Ar.IsValid()) return false;
+		}
+		return true;
 	}
 } // namespace
 
@@ -632,6 +717,7 @@ bool FVoxelNavigationGrid::ValidateBakedChunks() const
 		for (const FBakedVoxelNavigationIntraEdge& Edge : Chunk.IntraEdges)
 		{
 			if (Edge.PortalA >= NavL1ChunkCellCount || Edge.PortalB >= NavL1ChunkCellCount ||
+				Chunk.Cells[Edge.PortalA] == 0 || Chunk.Cells[Edge.PortalB] == 0 ||
 				Edge.PortalA >= Edge.PortalB || !std::isfinite(Edge.Cost) || Edge.Cost < 0.0f ||
 				(PreviousA == Edge.PortalA && PreviousB == Edge.PortalB))
 			{
@@ -644,7 +730,8 @@ bool FVoxelNavigationGrid::ValidateBakedChunks() const
 		{
 			FVoxelCoord Delta;
 			if (Link.LocalPortalId >= NavL1ChunkCellCount || Link.NeighborPortalId >= NavL1ChunkCellCount ||
-				!std::isfinite(Link.Cost) || Link.Cost < 0.0f || !UnpackNeighborChunkDelta(Link.PackedNeighborChunkDelta, Delta))
+				Chunk.Cells[Link.LocalPortalId] == 0 || !std::isfinite(Link.Cost) || Link.Cost < 0.0f ||
+				!UnpackNeighborChunkDelta(Link.PackedNeighborChunkDelta, Delta))
 			{
 				return false;
 			}
@@ -654,6 +741,7 @@ bool FVoxelNavigationGrid::ValidateBakedChunks() const
 				return Candidate.Coord == NeighborCoord;
 			});
 			if (NeighborIt == BakedChunks.end()) return false;
+			if (NeighborIt->Cells[Link.NeighborPortalId] == 0) return false;
 			uint8 ReverseDelta = 0;
 			if (!PackNeighborChunkDelta({ -Delta.X, -Delta.Y, -Delta.Z }, ReverseDelta)) return false;
 			const bool bReciprocal = std::any_of(NeighborIt->ExternalLinks.begin(), NeighborIt->ExternalLinks.end(),
@@ -885,6 +973,207 @@ bool FVoxelNavigationGrid::LoadReferenceJson(const FString& Path)
 	L1ChunkCountX = (CellCountX + NavL1ChunkCellsPerAxis - 1) / NavL1ChunkCellsPerAxis;
 	L1ChunkCountY = (CellCountY + NavL1ChunkCellsPerAxis - 1) / NavL1ChunkCellsPerAxis;
 	L1ChunkCountZ = (CellCountZ + NavL1ChunkCellsPerAxis - 1) / NavL1ChunkCellsPerAxis;
+	BakedChunks = std::move(LoadedChunks);
+	if (!BuildRuntimeGraphFromBakedChunks())
+	{
+		bBuilt = false;
+		return false;
+	}
+	BuildStats = FVoxelNavigationBuildStats();
+	BuildStats.NumBuiltL1Chunks = L1Chunks.size();
+	for (const FVoxelNavigationL1Chunk& Chunk : L1Chunks)
+	{
+		for (uint8 Cell : Chunk.Cells) BuildStats.NumWalkableNodes += Cell != 0;
+	}
+	BuildStats.NumAbstractNodes = Portals.size();
+	for (const FVoxelNavigationPortal& Portal : Portals) BuildStats.NumAbstractEdges += Portal.Edges.size();
+	bBuilt = BuildStats.NumWalkableNodes > 0;
+	RefreshTrackedMemory();
+	return bBuilt;
+}
+
+bool FVoxelNavigationGrid::SaveNavigationAsset(const FString& Path, const FString& SourceScenePath) const
+{
+	if (!bBuilt || !ValidateBakedChunks() || BakedChunks.empty() || BakedChunks.size() > MaxNavigationAssetChunks)
+	{
+		return false;
+	}
+
+	TArray<FBakedVoxelNavigationChunk> Chunks = BakedChunks;
+	std::sort(Chunks.begin(), Chunks.end(), [](const auto& A, const auto& B) { return IsCoordLess(A.Coord, B.Coord); });
+	for (FBakedVoxelNavigationChunk& Chunk : Chunks)
+	{
+		std::sort(Chunk.IntraEdges.begin(), Chunk.IntraEdges.end(), [](const auto& A, const auto& B)
+		{
+			return std::tie(A.PortalA, A.PortalB, A.Cost) < std::tie(B.PortalA, B.PortalB, B.Cost);
+		});
+		std::sort(Chunk.ExternalLinks.begin(), Chunk.ExternalLinks.end(), [](const auto& A, const auto& B)
+		{
+			return std::tie(A.LocalPortalId, A.PackedNeighborChunkDelta, A.NeighborPortalId, A.Cost) <
+				std::tie(B.LocalPortalId, B.PackedNeighborChunkDelta, B.NeighborPortalId, B.Cost);
+		});
+	}
+
+	const std::filesystem::path OutputPath(FPaths::ToWide(Path));
+	std::error_code Error;
+	std::filesystem::create_directories(OutputPath.parent_path(), Error);
+	if (Error) return false;
+	const FString StagingPath = Path + ".tmp";
+	const std::filesystem::path StagingOutputPath(FPaths::ToWide(StagingPath));
+
+	const bool bWritten = [&]()
+	{
+	FWindowsBinWriter Ar(FPaths::MakeProjectRelative(StagingPath));
+	if (!Ar.IsValid()) return false;
+	FAssetImportMetadata Metadata;
+	Metadata.SourcePath = SourceScenePath;
+	if (!FAssetPackage::WritePackagePrelude(Ar, EAssetPackageType::VoxelNavigation, Metadata)) return false;
+	Ar.SetTaggedPropertySerializationEnabled(false);
+	const uint64 PayloadStart = Ar.Tell();
+
+	uint32 FormatVersion = NavigationAssetFormatVersion;
+	uint32 ByteOrder = NavigationAssetByteOrder;
+	uint32 ChunkCount = static_cast<uint32>(Chunks.size());
+	float AgentRadius = BuildSettings.AgentRadius;
+	float AgentHeight = BuildSettings.AgentHeight;
+	float MaxWalkableSlopeDegrees = BuildSettings.MaxWalkableSlopeDegrees;
+	float MaxNeighborHeightDelta = BuildSettings.MaxNeighborHeightDelta;
+	float GroundProbeInset = BuildSettings.GroundProbeInset;
+	float ClearanceOffset = BuildSettings.ClearanceOffset;
+	Ar << FormatVersion << ByteOrder;
+	Ar.Serialize(const_cast<float*>(BoundsCenter.Data), sizeof(BoundsCenter.Data));
+	Ar.Serialize(const_cast<float*>(BoundsExtent.Data), sizeof(BoundsExtent.Data));
+	Ar << AgentRadius << AgentHeight << MaxWalkableSlopeDegrees << MaxNeighborHeightDelta << GroundProbeInset << ClearanceOffset;
+	Ar << ChunkCount;
+	if (!Ar.IsValid()) return false;
+
+	const uint64 IndexStart = Ar.Tell();
+	FNavigationChunkIndexEntry EmptyEntry;
+	for (uint32 Index = 0; Index < ChunkCount; ++Index)
+	{
+		if (!WriteChunkIndexEntry(Ar, EmptyEntry)) return false;
+	}
+
+	TArray<FNavigationChunkIndexEntry> Index;
+	Index.reserve(Chunks.size());
+	for (const FBakedVoxelNavigationChunk& Chunk : Chunks)
+	{
+		const uint64 ChunkStart = Ar.Tell();
+		if (ChunkStart < PayloadStart || !WriteNavigationChunk(Ar, Chunk)) return false;
+		const uint64 ChunkEnd = Ar.Tell();
+		if (ChunkEnd < ChunkStart || ChunkEnd - ChunkStart > (std::numeric_limits<uint32>::max)()) return false;
+		Index.push_back({ Chunk.Coord, ChunkStart - PayloadStart, static_cast<uint32>(ChunkEnd - ChunkStart) });
+	}
+	const uint64 EndPosition = Ar.Tell();
+	if (!Ar.Seek(IndexStart)) return false;
+	for (const FNavigationChunkIndexEntry& Entry : Index)
+	{
+		if (!WriteChunkIndexEntry(Ar, Entry)) return false;
+	}
+	if (!Ar.Seek(EndPosition)) return false;
+	return Ar.IsValid();
+	}();
+
+	if (!bWritten)
+	{
+		std::filesystem::remove(StagingOutputPath, Error);
+		return false;
+	}
+
+	const std::wstring StagingPathWide = FPaths::ToWide(FPaths::MakeProjectRelative(StagingPath));
+	const std::wstring OutputPathWide = FPaths::ToWide(FPaths::MakeProjectRelative(Path));
+	if (!::MoveFileExW(StagingPathWide.c_str(), OutputPathWide.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+	{
+		std::filesystem::remove(StagingOutputPath, Error);
+		return false;
+	}
+	return true;
+}
+
+bool FVoxelNavigationGrid::LoadNavigationAsset(const FString& Path)
+{
+	FWindowsBinReader Ar(FPaths::MakeProjectRelative(Path));
+	if (!Ar.IsValid()) return false;
+	FAssetPackageHeader PackageHeader;
+	FAssetImportMetadata Metadata;
+	if (!FAssetPackage::ReadPackagePrelude(Ar, EAssetPackageType::VoxelNavigation, PackageHeader, Metadata)) return false;
+	Ar.SetTaggedPropertySerializationEnabled(false);
+	const uint64 PayloadStart = Ar.Tell();
+	const uint64 FileSize = Ar.Size();
+
+	uint32 FormatVersion = 0;
+	uint32 ByteOrder = 0;
+	FVector LoadedCenter;
+	FVector LoadedExtent;
+	FVoxelNavigationBuildSettings LoadedSettings;
+	uint32 ChunkCount = 0;
+	Ar << FormatVersion << ByteOrder;
+	Ar.Serialize(LoadedCenter.Data, sizeof(LoadedCenter.Data));
+	Ar.Serialize(LoadedExtent.Data, sizeof(LoadedExtent.Data));
+	Ar << LoadedSettings.AgentRadius << LoadedSettings.AgentHeight << LoadedSettings.MaxWalkableSlopeDegrees
+		<< LoadedSettings.MaxNeighborHeightDelta << LoadedSettings.GroundProbeInset << LoadedSettings.ClearanceOffset;
+	Ar << ChunkCount;
+	if (!Ar.IsValid() || FormatVersion != NavigationAssetFormatVersion || ByteOrder != NavigationAssetByteOrder ||
+		ChunkCount == 0 || ChunkCount > MaxNavigationAssetChunks ||
+		!std::isfinite(LoadedCenter.X) || !std::isfinite(LoadedCenter.Y) || !std::isfinite(LoadedCenter.Z) ||
+		!std::isfinite(LoadedExtent.X) || !std::isfinite(LoadedExtent.Y) || !std::isfinite(LoadedExtent.Z) ||
+		LoadedExtent.X <= Epsilon || LoadedExtent.Y <= Epsilon || LoadedExtent.Z <= Epsilon ||
+		!std::isfinite(LoadedSettings.AgentRadius) || LoadedSettings.AgentRadius <= Epsilon ||
+		!std::isfinite(LoadedSettings.AgentHeight) || LoadedSettings.AgentHeight <= Epsilon ||
+		!std::isfinite(LoadedSettings.MaxWalkableSlopeDegrees) || !std::isfinite(LoadedSettings.MaxNeighborHeightDelta) ||
+		!std::isfinite(LoadedSettings.GroundProbeInset) || !std::isfinite(LoadedSettings.ClearanceOffset))
+	{
+		return false;
+	}
+
+	TArray<FNavigationChunkIndexEntry> Index(ChunkCount);
+	for (FNavigationChunkIndexEntry& Entry : Index)
+	{
+		if (!ReadChunkIndexEntry(Ar, Entry)) return false;
+	}
+	const uint64 PayloadDataStart = Ar.Tell();
+	if (PayloadDataStart < PayloadStart || PayloadDataStart > FileSize) return false;
+
+	uint64 ExpectedOffset = PayloadDataStart - PayloadStart;
+	for (size_t IndexEntry = 0; IndexEntry < Index.size(); ++IndexEntry)
+	{
+		const FNavigationChunkIndexEntry& Entry = Index[IndexEntry];
+		if ((IndexEntry > 0 && !IsCoordLess(Index[IndexEntry - 1].Coord, Entry.Coord)) ||
+			Entry.Offset != ExpectedOffset || Entry.Size == 0 || Entry.Offset > FileSize - PayloadStart ||
+			Entry.Size > FileSize - PayloadStart - Entry.Offset)
+		{
+			return false;
+		}
+		ExpectedOffset += Entry.Size;
+	}
+	if (PayloadStart > FileSize || ExpectedOffset != FileSize - PayloadStart) return false;
+
+	TArray<FBakedVoxelNavigationChunk> LoadedChunks;
+	LoadedChunks.reserve(ChunkCount);
+	for (const FNavigationChunkIndexEntry& Entry : Index)
+	{
+		const uint64 ChunkStart = PayloadStart + Entry.Offset;
+		if (!Ar.Seek(ChunkStart)) return false;
+		FBakedVoxelNavigationChunk Chunk;
+		Chunk.Coord = Entry.Coord;
+		if (!ReadNavigationChunk(Ar, Chunk) || Ar.Tell() != ChunkStart + Entry.Size) return false;
+		LoadedChunks.push_back(std::move(Chunk));
+	}
+
+	BoundsCenter = LoadedCenter;
+	BoundsExtent = LoadedExtent;
+	BoundsMin = BoundsCenter - BoundsExtent;
+	BuildSettings = LoadedSettings;
+	CellCountX = static_cast<int>(std::ceil(BoundsExtent.X * 2.0f / NavVoxelCellSize));
+	CellCountY = static_cast<int>(std::ceil(BoundsExtent.Y * 2.0f / NavVoxelCellSize));
+	CellCountZ = static_cast<int>(std::ceil(BoundsExtent.Z * 2.0f / NavVoxelCellSize));
+	L1ChunkCountX = (CellCountX + NavL1ChunkCellsPerAxis - 1) / NavL1ChunkCellsPerAxis;
+	L1ChunkCountY = (CellCountY + NavL1ChunkCellsPerAxis - 1) / NavL1ChunkCellsPerAxis;
+	L1ChunkCountZ = (CellCountZ + NavL1ChunkCellsPerAxis - 1) / NavL1ChunkCellsPerAxis;
+	for (const FBakedVoxelNavigationChunk& Chunk : LoadedChunks)
+	{
+		if (!IsValidL1Chunk(Chunk.Coord.X, Chunk.Coord.Y, Chunk.Coord.Z)) return false;
+	}
 	BakedChunks = std::move(LoadedChunks);
 	if (!BuildRuntimeGraphFromBakedChunks())
 	{

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "Core/Types/CoreTypes.h"
 
@@ -13,5 +13,5 @@ public:
 	static bool Bake(UWorld* EditorWorld, const FString& ScenePath);
 
 private:
-	static FString GetReferenceOutputPath(const FString& ScenePath, const class AVoxelNavigationVolume& Volume);
+	static FString GetAssetOutputPath(const FString& ScenePath, const class AVoxelNavigationVolume& Volume);
 };

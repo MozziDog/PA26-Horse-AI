@@ -7,7 +7,10 @@
 #include "Core/Types/CollisionTypes.h"
 #include "Debug/DrawDebugHelpers.h"
 #include "GameFramework/World.h"
+#include "Platform/Paths.h"
 #include "Serialization/Archive.h"
+
+#include <filesystem>
 
 void AVoxelNavigationVolume::InitDefaultComponents(const FVector& Extent)
 {
@@ -26,9 +29,9 @@ void AVoxelNavigationVolume::BeginPlay()
 {
 	RebindComponents();
 	Super::BeginPlay();
-	if (!ReferenceDataPath.empty() && !LoadNavigationReference(ReferenceDataPath))
+	if (!ReferenceDataPath.empty() && !LoadNavigationAsset(ReferenceDataPath))
 	{
-		UE_LOG("[VoxelNavigation] Failed to load baked reference data: %s", ReferenceDataPath.c_str());
+		UE_LOG("[VoxelNavigation] Failed to load baked navigation asset: %s", ReferenceDataPath.c_str());
 	}
 }
 
@@ -63,7 +66,7 @@ const FVoxelNavigationBuildSettings AVoxelNavigationVolume::GetNavigationBuildSe
 	return Settings;
 }
 
-bool AVoxelNavigationVolume::BakeNavigationReference(const FString& OutputPath)
+bool AVoxelNavigationVolume::BakeNavigationAsset(const FString& OutputPath, const FString& SourceScenePath)
 {
 	RebindComponents();
 	UWorld* World = GetWorld();
@@ -76,8 +79,12 @@ bool AVoxelNavigationVolume::BakeNavigationReference(const FString& OutputPath)
 		return false;
 	}
 
+	const std::filesystem::path AssetPath(FPaths::ToWide(OutputPath));
+	const FString ReferencePath = FPaths::ToUtf8((AssetPath.parent_path() /
+		std::filesystem::path(AssetPath.stem().wstring() + L".reference.json")).wstring());
 	const bool bSuccess = Grid.Build(World, GetActorLocation(), Box->GetScaledBoxExtent(), this->GetNavigationBuildSettings(), this) &&
-		Grid.SaveReferenceJson(OutputPath);
+		Grid.SaveReferenceJson(ReferencePath) &&
+		Grid.SaveNavigationAsset(OutputPath, SourceScenePath);
 	if (bSuccess)
 	{
 		ReferenceDataPath = OutputPath;
@@ -107,9 +114,9 @@ bool AVoxelNavigationVolume::BakeNavigationReference(const FString& OutputPath)
 	return bSuccess;
 }
 
-bool AVoxelNavigationVolume::LoadNavigationReference(const FString& InputPath)
+bool AVoxelNavigationVolume::LoadNavigationAsset(const FString& InputPath)
 {
-	const bool bSuccess = Grid.LoadReferenceJson(InputPath);
+	const bool bSuccess = Grid.LoadNavigationAsset(InputPath);
 	if (bSuccess)
 	{
 		ReferenceDataPath = InputPath;
