@@ -47,10 +47,10 @@ public:
 	const FVector& GetBoundsExtent() const { return BoundsExtent; }
 	const FVoxelNavigationBuildSettings& GetSettings() const { return BuildSettings; }
 	const FVoxelNavigationBuildStats& GetBuildStats() const { return BuildStats; }
-	void GatherDebugGeometry(
-		int MaxNodes,
-		TArray<FVector>& OutNodes,
-		TArray<TPair<FVector, FVector>>& OutEdges) const;
+	void GatherDebugWalkableNodes(int MaxNodes, TArray<FVector>& OutNodes) const;
+	// Each baked chunk contributes one XY outline at its ChunkCoord.Z slab: four
+	// lines only, avoiding overlapping top/bottom box edges and terrain occlusion.
+	void GatherDebugChunkBoundaryLines(int MaxChunks, TArray<TPair<FVector, FVector>>& OutLines) const;
 
 private:
 	struct FCellRef

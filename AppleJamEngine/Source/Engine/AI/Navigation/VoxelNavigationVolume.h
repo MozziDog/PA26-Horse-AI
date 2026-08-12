@@ -59,10 +59,12 @@ private:
 
 	UPROPERTY(Edit, Save, Category="Navigation|Debug", DisplayName="Draw Walkable Nodes")
 	bool bDrawWalkableNodes = false;
-	UPROPERTY(Edit, Save, Category="Navigation|Debug", DisplayName="Draw Graph Edges")
-	bool bDrawGraphEdges = false;
+	UPROPERTY(Edit, Save, Category="Navigation|Debug", DisplayName="Draw Chunk Boundaries")
+	bool bDrawChunkBoundaries = false;
 	UPROPERTY(Edit, Save, Category="Navigation|Debug", DisplayName="Max Debug Nodes", Min=0, Max=100000)
 	int32 MaxDebugNodes = 4000;
+	UPROPERTY(Edit, Save, Category="Navigation|Debug", DisplayName="Max Debug Chunks", Min=0, Max=100000)
+	int32 MaxDebugChunks = 4000;
 
 	// 디버그 정보 Detail 패널에 출력
 	// NOTE: reflection이 size_t(=uint64) 프로퍼티를 지원하지 않아 detail 패널 표기값은 '잘린 값'일 수 있음

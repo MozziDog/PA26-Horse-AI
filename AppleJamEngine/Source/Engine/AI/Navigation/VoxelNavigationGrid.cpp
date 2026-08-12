@@ -1175,13 +1175,9 @@ bool FVoxelNavigationGrid::Contains(const FVector& Point) const
 		Point.Z >= BoundsMin.Z && Point.Z <= Max.Z;
 }
 
-void FVoxelNavigationGrid::GatherDebugGeometry(
-	int MaxNodes,
-	TArray<FVector>& OutNodes,
-	TArray<TPair<FVector, FVector>>& OutEdges) const
+void FVoxelNavigationGrid::GatherDebugWalkableNodes(int MaxNodes, TArray<FVector>& OutNodes) const
 {
 	OutNodes.clear();
-	OutEdges.clear();
 	if (MaxNodes <= 0) return;
 
 	for (int ChunkIndex = 0; ChunkIndex < L1Chunks.size() && OutNodes.size() < MaxNodes; ++ChunkIndex)
@@ -1192,42 +1188,39 @@ void FVoxelNavigationGrid::GatherDebugGeometry(
 				continue;
 
 			OutNodes.push_back(GetCellPosition({ ChunkIndex, LocalCell }));
-			const int X = LocalCell % NavL1ChunkCellsPerAxis;
-			const int Y = LocalCell / NavL1ChunkCellsPerAxis;
-			const int DebugOffsets[4][2] = { { 1, 0 }, { 0, 1 }, { 1, 1 }, { -1, 1 } };
-			for (const auto& Offset : DebugOffsets)
-			{
-				const int NX = X + Offset[0];
-				const int NY = Y + Offset[1];
-				if (NX < 0 || NX >= NavL1ChunkCellsPerAxis ||
-					NY < 0 || NY >= NavL1ChunkCellsPerAxis) 
-					continue;
-
-				const int NeighborCell = NY * NavL1ChunkCellsPerAxis + NX;
-				if (IsCellWalkable(ChunkIndex, NeighborCell))
-				{
-					OutEdges.push_back({ GetCellPosition({ ChunkIndex, LocalCell }),
-						GetCellPosition({ ChunkIndex, NeighborCell }) });
-				}
-			}
 		}
 	}
+}
 
-	for (int PortalIndex = 0; PortalIndex <Portals.size(); ++PortalIndex)
+
+void FVoxelNavigationGrid::GatherDebugChunkBoundaryLines(
+	int MaxChunks,
+	TArray<TPair<FVector, FVector>>& OutLines) const
+{
+	OutLines.clear();
+	if (MaxChunks <= 0) return;
+
+	const FVector BoundsMax = BoundsMin + FVector(
+		CellCountX * NavVoxelCellSize,
+		CellCountY * NavVoxelCellSize,
+		CellCountZ * NavVoxelCellSize);
+	for (int ChunkIndex = 0; ChunkIndex < static_cast<int>(L1Chunks.size()) && ChunkIndex < MaxChunks; ++ChunkIndex)
 	{
-		const FVoxelNavigationPortal& Portal = Portals[PortalIndex];
-		for (const FVoxelNavigationAbstractEdge& Edge : Portal.Edges)
-		{
-			if (Edge.ToPortal <= PortalIndex) 
-				continue;
+		const FVoxelCoord& Coord = L1Chunks[ChunkIndex].Coord;
+		const float MinX = BoundsMin.X + Coord.X * NavL1ChunkSize;
+		const float MinY = BoundsMin.Y + Coord.Y * NavL1ChunkSize;
+		const float MaxX = (std::min)(MinX + NavL1ChunkSize, BoundsMax.X);
+		const float MaxY = (std::min)(MinY + NavL1ChunkSize, BoundsMax.Y);
+		const float Z = BoundsMin.Z + Coord.Z * NavL1ChunkSize;
 
-			const FVoxelNavigationPortal& Other = Portals[Edge.ToPortal];
-			if (Portal.ChunkIndex == Other.ChunkIndex) 
-				continue;
-
-			OutEdges.push_back({ GetCellPosition({ Portal.ChunkIndex, Portal.LocalCell }),
-				GetCellPosition({ Other.ChunkIndex, Other.LocalCell }) });
-		}
+		const FVector P0(MinX, MinY, Z);
+		const FVector P1(MaxX, MinY, Z);
+		const FVector P2(MaxX, MaxY, Z);
+		const FVector P3(MinX, MaxY, Z);
+		OutLines.push_back({ P0, P1 });
+		OutLines.push_back({ P1, P2 });
+		OutLines.push_back({ P2, P3 });
+		OutLines.push_back({ P3, P0 });
 	}
 }
 

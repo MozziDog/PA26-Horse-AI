@@ -35,7 +35,7 @@ void AVoxelNavigationVolume::BeginPlay()
 void AVoxelNavigationVolume::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
-	if (bDrawWalkableNodes || bDrawGraphEdges)
+	if (bDrawWalkableNodes || bDrawChunkBoundaries)
 	{
 		DrawNavigationDebug();
 	}
@@ -143,25 +143,25 @@ void AVoxelNavigationVolume::RebindComponents()
 void AVoxelNavigationVolume::DrawNavigationDebug() const
 {
 	UWorld* World = GetWorld();
-	if (!World || !Grid.IsBuilt() || MaxDebugNodes <= 0) return;
+	if (!World || !Grid.IsBuilt()) return;
 
-	TArray<FVector> Nodes;
-	TArray<TPair<FVector, FVector>> Edges;
-	Grid.GatherDebugGeometry(MaxDebugNodes, Nodes, Edges);
-	for (const FVector& Node : Nodes)
+	if (bDrawWalkableNodes && MaxDebugNodes > 0)
 	{
-		if (bDrawWalkableNodes)
+		TArray<FVector> Nodes;
+		Grid.GatherDebugWalkableNodes(MaxDebugNodes, Nodes);
+		for (const FVector& Node : Nodes)
 		{
 			DrawDebugBox(World, Node + FVector::UpVector * 0.03f,
 				FVector(NavVoxelCellSize * 0.18f, NavVoxelCellSize * 0.18f, 0.03f), FColor::Green());
 		}
 	}
-	if (bDrawGraphEdges)
+	if (bDrawChunkBoundaries && MaxDebugChunks > 0)
 	{
-		for (const TPair<FVector, FVector>& Edge : Edges)
+		TArray<TPair<FVector, FVector>> BoundaryLines;
+		Grid.GatherDebugChunkBoundaryLines(MaxDebugChunks, BoundaryLines);
+		for (const TPair<FVector, FVector>& Line : BoundaryLines)
 		{
-			DrawDebugLine(World, Edge.first + FVector::UpVector * 0.08f,
-				Edge.second + FVector::UpVector * 0.08f, FColor(80, 160, 255));
+			DrawDebugLine(World, Line.first, Line.second, FColor(240, 0, 255)); // 보라색
 		}
 	}
 }
