@@ -1,4 +1,4 @@
-﻿#include "GameFramework/World.h"
+#include "GameFramework/World.h"
 #include "Object/Reflection/ObjectFactory.h"
 #include "Component/PrimitiveComponent.h"
 #include "Component/Primitive/StaticMeshComponent.h"
@@ -359,6 +359,7 @@ void UWorld::AddActor(AActor* Actor)
 	}
 
 	PersistentLevel->AddActor(Actor);
+	Actor->CreatePhysicsState();
 
 	InsertActorToOctree(Actor);
 	MarkWorldPrimitivePickingBVHDirty();

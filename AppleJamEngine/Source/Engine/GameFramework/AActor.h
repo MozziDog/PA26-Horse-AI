@@ -62,6 +62,9 @@ public:
 	// 외부에서 생성된 컴포넌트를 등록 (역직렬화 등)
 	UFUNCTION(Callable, Category="Actor|Components")
 	void RegisterComponent(UActorComponent* Comp);
+	void CreatePhysicsState();
+	void DestroyPhysicsState();
+	void RebuildPhysicsState();
 
 	UFUNCTION(Callable, Category="Actor|Components")
 	void SetRootComponent(USceneComponent* Comp);

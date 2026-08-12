@@ -38,37 +38,13 @@ HIDE_FROM_COMPONENT_LIST(UPrimitiveComponent)
 
 UPrimitiveComponent::~UPrimitiveComponent()
 {
-	if (UWorld* World = GetWorldEvenIfPendingKill())
-	{
-		if (IPhysicsScene* PS = World->GetPhysicsScene())
-		{
-			PS->UnregisterComponent(this);
-		}
-	}
+	DestroyPhysicsState();
 	DestroyRenderState();
 }
 
 void UPrimitiveComponent::BeginPlay()
 {
 	USceneComponent::BeginPlay();
-
-	// 직렬화나 InitDefaultComponents에서 CollisionEnabled가 이미 설정된 경우 등록.
-	// QueryOnly뿐 아니라 PhysicsOnly도 실제 물리 body가 필요하므로 NoCollision만 제외한다.
-	// 이 시점에 SimulatePhysics/ObjectType/Response/Mass/COM 등 모든 셋업이 끝나있어
-	// PhysX가 정확한 값으로 body를 생성한다.
-	if (IsCollisionEnabled())
-	{
-		if (UWorld* World = GetWorld())
-		{
-			if (IPhysicsScene* PS = World->GetPhysicsScene())
-			{
-				PS->RegisterComponent(this);
-			}
-		}
-	}
-
-	// flag는 등록 흐름이 끝난 직후에만 true. 이후 setter들이 PhysicsScene::RebuildBody 호출.
-	bComponentHasBegunPlay = true;
 }
 
 void UPrimitiveComponent::EndPlay()
@@ -80,10 +56,7 @@ void UPrimitiveComponent::EndPlay()
 	// 이중 호출은 mapping/proxy 부재로 noop.
 	if (UWorld* World = GetWorldEvenIfPendingKill())
 	{
-		if (IPhysicsScene* PS = World->GetPhysicsScene())
-		{
-			PS->UnregisterComponent(this);
-		}
+		DestroyPhysicsState();
 
 		// SpatialPartition에서도 즉시 제거. World::DestroyActor가 Partition.RemoveActor를
 		// 호출하지만, 그 시점에 OctreeNode 캐시가 이미 stale일 수 있는 경로(스폰 폭주 시
@@ -95,7 +68,7 @@ void UPrimitiveComponent::EndPlay()
 	ClearOctreeLocation();
 
 	DestroyRenderState();
-	bComponentHasBegunPlay = false;
+	bPhysicsStateCreated = false;
 
 	USceneComponent::EndPlay();
 }
@@ -109,10 +82,7 @@ void UPrimitiveComponent::RouteComponentDestroyed()
 
 	if (UWorld* World = GetWorldEvenIfPendingKill())
 	{
-		if (IPhysicsScene* PS = World->GetPhysicsScene())
-		{
-			PS->UnregisterComponent(this);
-		}
+		DestroyPhysicsState();
 
 		World->GetPartition().RemoveSinglePrimitive(this);
 		World->MarkWorldPrimitivePickingBVHDirty();
@@ -124,7 +94,7 @@ void UPrimitiveComponent::RouteComponentDestroyed()
 	OnComponentEndOverlap.Clear();
 	OnComponentHit.Clear();
 	OnComponentEndHit.Clear();
-	bComponentHasBegunPlay = false;
+	bPhysicsStateCreated = false;
 
 	USceneComponent::RouteComponentDestroyed();
 }
@@ -143,12 +113,24 @@ void UPrimitiveComponent::BeginDestroy()
 
 void UPrimitiveComponent::NotifyPhysicsBodyDirty()
 {
-	if (!bComponentHasBegunPlay) return;
+	if (!bPhysicsStateCreated) return;
 	UWorld* World = GetWorld();
 	if (!World) return;
 	if (IPhysicsScene* PS = World->GetPhysicsScene())
 	{
 		PS->RebuildBody(this);
+	}
+}
+
+void UPrimitiveComponent::NotifyPhysicsTransformChanged()
+{
+	if (!bPhysicsStateCreated) return;
+	if (UWorld* World = GetWorld())
+	{
+		if (IPhysicsScene* PS = World->GetPhysicsScene())
+		{
+			PS->MarkQuerySceneDirty();
+		}
 	}
 }
 
@@ -259,7 +241,7 @@ void UPrimitiveComponent::PostEditProperty(const char* PropertyName)
 		// 프로퍼티 setter 들의 NotifyPhysicsBodyDirty 가 같은 가드에 막혀 no-op 라 영영
 		// 갱신 안 됨. BeginPlay 의 RegisterComponent 한 번에 위임하면 모든 프로퍼티가
 		// 최종 상태인 채로 등록된다 (PIE Duplicate 경로와 동일한 타이밍).
-		if (!bComponentHasBegunPlay) return;
+		if (!bPhysicsStateCreated) return;
 
 		if (Owner)
 		{
@@ -418,6 +400,44 @@ void UPrimitiveComponent::CreateRenderState()
 	SceneProxy = Scene.AddPrimitive(this);
 }
 
+void UPrimitiveComponent::CreatePhysicsState()
+{
+	if (bPhysicsStateCreated || IsEditorOnly())
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World || !World->GetPhysicsScene())
+	{
+		return;
+	}
+
+	bPhysicsStateCreated = true;
+	if (IsCollisionEnabled())
+	{
+		World->GetPhysicsScene()->RegisterComponent(this);
+	}
+}
+
+void UPrimitiveComponent::DestroyPhysicsState()
+{
+	if (!bPhysicsStateCreated)
+	{
+		return;
+	}
+
+	if (UWorld* World = GetWorldEvenIfPendingKill())
+	{
+		if (IPhysicsScene* PS = World->GetPhysicsScene())
+		{
+			PS->UnregisterComponent(this);
+		}
+	}
+
+	bPhysicsStateCreated = false;
+}
+
 void UPrimitiveComponent::DestroyRenderState()
 {
 	// GC sweep은 RF_Garbage를 BeginDestroy보다 먼저 세운다. 이때 Owner.Get()/GetWorld()는
@@ -452,6 +472,7 @@ void UPrimitiveComponent::OnTransformDirty()
 	// (basis 동일 + translation만 바뀐 경우 UpdateWorldMatrix가 이전 AABB를 평행이동만 적용)
 	bWorldAABBDirty = true;
 	MarkRenderTransformDirty();
+	NotifyPhysicsTransformChanged();
 }
 
 void UPrimitiveComponent::EnsureWorldAABBUpdated() const
@@ -473,7 +494,7 @@ void UPrimitiveComponent::SetCollisionEnabled(ECollisionEnabled InEnabled)
 
 	// 컴포넌트 BeginPlay 전이면 멤버만 변경. BeginPlay에서 한 번 등록되며 그 시점엔
 	// SimulatePhysics 등 다른 셋업이 모두 완료된 상태.
-	if (!bComponentHasBegunPlay) return;
+	if (!bPhysicsStateCreated) return;
 
 	if (!Owner) return;
 	UWorld* World = Owner->GetWorld();

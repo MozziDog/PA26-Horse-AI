@@ -1,4 +1,4 @@
-﻿#include "Physics/PhysXPhysicsScene.h"
+#include "Physics/PhysXPhysicsScene.h"
 
 #include "Component/PrimitiveComponent.h"
 #include "Component/Primitive/SkeletalMeshComponent.h"
@@ -1422,6 +1422,8 @@ void FPhysXPhysicsScene::RegisterComponent(UPrimitiveComponent* Comp)
         return;
     }
 
+	bQuerySceneDirty = true;
+
     FPhysicsComponentBinding& Binding = TouchBinding_GameThread(Comp);
     Binding.bPendingDestroy           = false;
     Binding.bPendingCreate            = true;
@@ -1449,6 +1451,8 @@ void FPhysXPhysicsScene::UnregisterComponent(UPrimitiveComponent* Comp)
     {
         return;
     }
+
+	bQuerySceneDirty = true;
 
     if (EventCallback)
     {
@@ -1498,6 +1502,8 @@ void FPhysXPhysicsScene::RebuildBody(UPrimitiveComponent* Comp)
     {
         return;
     }
+
+	bQuerySceneDirty = true;
 
     AActor*      OwnerActor = Comp->GetOwner();
     const uint32 ActorId    = OwnerActor ? OwnerActor->GetUUID() : 0;
@@ -1559,6 +1565,16 @@ void FPhysXPhysicsScene::RebuildBody(UPrimitiveComponent* Comp)
             RegisterComponent(RebuildComp);
         }
     }
+}
+
+void FPhysXPhysicsScene::MarkQuerySceneDirty()
+{
+	bQuerySceneDirty = true;
+}
+
+void FPhysXPhysicsScene::EnsureQuerySceneUpToDate()
+{
+	FlushQueryState_GameThread();
 }
 
 FPhysicsComponentBinding& FPhysXPhysicsScene::TouchBinding_GameThread(UPrimitiveComponent* Comp)
@@ -1870,6 +1886,42 @@ void FPhysXPhysicsScene::Tick(float DeltaTime)
     }
     SubmitPhysicsFrame(FrameIndex, DeltaTime);
     WaitPhysicsFrame(FrameIndex);
+}
+
+void FPhysXPhysicsScene::FlushQueryState_GameThread()
+{
+	if (!bQuerySceneDirty || !Scene)
+	{
+		return;
+	}
+
+	uint64 FrameIndex = 0;
+	{
+		std::unique_lock<std::mutex> Lock(PhysicsThreadMutex);
+		PhysicsThreadDoneCv.wait(
+			Lock,
+			[this]()
+			{
+				return bPhysicsThreadStopRequested ||
+					(!bPhysicsFramePending && !bPhysicsFrameInProgress &&
+					 !bPhysicsQueryPending && !bPhysicsQueryInProgress);
+			}
+		);
+
+		if (bPhysicsThreadStopRequested)
+		{
+			return;
+		}
+
+		FrameIndex = CompletedPhysicsFrameIndex + 1;
+	}
+
+	// Apply all queued create/destroy/rebuild and engine-to-physics transforms without
+	// advancing simulation time. Queries are only supported after graph finalization.
+	SubmitPhysicsFrame(FrameIndex, 0.0f);
+	WaitPhysicsFrame(FrameIndex);
+	ConsumeCreationResults_GameThread();
+	bQuerySceneDirty = false;
 }
 
 void FPhysXPhysicsScene::SubmitPhysicsFrame(uint64 FrameIndex, float DeltaTime)
@@ -3265,6 +3317,7 @@ bool FPhysXPhysicsScene::Raycast(
     const AActor*     IgnoreActor
 )
 {
+	EnsureQuerySceneUpToDate();
     OutHit                     = FHitResult();
     const uint32 IgnoreActorId = IgnoreActor ? IgnoreActor->GetUUID() : 0;
 
@@ -3286,6 +3339,7 @@ bool FPhysXPhysicsScene::RaycastByObjectTypes(
     const AActor*  IgnoreActor
 )
 {
+	EnsureQuerySceneUpToDate();
     OutHit                     = FHitResult();
     const uint32 IgnoreActorId = IgnoreActor ? IgnoreActor->GetUUID() : 0;
 
@@ -3307,6 +3361,7 @@ bool FPhysXPhysicsScene::RaycastPhysicsByObjectTypes(
     const AActor*          IgnoreActor
 )
 {
+	EnsureQuerySceneUpToDate();
     const uint32 IgnoreActorId = IgnoreActor ? IgnoreActor->GetUUID() : 0;
     return SubmitRaycastQuery_GameThread(
         true,
@@ -3329,6 +3384,7 @@ bool FPhysXPhysicsScene::Sweep(
     const AActor*          IgnoreActor
 )
 {
+	EnsureQuerySceneUpToDate();
     OutHit = FHitResult();
 
     const FVector Delta   = End - Start;
@@ -3360,6 +3416,7 @@ bool FPhysXPhysicsScene::SweepByObjectTypes(
     const AActor*          IgnoreActor
 )
 {
+	EnsureQuerySceneUpToDate();
     OutHit = FHitResult();
 
     const FVector Delta   = End - Start;
@@ -3389,6 +3446,7 @@ bool FPhysXPhysicsScene::OverlapAnyByObjectTypes(
     const AActor*          IgnoreActor
 )
 {
+	EnsureQuerySceneUpToDate();
     const uint32 IgnoreActorId = IgnoreActor ? IgnoreActor->GetUUID() : 0;
     return SubmitOverlapQuery_GameThread(Location, Rotation, Shape, ObjectTypeMask, IgnoreActorId);
 }

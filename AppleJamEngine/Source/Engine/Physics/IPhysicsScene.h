@@ -37,6 +37,11 @@ public:
 	// backend actor 단위로 unregister + register 한다. compound shape의 다른 컴포넌트도 함께 재등록된다.
 	virtual void RebuildBody(UPrimitiveComponent* Comp) = 0;
 
+	// Editor-time queries call this immediately before reading the scene. Backends
+	// flush pending registration/rebuild/transform commands only when dirty.
+	virtual void EnsureQuerySceneUpToDate() {}
+	virtual void MarkQuerySceneDirty() {}
+
 	// --- 시뮬레이션 ---
 	virtual void Tick(float DeltaTime) = 0;
 

@@ -99,6 +99,8 @@ public:
 	// --- 렌더 상태 관리 ---
 	void CreateRenderState() override;
 	void DestroyRenderState() override;
+	void CreatePhysicsState() override;
+	void DestroyPhysicsState() override;
 
 	// 프록시 전체 재생성 (메시 교체 등 큰 변경 시 사용)
 	void MarkRenderStateDirty();
@@ -275,19 +277,18 @@ protected:
 	void OnTransformDirty() override;
 	void EnsureWorldAABBUpdated() const;
 
-	// 컴포넌트가 BeginPlay 후에만 PhysicsScene::RebuildBody 호출. 이전이면 skip.
+	// Physics state가 생성된 컴포넌트만 PhysicsScene::RebuildBody를 호출한다.
 	void NotifyPhysicsBodyDirty();
+	void NotifyPhysicsTransformChanged();
 
 	FVector LocalExtents = { 0.5f, 0.5f, 0.5f };
 	mutable FVector WorldAABBMinLocation;
 	mutable FVector WorldAABBMaxLocation;
 	mutable bool bWorldAABBDirty = true;
 	mutable bool bHasValidWorldAABB = false;
-	// PrimitiveComponent::BeginPlay에서 PhysicsScene::RegisterComponent를 호출한 직후 true가 된다.
-	// setter들이 이 플래그를 보고 PhysicsScene 측 RebuildBody를 호출할지 결정한다.
-	// (BeginPlay 전 InitDefaultComponents 단계에서 setter가 호출돼도 PhysicsScene 호출은 skip되어
-	//  멤버만 변경 → BeginPlay에서 한 번 정확한 값으로 등록됨.)
-	bool bComponentHasBegunPlay = false;
+	// Component registration에서 생성되고 teardown에서 해제된다. BeginPlay는
+	// simulation/activation 전용이며 physics query 등록 여부를 결정하지 않는다.
+	bool bPhysicsStateCreated = false;
 	UPROPERTY(Edit, Save, Category="Rendering", DisplayName="Visible")
 	bool bIsVisible = true;
 	UPROPERTY(Edit, Save, Category="Rendering", DisplayName="Cast Shadow")

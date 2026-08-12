@@ -3,6 +3,7 @@
 #include "Component/PrimitiveComponent.h"
 #include "Component/ActorComponent.h"
 #include "Component/Movement/MovementComponent.h"
+#include "Physics/IPhysicsScene.h"
 #include "Math/Rotator.h"
 #include "GameFramework/Level.h"
 #include "GameFramework/World.h"
@@ -171,6 +172,8 @@ void AActor::OnComponentBeingDestroyed(UActorComponent* Component)
 			}),
 		OwnedComponents.end());
 
+	RebuildPhysicsState();
+
 	bPrimitiveCacheDirty = true;
 	PrimitiveCache.clear();
 	MarkPickingDirty();
@@ -242,6 +245,59 @@ void AActor::RegisterComponent(UActorComponent* Comp)
 	PrimitiveCache.clear();
 	MarkPickingDirty();
 	Comp->CreateRenderState();
+	Comp->CreatePhysicsState();
+}
+
+void AActor::CreatePhysicsState()
+{
+	for (const TObjectPtr<UActorComponent>& ComponentRef : OwnedComponents)
+	{
+		if (UActorComponent* Component = ComponentRef.GetValid())
+		{
+			Component->CreatePhysicsState();
+		}
+	}
+}
+
+void AActor::DestroyPhysicsState()
+{
+	for (const TObjectPtr<UActorComponent>& ComponentRef : OwnedComponents)
+	{
+		if (UActorComponent* Component = ComponentRef.GetValid())
+		{
+			Component->DestroyPhysicsState();
+		}
+	}
+}
+
+void AActor::RebuildPhysicsState()
+{
+	UWorld* World = GetWorld();
+	if (!World || !World->GetPhysicsScene())
+	{
+		return;
+	}
+
+	UPrimitiveComponent* RebuildSource = nullptr;
+	for (const TObjectPtr<UActorComponent>& ComponentRef : OwnedComponents)
+	{
+		UPrimitiveComponent* Primitive = Cast<UPrimitiveComponent>(ComponentRef.GetValid());
+		if (!Primitive)
+		{
+			continue;
+		}
+
+		Primitive->CreatePhysicsState();
+		if (!RebuildSource && Primitive->IsCollisionEnabled() && !Primitive->IsEditorOnly())
+		{
+			RebuildSource = Primitive;
+		}
+	}
+
+	if (RebuildSource)
+	{
+		World->GetPhysicsScene()->RebuildBody(RebuildSource);
+	}
 }
 
 
@@ -334,6 +390,7 @@ void AActor::SetRootComponent(USceneComponent* Comp)
 	if (!Comp)
 	{
 		RootComponent = nullptr;
+		RebuildPhysicsState();
 		return;
 	}
 
@@ -350,6 +407,7 @@ void AActor::SetRootComponent(USceneComponent* Comp)
 	if (IsValid(Comp) && Comp->GetOwner() == this && OwnsComponent(Comp))
 	{
 		RootComponent = Comp;
+		RebuildPhysicsState();
 	}
 }
 

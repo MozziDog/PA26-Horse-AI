@@ -47,6 +47,8 @@ public:
     void RegisterComponent(UPrimitiveComponent* Comp) override;
     void UnregisterComponent(UPrimitiveComponent* Comp) override;
     void RebuildBody(UPrimitiveComponent* Comp) override;
+	void EnsureQuerySceneUpToDate() override;
+	void MarkQuerySceneDirty() override;
 
     void Tick(float DeltaTime) override;
     void SubmitPhysicsFrame(uint64 FrameIndex, float DeltaTime) override;
@@ -174,6 +176,7 @@ private:
     void PhysicsThreadMain();
     void RunPhysicsFrame_PhysicsThread(float DeltaTime, const TArray<FPhysicsCommand>& FrameCommands);
     void ConsumeCreationResults_GameThread();
+	void FlushQueryState_GameThread();
 
     TMap<uint32, FPhysicsComponentBinding> GameThreadBindings;
     TMap<uint32, FPhysicsBodyHandle>       GameThreadActorBodies;
@@ -204,6 +207,11 @@ private:
     uint64                          CompletedPhysicsFrameIndex  = 0;
     float                           PendingPhysicsDeltaTime     = 0.0f;
     TArray<FPhysicsCommand>         PendingPhysicsFrameCommands;
+
+	// Initial scene-graph construction is intentionally not query-safe. This flag
+	// synchronizes only user-requested editor-time queries after component trees
+	// and reflected properties have reached their final state.
+	bool bQuerySceneDirty = false;
 
     mutable bool                  bPhysicsQueryPending     = false;
     mutable bool                  bPhysicsQueryInProgress  = false;

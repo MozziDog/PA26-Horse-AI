@@ -28,8 +28,10 @@ public:
 	// --- 렌더 상태 관리 (UE RegisterComponent/UnregisterComponent 대응) ---
 	// 컴포넌트 등록 시 호출 — PrimitiveComponent에서 SceneProxy 생성
 	virtual void CreateRenderState() {}
+	virtual void CreatePhysicsState() {}
 	// 컴포넌트 해제 시 호출 — PrimitiveComponent에서 SceneProxy 파괴
 	virtual void DestroyRenderState() {}
+	virtual void DestroyPhysicsState() {}
 
 	UFUNCTION(Callable, Category="Component|Activation")
 	virtual void Activate();

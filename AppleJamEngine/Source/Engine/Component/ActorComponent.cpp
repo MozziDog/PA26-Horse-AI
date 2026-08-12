@@ -67,9 +67,11 @@ void UActorComponent::SetEditorOnly(bool bInEditorOnly)
 	if (bEditorOnly == bInEditorOnly) return;
 	bEditorOnly = bInEditorOnly;
 
+	DestroyPhysicsState();
 	// 렌더 상태 재생성 — EditorOnly 변경 시 프록시 생성/파괴 판단이 달라짐
 	DestroyRenderState();
 	CreateRenderState();
+	CreatePhysicsState();
 }
 
 void UActorComponent::SetOwner(AActor* Actor)
@@ -90,6 +92,7 @@ void UActorComponent::RouteComponentDestroyed()
 
 	bComponentDestroyRouted = true;
 	PrimaryComponentTick.UnRegisterTickFunction();
+	DestroyPhysicsState();
 	DestroyRenderState();
 
 	if (AActor* OwnerActor = GetOwnerEvenIfPendingKill())
@@ -129,8 +132,10 @@ void UActorComponent::PostEditProperty(const char* PropertyName)
 	if (strcmp(PropertyName, "bEditorOnly") == 0) {
 		// Property Editor가 bEditorOnly를 이미 직접 수정한 상태이므로
 		// SetEditorOnly의 early-return 가드를 우회하여 렌더 상태를 직접 재생성한다.
+		DestroyPhysicsState();
 		DestroyRenderState();
 		CreateRenderState();
+		CreatePhysicsState();
 	}
 
 	if (strcmp(PropertyName, "bIsActive") == 0) {

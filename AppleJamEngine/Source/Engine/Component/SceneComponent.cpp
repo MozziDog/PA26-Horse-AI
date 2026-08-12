@@ -2,6 +2,7 @@
 #include "Object/Reflection/ObjectFactory.h"
 #include "Object/Reflection/UClass.h"
 #include <GameFramework/World.h>
+#include "GameFramework/AActor.h"
 #include "Core/Logging/Log.h"
 #include "Serialization/Archive.h"
 #include "Object/GarbageCollection.h"
@@ -273,6 +274,10 @@ void USceneComponent::SetParent(USceneComponent* NewParent)
 
 	// 부모 변경 시 자신 및 하위 자식의 월드 행렬을 갱신하도록 dirty 마킹
 	MarkTransformDirty();
+	if (AActor* OwnerActor = GetOwner())
+	{
+		OwnerActor->RebuildPhysicsState();
+	}
 }
 
 void USceneComponent::AddChild(USceneComponent* NewChild)
@@ -302,6 +307,10 @@ void USceneComponent::RemoveChild(USceneComponent* Child)
 		}
 
 		ChildComponents.erase(iter);
+		if (AActor* OwnerActor = GetOwner())
+		{
+			OwnerActor->RebuildPhysicsState();
+		}
 	}
 }
 
