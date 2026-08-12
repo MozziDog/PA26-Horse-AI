@@ -23,6 +23,17 @@ public:
 		const FVoxelNavigationBuildSettings& Settings,
 		const AActor* QueryOwner = nullptr);
 
+	// Debug/reference transport used before the production binary page format is
+	// introduced.  Loading recreates the same runtime HPA* graph from baked
+	// chunk identities and edges, without invoking any physics query.
+	bool SaveReferenceJson(const FString& Path) const;
+	bool LoadReferenceJson(const FString& Path);
+	bool HasLoadedNavigationAt(const FVector& Point) const;
+	bool IsNavigationReadyFor(const FVector& Start, const FVector& Goal) const
+	{
+		return HasLoadedNavigationAt(Start) && HasLoadedNavigationAt(Goal);
+	}
+
 	FVoxelNavigationPathResult FindPath(
 		const FVector& Start,
 		const FVector& Goal,
@@ -68,6 +79,12 @@ private:
 		bool bAllowPartial = false,
 		const FVector* PartialTarget = nullptr) const;
 	void BuildAbstractGraph(const TArray<uint8>& RetainedNodes);
+	bool BuildBakedChunksFromRuntimeGraph();
+	bool BuildRuntimeGraphFromBakedChunks();
+	bool ValidateBakedChunks() const;
+	int FindChunkIndexByCoord(const FVoxelCoord& Coord) const;
+	static bool PackNeighborChunkDelta(const FVoxelCoord& Delta, uint8& OutPacked);
+	static bool UnpackNeighborChunkDelta(uint8 Packed, FVoxelCoord& OutDelta);
 	int FindOrAddPortal(int ChunkIndex, int LocalCell);
 	void AddAbstractEdge(int FromPortal, int ToPortal, float Cost);
 	bool CanTraverse(UWorld* World, int FromNode, int ToNode, const AActor* QueryOwner) const;
@@ -97,6 +114,7 @@ private:
 	TArray<FVoxelNavigationNode> Nodes;		// 복셀 1개를 1개의 노드로 취급
 	TArray<FVoxelNavigationL1Chunk> L1Chunks;
 	TArray<FVoxelNavigationPortal> Portals;	// 포탈: 청크간 연결
+	TArray<FBakedVoxelNavigationChunk> BakedChunks;
 	TArray<TArray<int>> XYToNodesLookup;	// flatten(XY) → NodeId(s) 매핑, 이웃한 노드들 빠른 탐색용
 	TArray<int> L1ChunkLookup;				// flatten(XYZ) → L1ChunkId 매핑
 	TArray<int> NodeToChunkLookup;			// NodeId → L1ChunkId 매핑

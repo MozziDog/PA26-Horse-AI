@@ -107,6 +107,7 @@ private:
 	void HandleShowCollisionShape(const TArray<FString>& Args);
 	void HandleContentBrowserRefresh(const TArray<FString>& Args);
 	void HandleContentBrowserIconSize(const TArray<FString>& Args);
+	void HandleBakeNavigation(const TArray<FString>& Args);
 	void HandleObjList(const TArray<FString>& Args);
 	void HandleGCDump(const TArray<FString>& Args);
 	void HandleGCMark(const TArray<FString>& Args);

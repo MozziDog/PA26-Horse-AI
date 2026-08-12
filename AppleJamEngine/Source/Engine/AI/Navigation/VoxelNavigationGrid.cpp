@@ -8,9 +8,13 @@
 #include "Math/Quat.h"
 #include "Profiling/Stats/MemoryStats.h"
 #include "Profiling/Stats/Stats.h"
+#include "SimpleJSON/json.hpp"
+#include "Platform/Paths.h"
 
 #include <chrono>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <limits>
 #include <queue>
 #include <tuple>
@@ -112,6 +116,7 @@ bool FVoxelNavigationGrid::Build(
 	L1Chunks.clear();
 	L1ChunkLookup.clear();
 	Portals.clear();
+	BakedChunks.clear();
 	NodeToChunkLookup.clear();
 	NodeToLocalCellIdxLookup.clear();
 	ChunkCellToNodeLookup.clear();
@@ -474,6 +479,12 @@ bool FVoxelNavigationGrid::Build(
 
 	// HPA* 계층 구성
 	BuildAbstractGraph(RetainedNodes);
+	if (!BuildBakedChunksFromRuntimeGraph() || !BuildRuntimeGraphFromBakedChunks())
+	{
+		UE_LOG("[VoxelNavigationGrid] Build rejected: baked chunk graph validation failed.");
+		bBuilt = false;
+		return false;
+	}
 
 	// 프로파일링 정보 업데이트
 	BuildStats.NumAbstractNodes =Portals.size();
@@ -497,6 +508,411 @@ bool FVoxelNavigationGrid::Build(
 	return bBuilt;
 }
 
+bool FVoxelNavigationGrid::PackNeighborChunkDelta(const FVoxelCoord& Delta, uint8& OutPacked)
+{
+	if (Delta.X < -1 || Delta.X > 1 || Delta.Y < -1 || Delta.Y > 1 || Delta.Z < -1 || Delta.Z > 1 ||
+		(Delta.X == 0 && Delta.Y == 0 && Delta.Z == 0))
+	{
+		return false;
+	}
+	OutPacked = static_cast<uint8>((Delta.X + 1) | ((Delta.Y + 1) << 2) | ((Delta.Z + 1) << 4));
+	return true;
+}
+
+bool FVoxelNavigationGrid::UnpackNeighborChunkDelta(uint8 Packed, FVoxelCoord& OutDelta)
+{
+	if ((Packed & 0xc0u) != 0)
+	{
+		return false;
+	}
+	const int X = Packed & 0x3;
+	const int Y = (Packed >> 2) & 0x3;
+	const int Z = (Packed >> 4) & 0x3;
+	if (X == 3 || Y == 3 || Z == 3)
+	{
+		return false;
+	}
+	OutDelta = { X - 1, Y - 1, Z - 1 };
+	return OutDelta.X != 0 || OutDelta.Y != 0 || OutDelta.Z != 0;
+}
+
+int FVoxelNavigationGrid::FindChunkIndexByCoord(const FVoxelCoord& Coord) const
+{
+	for (int Index = 0; Index < static_cast<int>(L1Chunks.size()); ++Index)
+	{
+		if (L1Chunks[Index].Coord == Coord)
+		{
+			return Index;
+		}
+	}
+	return -1;
+}
+
+bool FVoxelNavigationGrid::BuildBakedChunksFromRuntimeGraph()
+{
+	BakedChunks.clear();
+	BakedChunks.resize(L1Chunks.size());
+	for (int ChunkIndex = 0; ChunkIndex < static_cast<int>(L1Chunks.size()); ++ChunkIndex)
+	{
+		BakedChunks[ChunkIndex].Coord = L1Chunks[ChunkIndex].Coord;
+		BakedChunks[ChunkIndex].Cells = L1Chunks[ChunkIndex].Cells;
+	}
+
+	for (int PortalIndex = 0; PortalIndex < static_cast<int>(Portals.size()); ++PortalIndex)
+	{
+		const FVoxelNavigationPortal& From = Portals[PortalIndex];
+		if (From.ChunkIndex < 0 || From.ChunkIndex >= static_cast<int>(BakedChunks.size()))
+		{
+			return false;
+		}
+		for (const FVoxelNavigationAbstractEdge& Edge : From.Edges)
+		{
+			if (Edge.ToPortal < 0 || Edge.ToPortal >= static_cast<int>(Portals.size()) ||
+				!std::isfinite(Edge.Cost) || Edge.Cost < 0.0f)
+			{
+				return false;
+			}
+			const FVoxelNavigationPortal& To = Portals[Edge.ToPortal];
+			if (From.ChunkIndex == To.ChunkIndex)
+			{
+				if (From.LocalCell >= To.LocalCell)
+				{
+					continue;
+				}
+				FBakedVoxelNavigationIntraEdge BakedEdge{ From.LocalCell, To.LocalCell, Edge.Cost };
+				auto& Edges = BakedChunks[From.ChunkIndex].IntraEdges;
+				const bool bExists = std::any_of(Edges.begin(), Edges.end(), [&BakedEdge](const auto& Existing)
+				{
+					return Existing.PortalA == BakedEdge.PortalA && Existing.PortalB == BakedEdge.PortalB;
+				});
+				if (!bExists)
+				{
+					Edges.push_back(BakedEdge);
+				}
+				continue;
+			}
+
+			const FVoxelCoord& SourceCoord = L1Chunks[From.ChunkIndex].Coord;
+			const FVoxelCoord& TargetCoord = L1Chunks[To.ChunkIndex].Coord;
+			uint8 PackedDelta = 0;
+			if (!PackNeighborChunkDelta({ TargetCoord.X - SourceCoord.X, TargetCoord.Y - SourceCoord.Y, TargetCoord.Z - SourceCoord.Z }, PackedDelta))
+			{
+				return false;
+			}
+			BakedChunks[From.ChunkIndex].ExternalLinks.push_back({ From.LocalCell, PackedDelta, To.LocalCell, Edge.Cost });
+		}
+	}
+
+	for (FBakedVoxelNavigationChunk& Chunk : BakedChunks)
+	{
+		std::sort(Chunk.IntraEdges.begin(), Chunk.IntraEdges.end(), [](const auto& A, const auto& B)
+		{
+			return std::tie(A.PortalA, A.PortalB) < std::tie(B.PortalA, B.PortalB);
+		});
+		std::sort(Chunk.ExternalLinks.begin(), Chunk.ExternalLinks.end(), [](const auto& A, const auto& B)
+		{
+			return std::tie(A.LocalPortalId, A.PackedNeighborChunkDelta, A.NeighborPortalId) <
+				std::tie(B.LocalPortalId, B.PackedNeighborChunkDelta, B.NeighborPortalId);
+		});
+	}
+	return ValidateBakedChunks();
+}
+
+bool FVoxelNavigationGrid::ValidateBakedChunks() const
+{
+	for (size_t Index = 0; Index < BakedChunks.size(); ++Index)
+	{
+		const FBakedVoxelNavigationChunk& Chunk = BakedChunks[Index];
+		for (size_t OtherIndex = 0; OtherIndex < Index; ++OtherIndex)
+		{
+			if (BakedChunks[OtherIndex].Coord == Chunk.Coord) return false;
+		}
+		FBakedNavPortal PreviousA = InvalidBakedNavPortal;
+		FBakedNavPortal PreviousB = InvalidBakedNavPortal;
+		for (const FBakedVoxelNavigationIntraEdge& Edge : Chunk.IntraEdges)
+		{
+			if (Edge.PortalA >= NavL1ChunkCellCount || Edge.PortalB >= NavL1ChunkCellCount ||
+				Edge.PortalA >= Edge.PortalB || !std::isfinite(Edge.Cost) || Edge.Cost < 0.0f ||
+				(PreviousA == Edge.PortalA && PreviousB == Edge.PortalB))
+			{
+				return false;
+			}
+			PreviousA = Edge.PortalA;
+			PreviousB = Edge.PortalB;
+		}
+		for (const FBakedVoxelNavigationExternalLink& Link : Chunk.ExternalLinks)
+		{
+			FVoxelCoord Delta;
+			if (Link.LocalPortalId >= NavL1ChunkCellCount || Link.NeighborPortalId >= NavL1ChunkCellCount ||
+				!std::isfinite(Link.Cost) || Link.Cost < 0.0f || !UnpackNeighborChunkDelta(Link.PackedNeighborChunkDelta, Delta))
+			{
+				return false;
+			}
+			const FVoxelCoord NeighborCoord{ Chunk.Coord.X + Delta.X, Chunk.Coord.Y + Delta.Y, Chunk.Coord.Z + Delta.Z };
+			auto NeighborIt = std::find_if(BakedChunks.begin(), BakedChunks.end(), [&NeighborCoord](const auto& Candidate)
+			{
+				return Candidate.Coord == NeighborCoord;
+			});
+			if (NeighborIt == BakedChunks.end()) return false;
+			uint8 ReverseDelta = 0;
+			if (!PackNeighborChunkDelta({ -Delta.X, -Delta.Y, -Delta.Z }, ReverseDelta)) return false;
+			const bool bReciprocal = std::any_of(NeighborIt->ExternalLinks.begin(), NeighborIt->ExternalLinks.end(),
+				[&Link, ReverseDelta](const auto& Candidate)
+				{
+					return Candidate.LocalPortalId == Link.NeighborPortalId &&
+						Candidate.NeighborPortalId == Link.LocalPortalId &&
+						Candidate.PackedNeighborChunkDelta == ReverseDelta && std::abs(Candidate.Cost - Link.Cost) <= Epsilon;
+				});
+			if (!bReciprocal) return false;
+		}
+	}
+	return true;
+}
+
+bool FVoxelNavigationGrid::BuildRuntimeGraphFromBakedChunks()
+{
+	if (!ValidateBakedChunks()) return false;
+	L1Chunks.clear();
+	Portals.clear();
+	L1ChunkLookup.assign(L1ChunkCountX * L1ChunkCountY * L1ChunkCountZ, -1);
+	for (const FBakedVoxelNavigationChunk& Baked : BakedChunks)
+	{
+		FVoxelNavigationL1Chunk Chunk;
+		Chunk.Coord = Baked.Coord;
+		Chunk.Cells = Baked.Cells;
+		const int RuntimeChunkIndex = static_cast<int>(L1Chunks.size());
+		L1Chunks.push_back(Chunk);
+		if (IsValidL1Chunk(Baked.Coord.X, Baked.Coord.Y, Baked.Coord.Z))
+		{
+			L1ChunkLookup[FlattenL1Chunk(Baked.Coord.X, Baked.Coord.Y, Baked.Coord.Z)] = RuntimeChunkIndex;
+		}
+	}
+	for (int ChunkIndex = 0; ChunkIndex < static_cast<int>(BakedChunks.size()); ++ChunkIndex)
+	{
+		for (const FBakedVoxelNavigationIntraEdge& Edge : BakedChunks[ChunkIndex].IntraEdges)
+		{
+			FindOrAddPortal(ChunkIndex, Edge.PortalA);
+			FindOrAddPortal(ChunkIndex, Edge.PortalB);
+		}
+		for (const FBakedVoxelNavigationExternalLink& Link : BakedChunks[ChunkIndex].ExternalLinks)
+		{
+			FindOrAddPortal(ChunkIndex, Link.LocalPortalId);
+		}
+	}
+	for (int ChunkIndex = 0; ChunkIndex < static_cast<int>(BakedChunks.size()); ++ChunkIndex)
+	{
+		for (const FBakedVoxelNavigationIntraEdge& Edge : BakedChunks[ChunkIndex].IntraEdges)
+		{
+			const int A = FindOrAddPortal(ChunkIndex, Edge.PortalA);
+			const int B = FindOrAddPortal(ChunkIndex, Edge.PortalB);
+			AddAbstractEdge(A, B, Edge.Cost);
+			AddAbstractEdge(B, A, Edge.Cost);
+		}
+		for (const FBakedVoxelNavigationExternalLink& Link : BakedChunks[ChunkIndex].ExternalLinks)
+		{
+			FVoxelCoord Delta;
+			UnpackNeighborChunkDelta(Link.PackedNeighborChunkDelta, Delta);
+			const FVoxelCoord NeighborCoord{
+				BakedChunks[ChunkIndex].Coord.X + Delta.X, BakedChunks[ChunkIndex].Coord.Y + Delta.Y, BakedChunks[ChunkIndex].Coord.Z + Delta.Z };
+			const int NeighborChunkIndex = FindChunkIndexByCoord(NeighborCoord);
+			if (NeighborChunkIndex < 0) return false;
+			const int From = FindOrAddPortal(ChunkIndex, Link.LocalPortalId);
+			const int To = FindOrAddPortal(NeighborChunkIndex, Link.NeighborPortalId);
+			AddAbstractEdge(From, To, Link.Cost);
+		}
+	}
+	return true;
+}
+
+bool FVoxelNavigationGrid::SaveReferenceJson(const FString& Path) const
+{
+	if (!bBuilt || !ValidateBakedChunks()) return false;
+	using namespace json;
+	auto ToJsonCoord = [](const FVoxelCoord& Value)
+	{
+		return Array(Value.X, Value.Y, Value.Z);
+	};
+	auto ToJsonVector = [](const FVector& Value)
+	{
+		return Array(Value.X, Value.Y, Value.Z);
+	};
+
+	JSON Root = Object();
+	Root["FormatVersion"] = 1;
+	Root["Transport"] = "VoxelNavigationReferenceJson";
+	Root["BoundsCenter"] = ToJsonVector(BoundsCenter);
+	Root["BoundsExtent"] = ToJsonVector(BoundsExtent);
+	JSON Settings = Object();
+	Settings["AgentRadius"] = BuildSettings.AgentRadius;
+	Settings["AgentHeight"] = BuildSettings.AgentHeight;
+	Settings["MaxWalkableSlopeDegrees"] = BuildSettings.MaxWalkableSlopeDegrees;
+	Settings["MaxNeighborHeightDelta"] = BuildSettings.MaxNeighborHeightDelta;
+	Settings["GroundProbeInset"] = BuildSettings.GroundProbeInset;
+	Settings["ClearanceOffset"] = BuildSettings.ClearanceOffset;
+	Root["Settings"] = Settings;
+	JSON Chunks = Array();
+	for (const FBakedVoxelNavigationChunk& Chunk : BakedChunks)
+	{
+		JSON Item = Object();
+		Item["Coord"] = ToJsonCoord(Chunk.Coord);
+		JSON Cells = Array();
+		for (uint8 Cell : Chunk.Cells) Cells.append(static_cast<int>(Cell));
+		Item["Cells"] = Cells;
+		JSON IntraEdges = Array();
+		for (const FBakedVoxelNavigationIntraEdge& Edge : Chunk.IntraEdges)
+		{
+			IntraEdges.append(Array(Edge.PortalA, Edge.PortalB, Edge.Cost));
+		}
+		Item["IntraEdges"] = IntraEdges;
+		JSON ExternalLinks = Array();
+		for (const FBakedVoxelNavigationExternalLink& Link : Chunk.ExternalLinks)
+		{
+			ExternalLinks.append(Array(Link.LocalPortalId, Link.PackedNeighborChunkDelta, Link.NeighborPortalId, Link.Cost));
+		}
+		Item["ExternalLinks"] = ExternalLinks;
+		Chunks.append(Item);
+	}
+	Root["Chunks"] = Chunks;
+
+	const std::filesystem::path OutputPath(FPaths::ToWide(Path));
+	std::error_code Error;
+	std::filesystem::create_directories(OutputPath.parent_path(), Error);
+	std::ofstream File(OutputPath);
+	if (!File.is_open()) return false;
+	File << Root.dump(2);
+	return File.good();
+}
+
+bool FVoxelNavigationGrid::LoadReferenceJson(const FString& Path)
+{
+	using namespace json;
+	std::ifstream File(FPaths::ToWide(Path));
+	if (!File.is_open()) return false;
+	std::stringstream Buffer;
+	Buffer << File.rdbuf();
+	JSON Root = JSON::Load(Buffer.str());
+	if (Root.IsNull() || !Root.hasKey("FormatVersion") || Root["FormatVersion"].ToInt() != 1 ||
+		!Root.hasKey("BoundsCenter") || !Root.hasKey("BoundsExtent") || !Root.hasKey("Settings") || !Root.hasKey("Chunks"))
+	{
+		return false;
+	}
+	auto ReadVector = [](JSON Value, FVector& OutValue)
+	{
+		if (Value.length() != 3) return false;
+		OutValue = FVector(static_cast<float>(Value[0].ToFloat()), static_cast<float>(Value[1].ToFloat()), static_cast<float>(Value[2].ToFloat()));
+		return std::isfinite(OutValue.X) && std::isfinite(OutValue.Y) && std::isfinite(OutValue.Z);
+	};
+	auto ReadCoord = [](JSON Value, FVoxelCoord& OutValue)
+	{
+		if (Value.length() != 3) return false;
+		OutValue = { Value[0].ToInt(), Value[1].ToInt(), Value[2].ToInt() };
+		return true;
+	};
+	FVector LoadedCenter;
+	FVector LoadedExtent;
+	if (!ReadVector(Root["BoundsCenter"], LoadedCenter) || !ReadVector(Root["BoundsExtent"], LoadedExtent) ||
+		LoadedExtent.X <= Epsilon || LoadedExtent.Y <= Epsilon || LoadedExtent.Z <= Epsilon)
+	{
+		return false;
+	}
+	JSON SettingsJson = Root["Settings"];
+	const char* RequiredSettings[] = { "AgentRadius", "AgentHeight", "MaxWalkableSlopeDegrees", "MaxNeighborHeightDelta", "GroundProbeInset", "ClearanceOffset" };
+	for (const char* Key : RequiredSettings)
+	{
+		if (!SettingsJson.hasKey(Key)) return false;
+	}
+	FVoxelNavigationBuildSettings LoadedSettings;
+	LoadedSettings.AgentRadius = static_cast<float>(SettingsJson["AgentRadius"].ToFloat());
+	LoadedSettings.AgentHeight = static_cast<float>(SettingsJson["AgentHeight"].ToFloat());
+	LoadedSettings.MaxWalkableSlopeDegrees = static_cast<float>(SettingsJson["MaxWalkableSlopeDegrees"].ToFloat());
+	LoadedSettings.MaxNeighborHeightDelta = static_cast<float>(SettingsJson["MaxNeighborHeightDelta"].ToFloat());
+	LoadedSettings.GroundProbeInset = static_cast<float>(SettingsJson["GroundProbeInset"].ToFloat());
+	LoadedSettings.ClearanceOffset = static_cast<float>(SettingsJson["ClearanceOffset"].ToFloat());
+	if (!std::isfinite(LoadedSettings.AgentRadius) || LoadedSettings.AgentRadius <= Epsilon ||
+		!std::isfinite(LoadedSettings.AgentHeight) || LoadedSettings.AgentHeight <= Epsilon)
+	{
+		return false;
+	}
+
+	TArray<FBakedVoxelNavigationChunk> LoadedChunks;
+	JSON ChunksJson = Root["Chunks"];
+	for (int ChunkJsonIndex = 0; ChunkJsonIndex < ChunksJson.length(); ++ChunkJsonIndex)
+	{
+		JSON Item = ChunksJson[ChunkJsonIndex];
+		if (!Item.hasKey("Coord") || !Item.hasKey("Cells") || !Item.hasKey("IntraEdges") || !Item.hasKey("ExternalLinks")) return false;
+		FBakedVoxelNavigationChunk Chunk;
+		JSON Cells = Item["Cells"];
+		if (!ReadCoord(Item["Coord"], Chunk.Coord) || Cells.length() != NavL1ChunkCellCount) return false;
+		for (int CellIndex = 0; CellIndex < NavL1ChunkCellCount; ++CellIndex)
+		{
+			const int Value = Cells[CellIndex].ToInt();
+			if (Value < 0 || Value > 255) return false;
+			Chunk.Cells[CellIndex] = static_cast<uint8>(Value);
+		}
+		JSON IntraEdges = Item["IntraEdges"];
+		for (int EdgeIndex = 0; EdgeIndex < IntraEdges.length(); ++EdgeIndex)
+		{
+			JSON Edge = IntraEdges[EdgeIndex];
+			if (Edge.length() != 3) return false;
+			Chunk.IntraEdges.push_back({ static_cast<uint8>(Edge[0].ToInt()), static_cast<uint8>(Edge[1].ToInt()), static_cast<float>(Edge[2].ToFloat()) });
+		}
+		JSON ExternalLinks = Item["ExternalLinks"];
+		for (int LinkIndex = 0; LinkIndex < ExternalLinks.length(); ++LinkIndex)
+		{
+			JSON Link = ExternalLinks[LinkIndex];
+			if (Link.length() != 4) return false;
+			Chunk.ExternalLinks.push_back({ static_cast<uint8>(Link[0].ToInt()), static_cast<uint8>(Link[1].ToInt()), static_cast<uint8>(Link[2].ToInt()), static_cast<float>(Link[3].ToFloat()) });
+		}
+		std::sort(Chunk.IntraEdges.begin(), Chunk.IntraEdges.end(), [](const auto& A, const auto& B)
+		{
+			return std::tie(A.PortalA, A.PortalB) < std::tie(B.PortalA, B.PortalB);
+		});
+		LoadedChunks.push_back(std::move(Chunk));
+	}
+	if (LoadedChunks.empty()) return false;
+	std::sort(LoadedChunks.begin(), LoadedChunks.end(), [](const auto& A, const auto& B)
+	{
+		return std::tie(A.Coord.X, A.Coord.Y, A.Coord.Z) < std::tie(B.Coord.X, B.Coord.Y, B.Coord.Z);
+	});
+
+	BoundsCenter = LoadedCenter;
+	BoundsExtent = LoadedExtent;
+	BoundsMin = BoundsCenter - BoundsExtent;
+	BuildSettings = LoadedSettings;
+	CellCountX = static_cast<int>(std::ceil(BoundsExtent.X * 2.0f / NavVoxelCellSize));
+	CellCountY = static_cast<int>(std::ceil(BoundsExtent.Y * 2.0f / NavVoxelCellSize));
+	CellCountZ = static_cast<int>(std::ceil(BoundsExtent.Z * 2.0f / NavVoxelCellSize));
+	L1ChunkCountX = (CellCountX + NavL1ChunkCellsPerAxis - 1) / NavL1ChunkCellsPerAxis;
+	L1ChunkCountY = (CellCountY + NavL1ChunkCellsPerAxis - 1) / NavL1ChunkCellsPerAxis;
+	L1ChunkCountZ = (CellCountZ + NavL1ChunkCellsPerAxis - 1) / NavL1ChunkCellsPerAxis;
+	BakedChunks = std::move(LoadedChunks);
+	if (!BuildRuntimeGraphFromBakedChunks())
+	{
+		bBuilt = false;
+		return false;
+	}
+	BuildStats = FVoxelNavigationBuildStats();
+	BuildStats.NumBuiltL1Chunks = L1Chunks.size();
+	for (const FVoxelNavigationL1Chunk& Chunk : L1Chunks)
+	{
+		for (uint8 Cell : Chunk.Cells) BuildStats.NumWalkableNodes += Cell != 0;
+	}
+	BuildStats.NumAbstractNodes = Portals.size();
+	for (const FVoxelNavigationPortal& Portal : Portals) BuildStats.NumAbstractEdges += Portal.Edges.size();
+	bBuilt = BuildStats.NumWalkableNodes > 0;
+	RefreshTrackedMemory();
+	return bBuilt;
+}
+
+bool FVoxelNavigationGrid::HasLoadedNavigationAt(const FVector& Point) const
+{
+	if (!bBuilt || !Contains(Point)) return false;
+	const int ChunkX = static_cast<int>(std::floor((Point.X - BoundsMin.X) / NavL1ChunkSize));
+	const int ChunkY = static_cast<int>(std::floor((Point.Y - BoundsMin.Y) / NavL1ChunkSize));
+	const int ChunkZ = static_cast<int>(std::floor((Point.Z - BoundsMin.Z) / NavL1ChunkSize));
+	return FindChunkIndexByCoord({ ChunkX, ChunkY, ChunkZ }) >= 0;
+}
+
 FVoxelNavigationPathResult FVoxelNavigationGrid::FindPath(
 	const FVector& Start,
 	const FVector& Goal,
@@ -508,7 +924,7 @@ FVoxelNavigationPathResult FVoxelNavigationGrid::FindPath(
 	const auto StartTime = std::chrono::steady_clock::now();
 	FVoxelNavigationPathResult Result;
 
-	if (!bBuilt || !Contains(Start) || !Contains(Goal))
+	if (!bBuilt || !IsNavigationReadyFor(Start, Goal))
 	{
 		Result.Failure = FVoxelNavigationPathResult::EFailure::NoData;
 		Result.SearchTimeMs = ElapsedMilliseconds(StartTime);

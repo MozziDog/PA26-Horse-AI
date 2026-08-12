@@ -1,6 +1,7 @@
 ﻿#include "Editor/UI/Panel/EditorConsoleWidget.h"
 #include "Object/GarbageCollection.h"
 #include "Editor/EditorEngine.h"
+#include "Editor/Subsystem/NavigationBakeService.h"
 #include "Editor/Viewport/Level/LevelEditorViewportClient.h"
 #include "Editor/Viewport/EditorPreviewViewportClient.h"
 #include "Editor/Subsystem/OverlayStatSystem.h"
@@ -246,6 +247,8 @@ void FEditorConsoleWidget::RegisterEditorCommands()
 		"Editor", "cb refresh", "Refreshes the content browser.");
 	RegisterCommand("cb icon size", [this](const TArray<FString>& Args) { HandleContentBrowserIconSize(Args); },
 		"Editor", "cb icon size <20-100>", "Sets the content browser icon size.");
+	RegisterCommand("bake navigation", [this](const TArray<FString>& Args) { HandleBakeNavigation(Args); },
+		"Navigation", "bake navigation", "Builds baked voxel navigation from the active editor world.");
 }
 
 void FEditorConsoleWidget::RegisterDiagnosticsCommands()
@@ -830,6 +833,21 @@ void FEditorConsoleWidget::HandleContentBrowserIconSize(const TArray<FString>& A
 
 	EditorEngine->SetContentBrowserIconSize(Size);
 	AddLog("Content browser icon size set to %.0f.\n", Size);
+}
+
+void FEditorConsoleWidget::HandleBakeNavigation(const TArray<FString>& Args)
+{
+	if (!Args.empty())
+	{
+		AddLog("Usage: bake navigation\n");
+		return;
+	}
+	if (!EditorEngine)
+	{
+		AddLog("[ERROR] EditorEngine is null.\n");
+		return;
+	}
+	FNavigationBakeService::Bake(EditorEngine->GetWorld(), EditorEngine->GetCurrentLevelFilePath());
 }
 
 void FEditorConsoleWidget::HandleObjList(const TArray<FString>& Args)

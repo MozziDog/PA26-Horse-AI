@@ -166,9 +166,9 @@ bool UHorseCallNavigationComponent::BeginPlan()
 		StopAtTerminalStatus(EHorseCallNavigationStatus::FailedNoVolume);
 		return false;
 	}
-	if (!Volume->IsNavigationBuilt() && !Volume->RebuildNavigation())
+	if (!Volume->IsNavigationBuilt())
 	{
-		StopAtTerminalStatus(EHorseCallNavigationStatus::FailedNoPath);
+		StopAtTerminalStatus(EHorseCallNavigationStatus::FailedNoData);
 		return false;
 	}
 	ActiveVolume = Volume;

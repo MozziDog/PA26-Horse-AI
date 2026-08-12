@@ -21,8 +21,9 @@ public:
 	void PostDuplicate() override;
 	void OnPostLoad(FArchive& Ar) override;
 
-	UFUNCTION(Callable, Category="Navigation")
-	bool RebuildNavigation();
+	// Editor bake service only.  Runtime navigation must use LoadNavigationReference.
+	bool BakeNavigationReference(const FString& OutputPath);
+	bool LoadNavigationReference(const FString& InputPath);
 
 	bool Contains(const FVector& Point) const;
 	FVoxelNavigationPathResult FindPath(const FVector& Start, const FVector& Goal) const;
@@ -30,6 +31,7 @@ public:
 
 	UFUNCTION(Pure, Category="Navigation")
 	bool IsNavigationBuilt() const { return Grid.IsBuilt(); }
+	const FVoxelNavigationBuildSettings GetNavigationBuildSettings() const;
 
 private:
 	void RebindComponents();
@@ -37,7 +39,8 @@ private:
 
 	TWeakObjectPtr<UBoxComponent> VolumeBox = nullptr;
 	FVoxelNavigationGrid Grid;
-	int32 InitialBuildDelayTicks = 0;
+	UPROPERTY(Edit, Save, Category="Navigation|Baked Data", DisplayName="Reference JSON Path")
+	FString ReferenceDataPath;
 
 	UPROPERTY(Edit, Save, Category="Navigation|Agent", DisplayName="Agent Radius", Min=0.1f, Max=5.0f, Speed=0.05f)
 	float AgentRadius = 0.6f;

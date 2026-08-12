@@ -26,26 +26,15 @@ void AVoxelNavigationVolume::BeginPlay()
 {
 	RebindComponents();
 	Super::BeginPlay();
-	// Primitive components enqueue their body creation during BeginPlay.  Let one
-	// complete physics frame consume those commands before querying the scene.
-	InitialBuildDelayTicks = 1;
+	if (!ReferenceDataPath.empty() && !LoadNavigationReference(ReferenceDataPath))
+	{
+		UE_LOG("[VoxelNavigation] Failed to load baked reference data: %s", ReferenceDataPath.c_str());
+	}
 }
 
 void AVoxelNavigationVolume::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
-	if (InitialBuildDelayTicks >= 0)
-	{
-		if (InitialBuildDelayTicks == 0)
-		{
-			InitialBuildDelayTicks = -1;
-			RebuildNavigation();
-		}
-		else
-		{
-			--InitialBuildDelayTicks;
-		}
-	}
 	if (bDrawWalkableNodes || bDrawGraphEdges)
 	{
 		DrawNavigationDebug();
@@ -64,29 +53,35 @@ void AVoxelNavigationVolume::OnPostLoad(FArchive& Ar)
 	RebindComponents();
 }
 
-bool AVoxelNavigationVolume::RebuildNavigation()
+const FVoxelNavigationBuildSettings AVoxelNavigationVolume::GetNavigationBuildSettings() const
 {
-	InitialBuildDelayTicks = -1;
-	RebindComponents();
-	UWorld* World = GetWorld();
-	UBoxComponent* Box = VolumeBox.Get();
-	if (!World || !Box)
-	{
-		return false;
-	}
-	const FRotator VolumeRotation = GetActorRotation();
-	if (std::abs(VolumeRotation.Pitch) > 0.01f || std::abs(VolumeRotation.Yaw) > 0.01f || std::abs(VolumeRotation.Roll) > 0.01f)
-	{
-		UE_LOG("[VoxelNavigation] Volume=%s uses axis-aligned prototype bounds; actor rotation is ignored.", GetName().c_str());
-	}
-
 	FVoxelNavigationBuildSettings Settings;
 	Settings.AgentRadius = AgentRadius;
 	Settings.AgentHeight = AgentHeight;
 	Settings.MaxWalkableSlopeDegrees = MaxWalkableSlopeDegrees;
 	Settings.MaxNeighborHeightDelta = MaxNeighborHeightDelta;
+	return Settings;
+}
 
-	const bool bSuccess = Grid.Build(World, GetActorLocation(), Box->GetScaledBoxExtent(), Settings, this);
+bool AVoxelNavigationVolume::BakeNavigationReference(const FString& OutputPath)
+{
+	RebindComponents();
+	UWorld* World = GetWorld();
+	UBoxComponent* Box = VolumeBox.Get();
+	if (!World || !Box) return false;
+	const FRotator VolumeRotation = GetActorRotation();
+	if (std::abs(VolumeRotation.Pitch) > 0.01f || std::abs(VolumeRotation.Yaw) > 0.01f || std::abs(VolumeRotation.Roll) > 0.01f)
+	{
+		UE_LOG("[VoxelNavigation] Bake rejected: Volume=%s must not be rotated.", GetName().c_str());
+		return false;
+	}
+
+	const bool bSuccess = Grid.Build(World, GetActorLocation(), Box->GetScaledBoxExtent(), this->GetNavigationBuildSettings(), this) &&
+		Grid.SaveReferenceJson(OutputPath);
+	if (bSuccess)
+	{
+		ReferenceDataPath = OutputPath;
+	}
 
 	// 디버그 / 통계 정보를 detail 패널 + 로그로 출력
 	// NOTE: reflection이 size_t(=uint64) 프로퍼티를 지원하지 않아 detail 패널 표기값은 '잘린 값'일 수 있음
@@ -104,11 +99,21 @@ bool AVoxelNavigationVolume::RebuildNavigation()
 	DebugBuildTimeMs = Stats.BuildTimeMs;
 	DebugPeakMemoryMB = static_cast<float>(Stats.PeakMemoryBytes) / (1024.0f * 1024.0f);
 
-	UE_LOG("[VoxelNavigation] Build Volume=%s Success=%d Cells=%d RawNodes=%d Nodes=%d Eroded=%d RawEdges=%d L1=%d AbstractNodes=%d AbstractEdges=%d SlopeRejected=%d ClearanceRejected=%d TimeMs=%.3f PeakMemoryBytes=%llu",
-		GetName().c_str(), bSuccess ? 1 : 0, DebugSampledCells, DebugRawWalkableNodes, DebugWalkableNodes,
+	UE_LOG("[VoxelNavigation] Bake Volume=%s Success=%d Output=%s Cells=%d RawNodes=%d Nodes=%d Eroded=%d RawEdges=%d L1=%d AbstractNodes=%d AbstractEdges=%d SlopeRejected=%d ClearanceRejected=%d TimeMs=%.3f PeakMemoryBytes=%llu",
+		GetName().c_str(), bSuccess ? 1 : 0, OutputPath.c_str(), DebugSampledCells, DebugRawWalkableNodes, DebugWalkableNodes,
 		DebugErodedNodes, DebugDirectedEdges, DebugBuiltL1Chunks, DebugAbstractNodes, DebugAbstractEdges,
 		DebugRejectedSlope, DebugRejectedClearance, DebugBuildTimeMs,
 		static_cast<unsigned long long>(Stats.PeakMemoryBytes));
+	return bSuccess;
+}
+
+bool AVoxelNavigationVolume::LoadNavigationReference(const FString& InputPath)
+{
+	const bool bSuccess = Grid.LoadReferenceJson(InputPath);
+	if (bSuccess)
+	{
+		ReferenceDataPath = InputPath;
+	}
 	return bSuccess;
 }
 

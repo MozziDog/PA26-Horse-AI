@@ -15,6 +15,48 @@ struct FVoxelCoord
 	int32 X = 0;
 	int32 Y = 0;
 	int32 Z = 0;
+
+	bool operator==(const FVoxelCoord& Other) const
+	{
+		return X == Other.X && Y == Other.Y && Z == Other.Z;
+	}
+};
+
+// Baked files must never contain a runtime portal-array index.  A portal is
+// permanently identified by its chunk and representative 10x10 cell.
+using FBakedNavPortal = uint8;
+inline constexpr FBakedNavPortal InvalidBakedNavPortal = 0xff;
+static_assert(NavL1ChunkCellCount < InvalidBakedNavPortal);
+
+struct FVoxelNavigationPortalKey
+{
+	FVoxelCoord ChunkCoord;
+	FBakedNavPortal LocalPortalCell = InvalidBakedNavPortal;
+
+	bool IsValid() const { return LocalPortalCell != InvalidBakedNavPortal; }
+};
+
+struct FBakedVoxelNavigationIntraEdge
+{
+	FBakedNavPortal PortalA = InvalidBakedNavPortal;
+	FBakedNavPortal PortalB = InvalidBakedNavPortal;
+	float Cost = 0.0f;
+};
+
+struct FBakedVoxelNavigationExternalLink
+{
+	FBakedNavPortal LocalPortalId = InvalidBakedNavPortal;
+	uint8 PackedNeighborChunkDelta = 0;
+	FBakedNavPortal NeighborPortalId = InvalidBakedNavPortal;
+	float Cost = 0.0f;
+};
+
+struct FBakedVoxelNavigationChunk
+{
+	FVoxelCoord Coord;
+	TStaticArray<uint8, NavL1ChunkCellCount> Cells = {};
+	TArray<FBakedVoxelNavigationIntraEdge> IntraEdges;
+	TArray<FBakedVoxelNavigationExternalLink> ExternalLinks;
 };
 
 struct FVoxelNavigationBuildSettings
