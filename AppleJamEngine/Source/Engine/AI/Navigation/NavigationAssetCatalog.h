@@ -15,6 +15,7 @@ public:
 	bool IsOpen() const { return !AssetPath.empty(); }
 	void GatherChunkCoordsInRadius(const FVector& Center, float Radius, TArray<FVoxelCoord>& OutCoords) const;
 	FVector GetChunkCenter(const FVoxelCoord& Coord) const;
+	uint64 GetChunkPayloadBytes(const FVoxelCoord& Coord) const;
 
 	static bool WriteAsset(const FString& AssetPath, const FString& SourceScenePath, const FVoxelNavigationBakedData& Data);
 	static bool WriteReferenceJson(const FString& Path, const FVoxelNavigationBakedData& Data);

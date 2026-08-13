@@ -79,14 +79,8 @@ bool FVoxelNavigationGrid::UnpackNeighborChunkDelta(uint8 Packed, FVoxelCoord& O
 
 int FVoxelNavigationGrid::FindChunkIndexByCoord(const FVoxelCoord& Coord) const
 {
-	for (int Index = 0; Index < static_cast<int>(L1Chunks.size()); ++Index)
-	{
-		if (L1Chunks[Index].Coord == Coord)
-		{
-			return Index;
-		}
-	}
-	return -1;
+	return IsValidL1ChunkCoord(Coord.X, Coord.Y, Coord.Z)
+		? L1ChunkLookup[FlattenL1Chunk(Coord.X, Coord.Y, Coord.Z)] : -1;
 }
 
 bool FVoxelNavigationGrid::ValidateLoadedChunkPayload(const FBakedVoxelNavigationChunk& Chunk) const
@@ -123,81 +117,174 @@ bool FVoxelNavigationGrid::ValidateLoadedChunkPayload(const FBakedVoxelNavigatio
 	return true;
 }
 
-bool FVoxelNavigationGrid::RebuildActiveRuntimeGraph()
+void FVoxelNavigationGrid::ClearRuntimeTopology()
 {
-	for (size_t Index = 0; Index < BakedChunks.size(); ++Index)
-	{
-		if (!ValidateLoadedChunkPayload(BakedChunks[Index])) 
-			return false;
-
-		for (size_t OtherIndex = 0; OtherIndex < Index; ++OtherIndex)
-		{
-			if (BakedChunks[OtherIndex].Coord == BakedChunks[Index].Coord) 
-				return false;
-		}
-	}
-
+	bBuilt = false;
 	L1Chunks.clear();
 	Portals.clear();
+	BakedChunks.clear();
+	FreePortalIndices.clear();
 	L1ChunkLookup.assign(L1ChunkCountX * L1ChunkCountY * L1ChunkCountZ, -1);
-	for (const FBakedVoxelNavigationChunk& Baked : BakedChunks)
-	{
-		FVoxelNavigationL1Chunk Chunk;
-		Chunk.Coord = Baked.Coord;
-		Chunk.Cells = Baked.Cells;
-		const int RuntimeChunkIndex = static_cast<int>(L1Chunks.size());
-		L1Chunks.push_back(Chunk);
-		if (IsValidL1Chunk(Baked.Coord.X, Baked.Coord.Y, Baked.Coord.Z))
-		{
-			L1ChunkLookup[FlattenL1Chunk(Baked.Coord.X, Baked.Coord.Y, Baked.Coord.Z)] = RuntimeChunkIndex;
-		}
-	}
-	for (int ChunkIndex = 0; ChunkIndex < static_cast<int>(BakedChunks.size()); ++ChunkIndex)
-	{
-		for (const FBakedVoxelNavigationIntraEdge& Edge : BakedChunks[ChunkIndex].IntraEdges)
-		{
-			FindOrAddPortal(ChunkIndex, Edge.PortalA);
-			FindOrAddPortal(ChunkIndex, Edge.PortalB);
-		}
-		for (const FBakedVoxelNavigationExternalLink& Link : BakedChunks[ChunkIndex].ExternalLinks)
-		{
-			FindOrAddPortal(ChunkIndex, Link.LocalPortalId);
-		}
-	}
-	for (int ChunkIndex = 0; ChunkIndex < static_cast<int>(BakedChunks.size()); ++ChunkIndex)
-	{
-		for (const FBakedVoxelNavigationIntraEdge& Edge : BakedChunks[ChunkIndex].IntraEdges)
-		{
-			const int A = FindOrAddPortal(ChunkIndex, Edge.PortalA);
-			const int B = FindOrAddPortal(ChunkIndex, Edge.PortalB);
-			AddAbstractEdge(A, B, Edge.Cost);
-			AddAbstractEdge(B, A, Edge.Cost);
-		}
-		for (const FBakedVoxelNavigationExternalLink& Link : BakedChunks[ChunkIndex].ExternalLinks)
-		{
-			FVoxelCoord Delta;
-			UnpackNeighborChunkDelta(Link.PackedNeighborChunkDelta, Delta);
+}
 
-			const FVoxelCoord NeighborCoord{ BakedChunks[ChunkIndex].Coord.X + Delta.X, 
-											BakedChunks[ChunkIndex].Coord.Y + Delta.Y, 
-											BakedChunks[ChunkIndex].Coord.Z + Delta.Z };
-			const int NeighborChunkIndex = FindChunkIndexByCoord(NeighborCoord);
+bool FVoxelNavigationGrid::ApplyLoadedChunk(const FBakedVoxelNavigationChunk& Baked)
+{
+	if (!IsValidL1ChunkCoord(Baked.Coord.X, Baked.Coord.Y, Baked.Coord.Z) || !ValidateLoadedChunkPayload(Baked))
+		return false;
 
-			if (NeighborChunkIndex < 0)
-			{
-				continue; // 이웃한 청크가 메모리에 로드되지 않았을 수 있음. 그런 경우 스킵
-			}
-			if (BakedChunks[NeighborChunkIndex].Cells[Link.NeighborPortalId] == 0)
-			{
-				return false;
-			}
-
-			const int From = FindOrAddPortal(ChunkIndex, Link.LocalPortalId);
-			const int To = FindOrAddPortal(NeighborChunkIndex, Link.NeighborPortalId);
-			AddAbstractEdge(From, To, Link.Cost);
-		}
+	int ChunkIndex = FindChunkIndexByCoord(Baked.Coord);
+	if (ChunkIndex >= 0)
+	{
+		// A reload replaces just this chunk and its incident seams.
+		DisconnectChunkSeams(ChunkIndex);
+		for (int PortalIndex : L1Chunks[ChunkIndex].PortalIndices)
+			DeactivatePortal(PortalIndex);
+		L1Chunks[ChunkIndex].PortalIndices.clear();
+		BakedChunks[ChunkIndex] = Baked;
+		L1Chunks[ChunkIndex].Cells = Baked.Cells;
 	}
+	else
+	{
+		ChunkIndex = static_cast<int>(L1Chunks.size());
+		FVoxelNavigationL1Chunk RuntimeChunk;
+		RuntimeChunk.Coord = Baked.Coord;
+		RuntimeChunk.Cells = Baked.Cells;
+		L1Chunks.push_back(std::move(RuntimeChunk));
+		BakedChunks.push_back(Baked);
+		L1ChunkLookup[FlattenL1Chunk(Baked.Coord.X, Baked.Coord.Y, Baked.Coord.Z)] = ChunkIndex;
+	}
+
+	BuildChunkTopology(ChunkIndex);
+	ConnectChunkSeams(ChunkIndex);
 	return true;
+}
+
+bool FVoxelNavigationGrid::ApplyRemovedChunk(const FVoxelCoord& Coord)
+{
+	const int ChunkIndex = FindChunkIndexByCoord(Coord);
+	if (ChunkIndex < 0)
+		return true;
+
+	DisconnectChunkSeams(ChunkIndex);
+	for (int PortalIndex : L1Chunks[ChunkIndex].PortalIndices)
+		DeactivatePortal(PortalIndex);
+	L1ChunkLookup[FlattenL1Chunk(Coord.X, Coord.Y, Coord.Z)] = -1;
+
+	const int LastChunkIndex = static_cast<int>(L1Chunks.size()) - 1;
+	if (ChunkIndex != LastChunkIndex)
+	{
+		L1Chunks[ChunkIndex] = std::move(L1Chunks.back());
+		BakedChunks[ChunkIndex] = std::move(BakedChunks.back());
+		const FVoxelCoord& MovedCoord = L1Chunks[ChunkIndex].Coord;
+		L1ChunkLookup[FlattenL1Chunk(MovedCoord.X, MovedCoord.Y, MovedCoord.Z)] = ChunkIndex;
+		for (int PortalIndex : L1Chunks[ChunkIndex].PortalIndices)
+		{
+			Portals[PortalIndex].ChunkIndex = ChunkIndex;
+		}
+	}
+	L1Chunks.pop_back();
+	BakedChunks.pop_back();
+	return true;
+}
+
+void FVoxelNavigationGrid::BuildChunkTopology(int ChunkIndex)
+{
+	const FBakedVoxelNavigationChunk& Baked = BakedChunks[ChunkIndex];
+	for (const FBakedVoxelNavigationIntraEdge& Edge : Baked.IntraEdges)
+	{
+		const int A = FindOrAddPortal(ChunkIndex, Edge.PortalA);
+		const int B = FindOrAddPortal(ChunkIndex, Edge.PortalB);
+		AddAbstractEdge(A, B, Edge.Cost);
+		AddAbstractEdge(B, A, Edge.Cost);
+	}
+	for (const FBakedVoxelNavigationExternalLink& Link : Baked.ExternalLinks)
+	{
+		FindOrAddPortal(ChunkIndex, Link.LocalPortalId);
+	}
+}
+
+bool FVoxelNavigationGrid::HasReciprocalExternalLink(
+	const FBakedVoxelNavigationExternalLink& Link, int ToChunkIndex) const
+{
+	FVoxelCoord Delta;
+	if (!UnpackNeighborChunkDelta(Link.PackedNeighborChunkDelta, Delta))
+		return false;
+	uint8 ReverseDelta = 0;
+	if (!PackNeighborChunkDelta({ -Delta.X, -Delta.Y, -Delta.Z }, ReverseDelta))
+		return false;
+	const FBakedVoxelNavigationChunk& Neighbor = BakedChunks[ToChunkIndex];
+	return std::any_of(Neighbor.ExternalLinks.begin(), Neighbor.ExternalLinks.end(), [&Link, ReverseDelta](const auto& Candidate)
+	{
+		return Candidate.LocalPortalId == Link.NeighborPortalId && Candidate.NeighborPortalId == Link.LocalPortalId &&
+			Candidate.PackedNeighborChunkDelta == ReverseDelta && std::abs(Candidate.Cost - Link.Cost) <= Epsilon;
+	});
+}
+
+void FVoxelNavigationGrid::ConnectExternalLinksForChunk(int ChunkIndex)
+{
+	const FBakedVoxelNavigationChunk& Baked = BakedChunks[ChunkIndex];
+	for (const FBakedVoxelNavigationExternalLink& Link : Baked.ExternalLinks)
+	{
+		FVoxelCoord Delta;
+		UnpackNeighborChunkDelta(Link.PackedNeighborChunkDelta, Delta);
+		const FVoxelCoord NeighborCoord{ Baked.Coord.X + Delta.X, Baked.Coord.Y + Delta.Y, Baked.Coord.Z + Delta.Z };
+		const int NeighborChunkIndex = FindChunkIndexByCoord(NeighborCoord);
+		if (NeighborChunkIndex < 0 || BakedChunks[NeighborChunkIndex].Cells[Link.NeighborPortalId] == 0 ||
+			!HasReciprocalExternalLink(Link, NeighborChunkIndex))
+		{
+			continue;
+		}
+		AddAbstractEdge(FindOrAddPortal(ChunkIndex, Link.LocalPortalId),
+			FindOrAddPortal(NeighborChunkIndex, Link.NeighborPortalId), Link.Cost);
+	}
+}
+
+void FVoxelNavigationGrid::ConnectChunkSeams(int ChunkIndex)
+{
+	ConnectExternalLinksForChunk(ChunkIndex);
+	const FVoxelCoord Coord = BakedChunks[ChunkIndex].Coord;
+	for (int Z = -1; Z <= 1; ++Z)
+	{
+		for (int Y = -1; Y <= 1; ++Y)
+		{
+			for (int X = -1; X <= 1; ++X)
+			{
+				if (X == 0 && Y == 0 && Z == 0) continue;
+				const int Neighbor = FindChunkIndexByCoord({ Coord.X + X, Coord.Y + Y, Coord.Z + Z });
+				if (Neighbor >= 0) ConnectExternalLinksForChunk(Neighbor);
+			}
+		}
+	}
+}
+
+void FVoxelNavigationGrid::DisconnectChunkSeams(int ChunkIndex)
+{
+	if (ChunkIndex < 0 || ChunkIndex >= static_cast<int>(L1Chunks.size()))
+		return;
+
+	const FVoxelCoord Coord = L1Chunks[ChunkIndex].Coord;
+	for (int Z = -1; Z <= 1; ++Z)
+	{
+		for (int Y = -1; Y <= 1; ++Y)
+		{
+			for (int X = -1; X <= 1; ++X)
+			{
+				if (X == 0 && Y == 0 && Z == 0) continue;
+				const int NeighborChunkIndex = FindChunkIndexByCoord({ Coord.X + X, Coord.Y + Y, Coord.Z + Z });
+				if (NeighborChunkIndex < 0) continue;
+
+				for (int PortalIndex : L1Chunks[NeighborChunkIndex].PortalIndices)
+				{
+					TArray<FVoxelNavigationAbstractEdge>& Edges = Portals[PortalIndex].Edges;
+					Edges.erase(std::remove_if(Edges.begin(), Edges.end(), [this, ChunkIndex](const auto& Edge)
+					{
+						return Edge.ToPortal >= 0 && Edge.ToPortal < static_cast<int>(Portals.size()) &&
+							Portals[Edge.ToPortal].bActive && Portals[Edge.ToPortal].ChunkIndex == ChunkIndex;
+					}), Edges.end());
+				}
+			}
+		}
+	}
 }
 
 
@@ -226,106 +313,55 @@ bool FVoxelNavigationGrid::InitializeRuntime(
 	L1ChunkCountY = (CellCountY + NavL1ChunkCellsPerAxis - 1) / NavL1ChunkCellsPerAxis;
 	L1ChunkCountZ = (CellCountZ + NavL1ChunkCellsPerAxis - 1) / NavL1ChunkCellsPerAxis;
 	bRuntimeInitialized = true;
-
-	ClearNavigationData();
+	++NavigationDataGeneration;
+	ClearRuntimeTopology();
+	RefreshRuntimeMemory();
 
 	return true;
 }
 
 bool FVoxelNavigationGrid::AddLoadedChunks(const TArray<FBakedVoxelNavigationChunk>& LoadedChunks)
 {
-	if (!bRuntimeInitialized || LoadedChunks.empty()) 
+	if (!bRuntimeInitialized || LoadedChunks.empty())
 		return LoadedChunks.empty();
-
-	TArray<FBakedVoxelNavigationChunk> PreviousChunks = BakedChunks;
 	for (const FBakedVoxelNavigationChunk& Loaded : LoadedChunks)
 	{
-		if (!IsValidL1Chunk(Loaded.Coord.X, Loaded.Coord.Y, Loaded.Coord.Z)) 
+		if (!IsValidL1ChunkCoord(Loaded.Coord.X, Loaded.Coord.Y, Loaded.Coord.Z) || !ValidateLoadedChunkPayload(Loaded))
 			return false;
-
-		auto Existing = std::find_if(BakedChunks.begin(), BakedChunks.end(), 
-							[&Loaded](const auto& Chunk) { return Chunk.Coord == Loaded.Coord; });
-		if (Existing != BakedChunks.end())
-		{
-			*Existing = Loaded;				// 이미 메모리에 로드된 청크 다시 로드한 경우 데이터 업데이트
-		}
-		else
-		{
-			BakedChunks.push_back(Loaded);  // 아니면 새로 추가
-		}
 	}
-
-	std::sort(BakedChunks.begin(), BakedChunks.end(), 
-			[](const auto& A, const auto& B) { return A.Coord < B.Coord; }); // 좌표 기준 오름차순 정렬
-
-	// 로드한 데이터로 HPA* abstract graph 형성 실패한 경우 기존 데이터로 롤백
-	if (!RebuildActiveRuntimeGraph())
+	for (const FBakedVoxelNavigationChunk& Loaded : LoadedChunks)
 	{
-		BakedChunks = std::move(PreviousChunks);
-		RebuildActiveRuntimeGraph();
-		RefreshRuntimeMemory();
-		return false;
+		if (!ApplyLoadedChunk(Loaded)) return false;
 	}
 
-	// 통계 업데이트
 	size_t NumWalkableNodes = 0;
 	for (const FVoxelNavigationL1Chunk& Chunk : L1Chunks)
-	{
-		for (uint8 Cell : Chunk.Cells)
-		{
-			NumWalkableNodes += Cell != 0;
-		}
-	}
-	RefreshRuntimeMemory();
-
+		for (uint8 Cell : Chunk.Cells) NumWalkableNodes += Cell != 0;
 	bBuilt = NumWalkableNodes > 0;
+	RefreshRuntimeMemory();
 	return bBuilt;
 }
 
 bool FVoxelNavigationGrid::RemoveLoadedChunks(const TArray<FVoxelCoord>& ChunkCoords)
 {
 	if (!bRuntimeInitialized || ChunkCoords.empty()) return ChunkCoords.empty();
-	TArray<FBakedVoxelNavigationChunk> PreviousChunks = BakedChunks;
-	// ChunkCoords 기준으로 BakedChunks에 있는 청크들 제거
-	BakedChunks.erase(std::remove_if(BakedChunks.begin(), BakedChunks.end(), 
-		[&ChunkCoords](const auto& Chunk)
-		{
-			return std::any_of(ChunkCoords.begin(), ChunkCoords.end(), 
-				[&Chunk](const FVoxelCoord& Coord) { return Coord == Chunk.Coord; });
-		}), BakedChunks.end());
-
-	// 언로드 후 HPA* abstract graph 형성 실패한 경우 기존 데이터로 롤백
-	if (!RebuildActiveRuntimeGraph())
+	for (const FVoxelCoord& Coord : ChunkCoords)
 	{
-		BakedChunks = std::move(PreviousChunks);
-		RebuildActiveRuntimeGraph();
-		RefreshRuntimeMemory();
-		return false;
+		if (!ApplyRemovedChunk(Coord)) return false;
 	}
 
-	// 통계 업데이트
 	size_t NumWalkableNodes = 0;
 	for (const FVoxelNavigationL1Chunk& Chunk : L1Chunks)
-	{
-		for (uint8 Cell : Chunk.Cells)
-		{
-			NumWalkableNodes += Cell != 0;
-		}
-	}
-	RefreshRuntimeMemory();
-
+		for (uint8 Cell : Chunk.Cells) NumWalkableNodes += Cell != 0;
 	bBuilt = NumWalkableNodes > 0;
+	RefreshRuntimeMemory();
 	return true;
 }
 
 void FVoxelNavigationGrid::ClearNavigationData()
 {
-	++NavigationDataGeneration;	// Clear 직전에 디스크에서 로드 시작된 청크가 혼입되지 않도록 '세대' 증가 
-	bBuilt = false;
-	L1Chunks.clear();
-	Portals.clear();
-	BakedChunks.clear();
-	L1ChunkLookup.assign(L1ChunkCountX * L1ChunkCountY * L1ChunkCountZ, -1);
+	++NavigationDataGeneration;
+	ClearRuntimeTopology();
 	RefreshRuntimeMemory();
 }
 
@@ -658,7 +694,7 @@ int FVoxelNavigationGrid::FlattenL1Chunk(int X, int Y, int Z) const
 	return (Z * L1ChunkCountY + Y) * L1ChunkCountX + X;
 }
 
-bool FVoxelNavigationGrid::IsValidL1Chunk(int X, int Y, int Z) const
+bool FVoxelNavigationGrid::IsValidL1ChunkCoord(int X, int Y, int Z) const
 {
 	return X >= 0 && X < L1ChunkCountX && 
 			Y >= 0 && Y < L1ChunkCountY && 
@@ -701,7 +737,7 @@ FCellRef FVoxelNavigationGrid::FindNearestCell(const FVector& Point, float MaxDi
 		{
 			for (int X = HomeX - 1; X <= HomeX + 1; ++X)
 			{
-				if (!IsValidL1Chunk(X, Y, Z)) 
+				if (!IsValidL1ChunkCoord(X, Y, Z)) 
 					continue;
 
 				FindNearestCellInChunk(L1ChunkLookup[FlattenL1Chunk(X, Y, Z)]);
@@ -860,18 +896,30 @@ int FVoxelNavigationGrid::FindOrAddPortal(int ChunkIndex, int LocalCell)
 		if (Portals[PortalIndex].LocalCell == LocalCell) 
 			return PortalIndex;
 	}
-	const int PortalIndex = static_cast<int>(Portals.size());
+	const int PortalIndex = FreePortalIndices.empty() ? static_cast<int>(Portals.size()) : FreePortalIndices.back();
+	if (!FreePortalIndices.empty())
+		FreePortalIndices.pop_back();
 	FVoxelNavigationPortal Portal;
 	Portal.ChunkIndex = ChunkIndex;
 	Portal.LocalCell = static_cast<uint8>(LocalCell);
-	Portals.push_back(Portal);
+	Portal.bActive = true;
+	if (PortalIndex == static_cast<int>(Portals.size()))
+	{
+		Portals.push_back(std::move(Portal));
+	}
+	else
+	{
+		Portals[PortalIndex] = std::move(Portal);
+	}
 	Chunk.PortalIndices.push_back(PortalIndex);
 	return PortalIndex;
 }
 
 void FVoxelNavigationGrid::AddAbstractEdge(int FromPortal, int ToPortal, float Cost)
 {
-	if (FromPortal < 0 || ToPortal < 0 || FromPortal == ToPortal) 
+	if (FromPortal < 0 || ToPortal < 0 || FromPortal == ToPortal ||
+		FromPortal >= static_cast<int>(Portals.size()) || ToPortal >= static_cast<int>(Portals.size()) ||
+		!Portals[FromPortal].bActive || !Portals[ToPortal].bActive)
 		return;
 
 	TArray<FVoxelNavigationAbstractEdge>& Edges = Portals[FromPortal].Edges;
@@ -884,6 +932,16 @@ void FVoxelNavigationGrid::AddAbstractEdge(int FromPortal, int ToPortal, float C
 		return;
 	}
 	Edges.push_back({ ToPortal, Cost });
+}
+
+void FVoxelNavigationGrid::DeactivatePortal(int PortalIndex)
+{
+	if (PortalIndex < 0 || PortalIndex >= static_cast<int>(Portals.size()) || !Portals[PortalIndex].bActive)
+		return;
+	Portals[PortalIndex].Edges.clear();
+	Portals[PortalIndex].bActive = false;
+	Portals[PortalIndex].ChunkIndex = -1;
+	FreePortalIndices.push_back(PortalIndex);
 }
 
 void FVoxelNavigationGrid::RefreshRuntimeMemory()
@@ -906,6 +964,7 @@ size_t FVoxelNavigationGrid::CalculateRuntimeMemoryBytes() const
 	TotalBytes += L1Chunks.capacity() * sizeof(FVoxelNavigationL1Chunk);
 	TotalBytes += L1ChunkLookup.capacity() * sizeof(int);
 	TotalBytes += Portals.capacity() * sizeof(FVoxelNavigationPortal);
+	TotalBytes += FreePortalIndices.capacity() * sizeof(int);
 	TotalBytes += BakedChunks.capacity() * sizeof(FBakedVoxelNavigationChunk);
 	for (const FVoxelNavigationL1Chunk& Chunk : L1Chunks)
 	{

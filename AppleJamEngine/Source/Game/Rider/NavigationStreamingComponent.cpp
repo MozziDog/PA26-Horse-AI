@@ -94,32 +94,17 @@ void UNavigationStreamingComponent::TickComponent(float DeltaTime, ELevelTick Ti
 		Volume->GatherLoadedNavigationChunks(LoadedCoords);
 		LoadedChunkCount += LoadedCoords.size();
 	}
+	const FNavigationStreamingStats& Stats = StreamingService.GetStats();
+	RequestedChunkCount = Stats.RequestedChunkCount;
+	InFlightChunkCount = Stats.InFlightChunkCount;
+	InFlightMemoryMB = static_cast<float>(Stats.InFlightBytes) / (1024.0f * 1024.0f);
+	StaleLoadDiscardCount = static_cast<int>(Stats.StaleDiscardCount);
+	LastIoDeserializeTimeMs = Stats.LastIoDeserializeTimeMs;
 }
 
 void UNavigationStreamingComponent::UpdateStreamingForVolume(AVoxelNavigationVolume& Volume, const TArray<FVoxelCoord>& DesiredCoords)
 {
-	TArray<FVoxelCoord> LoadedCoords;
-	Volume.GatherLoadedNavigationChunks(LoadedCoords);
-
-	TArray<FVoxelCoord> UnloadCoords;
-	for (const FVoxelCoord& Loaded : LoadedCoords)
-	{
-		if (std::none_of(DesiredCoords.begin(), DesiredCoords.end(), [&Loaded](const FVoxelCoord& Desired) { return Desired == Loaded; }))
-		{
-			UnloadCoords.push_back(Loaded);
-		}
-	}
-	StreamingService.RequestUnload(&Volume, UnloadCoords);
-
-	TArray<FVoxelCoord> LoadCoords;
-	for (const FVoxelCoord& Desired : DesiredCoords)
-	{
-		if (std::none_of(LoadedCoords.begin(), LoadedCoords.end(), [&Desired](const FVoxelCoord& Loaded) { return Loaded == Desired; }))
-		{
-			LoadCoords.push_back(Desired);
-		}
-	}
-	StreamingService.RequestLoad(&Volume, Volume.GetNavigationAssetCatalog(), LoadCoords);
+	StreamingService.UpdateDesiredChunks(&Volume, Volume.GetNavigationAssetCatalog(), DesiredCoords);
 }
 
 float UNavigationStreamingComponent::GetChunkDistanceSquared( const AVoxelNavigationVolume& Volume, 

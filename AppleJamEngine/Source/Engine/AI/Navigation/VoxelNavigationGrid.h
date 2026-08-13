@@ -57,9 +57,11 @@ public:
 	// 청크의 12개 모서리를 모두 그리면 헷갈리므로 청크 밑면의 4개 선만 표시함
 	void GatherDebugChunkBoundaryLines(int MaxChunks, TArray<TPair<FVector, FVector>>& OutLines) const;
 
-protected: // VoxelNavigationBakeGrid에서도 접근
+private:
+	friend class FVoxelNavigationBakeGrid;
+
 	int FlattenL1Chunk(int X, int Y, int Z) const;
-	bool IsValidL1Chunk(int X, int Y, int Z) const;
+	bool IsValidL1ChunkCoord(int X, int Y, int Z) const;	// 입력은 단일 NavGrid 영역 내에서의 좌표기준
 
 	// ─── 길찾기 관련 ───
 	FCellRef FindNearestCell(const FVector& Point, float MaxDistance = 0.0f) const;
@@ -74,7 +76,15 @@ protected: // VoxelNavigationBakeGrid에서도 접근
 
 	// ─── 청크 로드/언로드 & 후처리 관련 ───
 	bool ValidateLoadedChunkPayload(const FBakedVoxelNavigationChunk& Chunk) const;
-	bool RebuildActiveRuntimeGraph();							// HPA* abstract graph 재구축
+	bool ApplyLoadedChunk(const FBakedVoxelNavigationChunk& Chunk);
+	bool ApplyRemovedChunk(const FVoxelCoord& Coord);
+	void ClearRuntimeTopology();
+	void BuildChunkTopology(int ChunkIndex);
+	void ConnectChunkSeams(int ChunkIndex);
+	void DisconnectChunkSeams(int ChunkIndex);
+	void ConnectExternalLinksForChunk(int ChunkIndex);
+	bool HasReciprocalExternalLink(const FBakedVoxelNavigationExternalLink& Link, int ToChunkIndex) const;
+	void DeactivatePortal(int PortalIndex);
 	int FindChunkIndexByCoord(const FVoxelCoord& Coord) const;	// 현재 로드된 청크들 중에서 탐색
 	static bool PackNeighborChunkDelta(const FVoxelCoord& Delta, uint8& OutPacked);
 	static bool UnpackNeighborChunkDelta(uint8 Packed, FVoxelCoord& OutDelta);
@@ -86,7 +96,7 @@ protected: // VoxelNavigationBakeGrid에서도 접근
 	void RefreshRuntimeMemory();
 	size_t CalculateRuntimeMemoryBytes() const;
 
-protected:
+private:
 	FVector BoundsCenter = FVector::ZeroVector;
 	FVector BoundsExtent = FVector::ZeroVector;
 	FVector BoundsMin = FVector::ZeroVector;
@@ -99,13 +109,13 @@ protected:
 	size_t L1ChunkCountZ = 0;
 	bool bBuilt = false;
 	bool bRuntimeInitialized = false;
-	uint64 NavigationDataGeneration = 0;	// 순간 이동 등 특수한 상황에서 디스크에서 로드 중인 청크가 버려져야할 수 있음
-											// 그러한 상황을 구분하기 위해 데이터 Clear 시마다 이 값을 1씩 증가시킴
+	uint64 NavigationDataGeneration = 0;
 
 	TArray<FVoxelNavigationL1Chunk> L1Chunks;
 	TArray<FVoxelNavigationPortal> Portals;	// 포탈: 청크간 연결
 	TArray<FBakedVoxelNavigationChunk> BakedChunks;
-	TArray<int> L1ChunkLookup;				// flatten(XYZ) → L1ChunkId 매핑
+	TArray<int> L1ChunkLookup;				// flatten(XYZ) → L1ChunkId 매핑해서 빠른 검색
+	TArray<int> FreePortalIndices;
 	
 	uint64 RuntimeMemoryBytes = 0;
 	bool bRuntimeMemoryStatsEnabled = true;

@@ -204,6 +204,7 @@ bool FVoxelNavigationBakeGrid::Build(
 	L1Chunks.clear();
 	L1ChunkLookup.clear();
 	Portals.clear();
+	FreePortalIndices.clear();
 	BakedChunks.clear();
 	bRuntimeInitialized = false;
 	NodeToChunkLookup.clear();
@@ -573,9 +574,9 @@ bool FVoxelNavigationBakeGrid::Build(
 
 	// HPA* 계층 구성
 	BuildAbstractGraph(RetainedNodes);
-	if (!BuildBakedChunksFromRuntimeGraph() || !RebuildActiveRuntimeGraph())
+	if (!BuildBakedChunksFromRuntimeGraph())
 	{
-		UE_LOG("[VoxelNavigationGrid] Build rejected: baked chunk graph validation failed.");
+		UE_LOG("[VoxelNavigationGrid] Build rejected: baked chunk graph export failed.");
 		bBuilt = false;
 		return false;
 	}

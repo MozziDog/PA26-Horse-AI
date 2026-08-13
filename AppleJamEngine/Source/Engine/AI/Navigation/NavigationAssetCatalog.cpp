@@ -302,6 +302,12 @@ FVector FNavigationAssetCatalog::GetChunkCenter(const FVoxelCoord& Coord) const
 							(Coord.Z + 0.5f) * NavL1ChunkSize);
 }
 
+uint64 FNavigationAssetCatalog::GetChunkPayloadBytes(const FVoxelCoord& Coord) const
+{
+	const FChunkIndexEntry* Entry = FindEntry(Coord);
+	return Entry ? Entry->Size : 0;
+}
+
 bool FNavigationAssetCatalog::WriteAsset(const FString& AssetPath, const FString& SourceScenePath, const FVoxelNavigationBakedData& Data)
 {
 	if (!ValidateNavigationAssetDataset(Data.Chunks)) 

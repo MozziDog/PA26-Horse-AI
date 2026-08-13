@@ -152,14 +152,16 @@ struct FVoxelNavigationL1Chunk
 
 struct FVoxelNavigationAbstractEdge
 {
-	int32 ToPortal = -1;
+	int32 ToPortal = -1;	// FVoxelNavigationGrid::Portals에서의 인덱스
 	float Cost = 0.0f;
 };
 
+// 런타임 전용
 struct FVoxelNavigationPortal
 {
 	int32 ChunkIndex = -1;
 	uint8 LocalCell = 0;
+	bool bActive = false;	// 이웃한 청크가 아직 로드되지 않은 경우 등에 포탈 비활성화
 	TArray<FVoxelNavigationAbstractEdge> Edges;
 };
 

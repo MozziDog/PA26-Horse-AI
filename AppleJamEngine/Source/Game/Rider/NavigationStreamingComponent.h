@@ -34,8 +34,18 @@ private:
 	float LoadRadius = 35.0f;
 	UPROPERTY(Edit, Save, Category="Navigation|Streaming", DisplayName="Max Loaded Chunks", Min=1, Max=100000, Speed=1.0f)
 	int MaxLoadedChunks = 256;
+	// Details 패널에 통계 표시용 ReadOnly property
 	UPROPERTY(Edit, ReadOnly, Transient, Category="Navigation|Streaming", DisplayName="Loaded Chunk Count")
 	int LoadedChunkCount = 0;
-
+	UPROPERTY(Edit, ReadOnly, Transient, Category="Navigation|Streaming", DisplayName="Requested Chunk Count")
+	int RequestedChunkCount = 0;
+	UPROPERTY(Edit, ReadOnly, Transient, Category="Navigation|Streaming", DisplayName="In Flight Chunk Count")
+	int InFlightChunkCount = 0;
+	UPROPERTY(Edit, ReadOnly, Transient, Category="Navigation|Streaming", DisplayName="In Flight MB")
+	float InFlightMemoryMB = 0.0f;
+	UPROPERTY(Edit, ReadOnly, Transient, Category="Navigation|Streaming", DisplayName="Stale Load Discards")
+	int StaleLoadDiscardCount = 0;
+	UPROPERTY(Edit, ReadOnly, Transient, Category="Navigation|Streaming", DisplayName="Last I/O Deserialize Ms")
+	float LastIoDeserializeTimeMs = 0.0f;
 	FNavigationStreamingService StreamingService;
 };
