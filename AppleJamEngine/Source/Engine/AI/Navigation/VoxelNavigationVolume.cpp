@@ -29,9 +29,9 @@ void AVoxelNavigationVolume::BeginPlay()
 {
 	RebindComponents();
 	Super::BeginPlay();
-	if (!ReferenceDataPath.empty() && !LoadNavigationAsset(ReferenceDataPath))
+	if (!ReferenceDataPath.empty() && !InitializeStreamingNavigation())
 	{
-		UE_LOG("[VoxelNavigation] Failed to load baked navigation asset: %s", ReferenceDataPath.c_str());
+		UE_LOG("[VoxelNavigation] Failed to initialize streaming navigation asset: %s", ReferenceDataPath.c_str());
 	}
 }
 
@@ -122,6 +122,30 @@ bool AVoxelNavigationVolume::LoadNavigationAsset(const FString& InputPath)
 		ReferenceDataPath = InputPath;
 	}
 	return bSuccess;
+}
+
+bool AVoxelNavigationVolume::InitializeStreamingNavigation()
+{
+	if (ReferenceDataPath.empty()) return false;
+	if (Grid.IsStreamingNavigationInitialized()) return true;
+	FVoxelNavigationAssetInfo AssetInfo;
+	return FVoxelNavigationGrid::ReadNavigationAssetInfo(ReferenceDataPath, AssetInfo) &&
+		Grid.InitializeStreamingNavigation(AssetInfo);
+}
+
+bool AVoxelNavigationVolume::PublishStreamingNavigationChunks(const TArray<FBakedVoxelNavigationChunk>& LoadedChunks)
+{
+	return Grid.PublishStreamingChunks(LoadedChunks);
+}
+
+bool AVoxelNavigationVolume::UnloadStreamingNavigationChunks(const TArray<FVoxelCoord>& ChunkCoords)
+{
+	return Grid.UnloadStreamingChunks(ChunkCoords);
+}
+
+void AVoxelNavigationVolume::ClearNavigationData()
+{
+	Grid.ClearNavigationData();
 }
 
 bool AVoxelNavigationVolume::Contains(const FVector& Point) const

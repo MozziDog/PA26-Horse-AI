@@ -24,6 +24,18 @@ public:
 	// 에디터 타임 Bake & 런타임 Load, 런타임에는 Bake 수행 X
 	bool BakeNavigationAsset(const FString& OutputPath, const FString& SourceScenePath);
 	bool LoadNavigationAsset(const FString& InputPath);
+	bool InitializeStreamingNavigation();
+	bool PublishStreamingNavigationChunks(const TArray<FBakedVoxelNavigationChunk>& LoadedChunks);
+	bool UnloadStreamingNavigationChunks(const TArray<FVoxelCoord>& ChunkCoords);
+	void ClearNavigationData();
+	bool IsStreamingNavigationInitialized() const { return Grid.IsStreamingNavigationInitialized(); }
+	uint64 GetNavigationDataGeneration() const { return Grid.GetNavigationDataGeneration(); }
+	const FString& GetNavigationAssetPath() const { return ReferenceDataPath; }
+	void GatherLoadedNavigationChunks(TArray<FVoxelCoord>& OutCoords) const { Grid.GatherLoadedChunkCoords(OutCoords); }
+	void GatherNavigationChunksInRadius(const FVector& Center, float Radius, TArray<FVoxelCoord>& OutCoords) const
+	{
+		Grid.GatherStreamingChunkCoordsInRadius(Center, Radius, OutCoords);
+	}
 
 	bool Contains(const FVector& Point) const;
 	FVoxelNavigationPathResult FindPath(const FVector& Start, const FVector& Goal) const;

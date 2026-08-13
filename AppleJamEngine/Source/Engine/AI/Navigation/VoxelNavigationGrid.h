@@ -32,11 +32,21 @@ public:
 	// indexed little-endian stream; no C++ struct layout is persisted.
 	bool SaveNavigationAsset(const FString& Path, const FString& SourceScenePath) const;
 	bool LoadNavigationAsset(const FString& Path);
-	bool HasLoadedNavigationAt(const FVector& Point) const;
-	bool IsNavigationReadyFor(const FVector& Start, const FVector& Goal) const
-	{
-		return HasLoadedNavigationAt(Start) && HasLoadedNavigationAt(Goal);
-	}
+
+	// Streaming transport: asset I/O is safe to run off the game thread; only
+	// Initialize/Publish/Clear mutate the runtime HPA* graph on the game thread.
+	static bool ReadNavigationAssetInfo(const FString& Path, FVoxelNavigationAssetInfo& OutInfo);
+	static bool ReadNavigationAssetChunks(const FString& Path, const TArray<FVoxelCoord>& RequestedCoords,
+		TArray<FBakedVoxelNavigationChunk>& OutChunks);
+	bool InitializeStreamingNavigation(const FVoxelNavigationAssetInfo& AssetInfo);
+	bool PublishStreamingChunks(const TArray<FBakedVoxelNavigationChunk>& LoadedChunks);
+	bool UnloadStreamingChunks(const TArray<FVoxelCoord>& ChunkCoords);
+	void ClearNavigationData();
+	bool IsStreamingNavigationInitialized() const { return bStreamingNavigationInitialized; }
+	uint64 GetNavigationDataGeneration() const { return NavigationDataGeneration; }
+	const TArray<FVoxelCoord>& GetAvailableStreamingChunkCoords() const { return AvailableStreamingChunkCoords; }
+	void GatherLoadedChunkCoords(TArray<FVoxelCoord>& OutCoords) const;
+	void GatherStreamingChunkCoordsInRadius(const FVector& Center, float Radius, TArray<FVoxelCoord>& OutCoords) const;
 
 	FVoxelNavigationPathResult FindPath(
 		const FVector& Start,
@@ -84,8 +94,8 @@ private:
 		const FVector* PartialTarget = nullptr) const;
 	void BuildAbstractGraph(const TArray<uint8>& RetainedNodes);
 	bool BuildBakedChunksFromRuntimeGraph();
-	bool BuildRuntimeGraphFromBakedChunks();
-	bool ValidateBakedChunks() const;
+	bool BuildRuntimeGraphFromBakedChunks(bool bAllowMissingExternalTargets = false); // TODO: 베이크 후 abstract graph 검증 역할 분리하도록 리팩토링
+	bool ValidateBakedChunks(bool bAllowMissingExternalTargets = false) const;
 	int FindChunkIndexByCoord(const FVoxelCoord& Coord) const;
 	static bool PackNeighborChunkDelta(const FVoxelCoord& Delta, uint8& OutPacked);
 	static bool UnpackNeighborChunkDelta(uint8 Packed, FVoxelCoord& OutDelta);
@@ -113,6 +123,10 @@ private:
 	size_t L1ChunkCountY = 0;
 	size_t L1ChunkCountZ = 0;
 	bool bBuilt = false;
+	bool bStreamingNavigationInitialized = false;
+	uint64 NavigationDataGeneration = 0;	// 순간 이동 등 특수한 상황에서 디스크에서 로드 중인 청크가 버려져야할 수 있음
+											// 그러한 상황을 구분하기 위해 데이터 Clear 시마다 이 값을 1씩 증가시킴
+	TArray<FVoxelCoord> AvailableStreamingChunkCoords;
 
 	// ── 복셀 빌드 중에만 사용하는 임시 데이터들 ──
 	TArray<FVoxelNavigationNode> Nodes;		// 복셀 1개를 1개의 노드로 취급

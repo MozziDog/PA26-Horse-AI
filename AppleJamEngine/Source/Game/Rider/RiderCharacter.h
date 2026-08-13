@@ -9,6 +9,7 @@ class AHorseCharacter;
 class UParentConstraintComponent;
 class USpringArmComponent;
 class UCameraComponent;
+class UNavigationStreamingComponent;
 
 // Player-controlled walking character.
 // While mounted it sends commands to AHorseCharacter.
@@ -66,4 +67,5 @@ private:
 	TWeakObjectPtr<AHorseCharacter> MountedHorse = nullptr;
 	TWeakObjectPtr<USpringArmComponent> SpringArm = nullptr;
 	TWeakObjectPtr<UCameraComponent> Camera = nullptr;
+	TWeakObjectPtr<UNavigationStreamingComponent> NavigationStreamingComp = nullptr;
 };

@@ -1,4 +1,4 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "RiderCharacter.h"
 
 #include "Component/Shape/CapsuleComponent.h"
@@ -8,6 +8,7 @@
 #include "Component/Camera/SpringArmComponent.h"
 #include "Component/Camera/CameraComponent.h"
 #include "Game/Horse/HorseCharacter.h"
+#include "Game/Rider/NavigationStreamingComponent.h"
 #include "GameFramework/GameMode/PlayerController.h"
 #include "GameFramework/World.h"
 #include "Core/Logging/Log.h"
@@ -28,6 +29,7 @@ void ARiderCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 	Mesh->SetRelativeLocation(FVector(0.0f, 0.0f, -0.9f));
 
 	ParentConstraintComponent = AddComponent<UParentConstraintComponent>();
+	NavigationStreamingComp = AddComponent<UNavigationStreamingComponent>();
 
 	// 3인칭 카메라 체인 — Capsule → SpringArm → Camera. lag 적용해 부드럽게 따라옴.
 	SpringArm = AddComponent<USpringArmComponent>();
@@ -52,12 +54,14 @@ void ARiderCharacter::PostDuplicate()
 {
 	Super::PostDuplicate();
 	ParentConstraintComponent = GetComponentByClass<UParentConstraintComponent>();
+	NavigationStreamingComp = GetComponentByClass<UNavigationStreamingComponent>();
 }
 
 void ARiderCharacter::OnPostLoad(FArchive& Ar)
 {
 	Super::OnPostLoad(Ar);
 	ParentConstraintComponent = GetComponentByClass<UParentConstraintComponent>();
+	NavigationStreamingComp = GetComponentByClass<UNavigationStreamingComponent>();
 }
 
 void ARiderCharacter::SetupInputComponent()

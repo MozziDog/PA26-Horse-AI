@@ -22,8 +22,9 @@ struct FVoxelCoord
 	}
 };
 
-// Baked files must never contain a runtime portal-array index.  A portal is
-// permanently identified by its chunk and representative 10x10 cell.
+// portal은 10x10 청크 기준 flattened coord를 사용하여 저장
+// (런타임에 사용하는 array index는 immutable하지 않아서 flattened coord 사용)
+// 청크 사이즈 바뀌면 자료형 변경해야 할 수 있음.
 using FBakedNavPortal = uint8;
 inline constexpr FBakedNavPortal InvalidBakedNavPortal = 0xff;
 static_assert(NavL1ChunkCellCount < InvalidBakedNavPortal);
@@ -67,6 +68,19 @@ struct FVoxelNavigationBuildSettings
 	float MaxNeighborHeightDelta = 0.4f;
 	float GroundProbeInset = 0.02f;
 	float ClearanceOffset = 0.03f;
+};
+
+// Navigation asset의 메타데이터 
+// 어느 씬의 어느 NavVolume에서 베이크했는지 등등
+// 특정 청크를 로드하려고 했는데 그것이 어느 NavVolume에 속해있는지 파악할 때 등의 상황에 필요
+// NOTE: it never transfers runtime portal indices or mutable graph state.
+struct FVoxelNavigationAssetInfo
+{
+	FString SourceScenePath;
+	FVector BoundsCenter = FVector::ZeroVector;
+	FVector BoundsExtent = FVector::ZeroVector;
+	FVoxelNavigationBuildSettings Settings;
+	TArray<FVoxelCoord> AvailableChunkCoords;
 };
 
 struct FVoxelNavigationBuildStats

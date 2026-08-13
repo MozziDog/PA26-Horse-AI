@@ -174,6 +174,73 @@ namespace
 		}
 		return true;
 	}
+
+	struct FNavigationAssetReadLayout
+	{
+		FVoxelNavigationAssetInfo Info;
+		uint64 PayloadStart = 0;
+		uint64 FileSize = 0;
+		TArray<FNavigationChunkIndexEntry> Index;
+	};
+
+	bool ReadNavigationAssetLayout(FArchive& Ar, FNavigationAssetReadLayout& OutLayout)
+	{
+		FAssetPackageHeader PackageHeader;
+		FAssetImportMetadata Metadata;
+		if (!FAssetPackage::ReadPackagePrelude(Ar, EAssetPackageType::VoxelNavigation, PackageHeader, Metadata)) return false;
+		Ar.SetTaggedPropertySerializationEnabled(false);
+		OutLayout.PayloadStart = Ar.Tell();
+		OutLayout.FileSize = Ar.Size();
+
+		uint32 FormatVersion = 0;
+		uint32 ByteOrder = 0;
+		uint32 ChunkCount = 0;
+		Ar << FormatVersion << ByteOrder;
+		Ar.Serialize(OutLayout.Info.BoundsCenter.Data, sizeof(OutLayout.Info.BoundsCenter.Data));
+		Ar.Serialize(OutLayout.Info.BoundsExtent.Data, sizeof(OutLayout.Info.BoundsExtent.Data));
+		Ar << OutLayout.Info.Settings.AgentRadius << OutLayout.Info.Settings.AgentHeight
+			<< OutLayout.Info.Settings.MaxWalkableSlopeDegrees << OutLayout.Info.Settings.MaxNeighborHeightDelta
+			<< OutLayout.Info.Settings.GroundProbeInset << OutLayout.Info.Settings.ClearanceOffset;
+		Ar << ChunkCount;
+		OutLayout.Info.SourceScenePath = Metadata.SourcePath;
+		if (!Ar.IsValid() || FormatVersion != NavigationAssetFormatVersion || ByteOrder != NavigationAssetByteOrder ||
+			ChunkCount == 0 || ChunkCount > MaxNavigationAssetChunks ||
+			!std::isfinite(OutLayout.Info.BoundsCenter.X) || !std::isfinite(OutLayout.Info.BoundsCenter.Y) || !std::isfinite(OutLayout.Info.BoundsCenter.Z) ||
+			!std::isfinite(OutLayout.Info.BoundsExtent.X) || !std::isfinite(OutLayout.Info.BoundsExtent.Y) || !std::isfinite(OutLayout.Info.BoundsExtent.Z) ||
+			OutLayout.Info.BoundsExtent.X <= Epsilon || OutLayout.Info.BoundsExtent.Y <= Epsilon || OutLayout.Info.BoundsExtent.Z <= Epsilon ||
+			!std::isfinite(OutLayout.Info.Settings.AgentRadius) || OutLayout.Info.Settings.AgentRadius <= Epsilon ||
+			!std::isfinite(OutLayout.Info.Settings.AgentHeight) || OutLayout.Info.Settings.AgentHeight <= Epsilon ||
+			!std::isfinite(OutLayout.Info.Settings.MaxWalkableSlopeDegrees) || !std::isfinite(OutLayout.Info.Settings.MaxNeighborHeightDelta) ||
+			!std::isfinite(OutLayout.Info.Settings.GroundProbeInset) || !std::isfinite(OutLayout.Info.Settings.ClearanceOffset))
+		{
+			return false;
+		}
+
+		OutLayout.Index.resize(ChunkCount);
+		OutLayout.Info.AvailableChunkCoords.clear();
+		OutLayout.Info.AvailableChunkCoords.reserve(ChunkCount);
+		for (FNavigationChunkIndexEntry& Entry : OutLayout.Index)
+		{
+			if (!ReadChunkIndexEntry(Ar, Entry)) return false;
+			OutLayout.Info.AvailableChunkCoords.push_back(Entry.Coord);
+		}
+		const uint64 PayloadDataStart = Ar.Tell();
+		if (PayloadDataStart < OutLayout.PayloadStart || PayloadDataStart > OutLayout.FileSize) return false;
+
+		uint64 ExpectedOffset = PayloadDataStart - OutLayout.PayloadStart;
+		for (size_t IndexEntry = 0; IndexEntry < OutLayout.Index.size(); ++IndexEntry)
+		{
+			const FNavigationChunkIndexEntry& Entry = OutLayout.Index[IndexEntry];
+			if ((IndexEntry > 0 && !IsCoordLess(OutLayout.Index[IndexEntry - 1].Coord, Entry.Coord)) ||
+				Entry.Offset != ExpectedOffset || Entry.Size == 0 || Entry.Offset > OutLayout.FileSize - OutLayout.PayloadStart ||
+				Entry.Size > OutLayout.FileSize - OutLayout.PayloadStart - Entry.Offset)
+			{
+				return false;
+			}
+			ExpectedOffset += Entry.Size;
+		}
+		return OutLayout.PayloadStart <= OutLayout.FileSize && ExpectedOffset == OutLayout.FileSize - OutLayout.PayloadStart;
+	}
 } // namespace
 
 FVoxelNavigationGrid::~FVoxelNavigationGrid()
@@ -202,6 +269,8 @@ bool FVoxelNavigationGrid::Build(
 	L1ChunkLookup.clear();
 	Portals.clear();
 	BakedChunks.clear();
+	bStreamingNavigationInitialized = false;
+	AvailableStreamingChunkCoords.clear();
 	NodeToChunkLookup.clear();
 	NodeToLocalCellIdxLookup.clear();
 	ChunkCellToNodeLookup.clear();
@@ -703,7 +772,7 @@ bool FVoxelNavigationGrid::BuildBakedChunksFromRuntimeGraph()
 	return ValidateBakedChunks();
 }
 
-bool FVoxelNavigationGrid::ValidateBakedChunks() const
+bool FVoxelNavigationGrid::ValidateBakedChunks(bool bAllowMissingExternalTargets) const
 {
 	for (size_t Index = 0; Index < BakedChunks.size(); ++Index)
 	{
@@ -740,7 +809,11 @@ bool FVoxelNavigationGrid::ValidateBakedChunks() const
 			{
 				return Candidate.Coord == NeighborCoord;
 			});
-			if (NeighborIt == BakedChunks.end()) return false;
+			if (NeighborIt == BakedChunks.end())
+			{
+				if (bAllowMissingExternalTargets) continue;
+				return false;
+			}
 			if (NeighborIt->Cells[Link.NeighborPortalId] == 0) return false;
 			uint8 ReverseDelta = 0;
 			if (!PackNeighborChunkDelta({ -Delta.X, -Delta.Y, -Delta.Z }, ReverseDelta)) return false;
@@ -757,9 +830,11 @@ bool FVoxelNavigationGrid::ValidateBakedChunks() const
 	return true;
 }
 
-bool FVoxelNavigationGrid::BuildRuntimeGraphFromBakedChunks()
+bool FVoxelNavigationGrid::BuildRuntimeGraphFromBakedChunks(bool bAllowMissingExternalTargets)
 {
-	if (!ValidateBakedChunks()) return false;
+	if (!ValidateBakedChunks(bAllowMissingExternalTargets)) 
+		return false;
+
 	L1Chunks.clear();
 	Portals.clear();
 	L1ChunkLookup.assign(L1ChunkCountX * L1ChunkCountY * L1ChunkCountZ, -1);
@@ -803,7 +878,13 @@ bool FVoxelNavigationGrid::BuildRuntimeGraphFromBakedChunks()
 			const FVoxelCoord NeighborCoord{
 				BakedChunks[ChunkIndex].Coord.X + Delta.X, BakedChunks[ChunkIndex].Coord.Y + Delta.Y, BakedChunks[ChunkIndex].Coord.Z + Delta.Z };
 			const int NeighborChunkIndex = FindChunkIndexByCoord(NeighborCoord);
-			if (NeighborChunkIndex < 0) return false;
+			if (NeighborChunkIndex < 0)
+			{
+				if (bAllowMissingExternalTargets) 
+					continue;
+
+				return false;
+			}
 			const int From = FindOrAddPortal(ChunkIndex, Link.LocalPortalId);
 			const int To = FindOrAddPortal(NeighborChunkIndex, Link.NeighborPortalId);
 			AddAbstractEdge(From, To, Link.Cost);
@@ -1193,13 +1274,234 @@ bool FVoxelNavigationGrid::LoadNavigationAsset(const FString& Path)
 	return bBuilt;
 }
 
-bool FVoxelNavigationGrid::HasLoadedNavigationAt(const FVector& Point) const
+bool FVoxelNavigationGrid::ReadNavigationAssetInfo(const FString& Path, FVoxelNavigationAssetInfo& OutInfo)
 {
-	if (!bBuilt || !Contains(Point)) return false;
-	const int ChunkX = static_cast<int>(std::floor((Point.X - BoundsMin.X) / NavL1ChunkSize));
-	const int ChunkY = static_cast<int>(std::floor((Point.Y - BoundsMin.Y) / NavL1ChunkSize));
-	const int ChunkZ = static_cast<int>(std::floor((Point.Z - BoundsMin.Z) / NavL1ChunkSize));
-	return FindChunkIndexByCoord({ ChunkX, ChunkY, ChunkZ }) >= 0;
+	FWindowsBinReader Ar(FPaths::MakeProjectRelative(Path));
+	if (!Ar.IsValid()) return false;
+	FNavigationAssetReadLayout Layout;
+	if (!ReadNavigationAssetLayout(Ar, Layout)) return false;
+	OutInfo = std::move(Layout.Info);
+	return true;
+}
+
+bool FVoxelNavigationGrid::ReadNavigationAssetChunks(
+	const FString& Path,
+	const TArray<FVoxelCoord>& RequestedCoords,
+	TArray<FBakedVoxelNavigationChunk>& OutChunks)
+{
+	OutChunks.clear();
+	if (RequestedCoords.empty()) return true;
+	FWindowsBinReader Ar(FPaths::MakeProjectRelative(Path));
+	if (!Ar.IsValid()) return false;
+	FNavigationAssetReadLayout Layout;
+	if (!ReadNavigationAssetLayout(Ar, Layout)) return false;
+
+	for (const FNavigationChunkIndexEntry& Entry : Layout.Index)
+	{
+		const bool bRequested = std::any_of(RequestedCoords.begin(), RequestedCoords.end(), [&Entry](const FVoxelCoord& Coord)
+		{
+			return Coord == Entry.Coord;
+		});
+		if (!bRequested) continue;
+
+		const uint64 ChunkStart = Layout.PayloadStart + Entry.Offset;
+		if (!Ar.Seek(ChunkStart)) return false;
+		FBakedVoxelNavigationChunk Chunk;
+		Chunk.Coord = Entry.Coord;
+		if (!ReadNavigationChunk(Ar, Chunk) || Ar.Tell() != ChunkStart + Entry.Size) return false;
+		for (const FBakedVoxelNavigationIntraEdge& Edge : Chunk.IntraEdges)
+		{
+			if (Edge.PortalA >= NavL1ChunkCellCount || Edge.PortalB >= NavL1ChunkCellCount ||
+				Chunk.Cells[Edge.PortalA] == 0 || Chunk.Cells[Edge.PortalB] == 0 || Edge.PortalA >= Edge.PortalB ||
+				!std::isfinite(Edge.Cost) || Edge.Cost < 0.0f)
+			{
+				return false;
+			}
+		}
+		for (const FBakedVoxelNavigationExternalLink& Link : Chunk.ExternalLinks)
+		{
+			FVoxelCoord Delta;
+			if (Link.LocalPortalId >= NavL1ChunkCellCount || Link.NeighborPortalId >= NavL1ChunkCellCount ||
+				Chunk.Cells[Link.LocalPortalId] == 0 || !std::isfinite(Link.Cost) || Link.Cost < 0.0f ||
+				!UnpackNeighborChunkDelta(Link.PackedNeighborChunkDelta, Delta))
+			{
+				return false;
+			}
+			const FVoxelCoord NeighborCoord{ Chunk.Coord.X + Delta.X, Chunk.Coord.Y + Delta.Y, Chunk.Coord.Z + Delta.Z };
+			if (std::none_of(Layout.Info.AvailableChunkCoords.begin(), Layout.Info.AvailableChunkCoords.end(),
+				[&NeighborCoord](const FVoxelCoord& Coord) { return Coord == NeighborCoord; }))
+			{
+				return false;
+			}
+		}
+		OutChunks.push_back(std::move(Chunk));
+	}
+	return OutChunks.size() == RequestedCoords.size();
+}
+
+bool FVoxelNavigationGrid::InitializeStreamingNavigation(const FVoxelNavigationAssetInfo& AssetInfo)
+{
+	if (AssetInfo.AvailableChunkCoords.empty() || AssetInfo.BoundsExtent.X <= Epsilon || AssetInfo.BoundsExtent.Y <= Epsilon || AssetInfo.BoundsExtent.Z <= Epsilon ||
+		!std::isfinite(AssetInfo.BoundsCenter.X) || !std::isfinite(AssetInfo.BoundsCenter.Y) || !std::isfinite(AssetInfo.BoundsCenter.Z) ||
+		!std::isfinite(AssetInfo.BoundsExtent.X) || !std::isfinite(AssetInfo.BoundsExtent.Y) || !std::isfinite(AssetInfo.BoundsExtent.Z))
+	{
+		return false;
+	}
+	BoundsCenter = AssetInfo.BoundsCenter;
+	BoundsExtent = AssetInfo.BoundsExtent;
+	BoundsMin = BoundsCenter - BoundsExtent;
+	BuildSettings = AssetInfo.Settings;
+	CellCountX = static_cast<int>(std::ceil(BoundsExtent.X * 2.0f / NavVoxelCellSize));
+	CellCountY = static_cast<int>(std::ceil(BoundsExtent.Y * 2.0f / NavVoxelCellSize));
+	CellCountZ = static_cast<int>(std::ceil(BoundsExtent.Z * 2.0f / NavVoxelCellSize));
+	L1ChunkCountX = (CellCountX + NavL1ChunkCellsPerAxis - 1) / NavL1ChunkCellsPerAxis;
+	L1ChunkCountY = (CellCountY + NavL1ChunkCellsPerAxis - 1) / NavL1ChunkCellsPerAxis;
+	L1ChunkCountZ = (CellCountZ + NavL1ChunkCellsPerAxis - 1) / NavL1ChunkCellsPerAxis;
+	AvailableStreamingChunkCoords = AssetInfo.AvailableChunkCoords;
+	bStreamingNavigationInitialized = true;
+	ClearNavigationData();
+	return true;
+}
+
+bool FVoxelNavigationGrid::PublishStreamingChunks(const TArray<FBakedVoxelNavigationChunk>& LoadedChunks)
+{
+	if (!bStreamingNavigationInitialized || LoadedChunks.empty())
+	{
+		return LoadedChunks.empty();
+	}
+
+	TArray<FBakedVoxelNavigationChunk> PreviousChunks = BakedChunks;
+	for (const FBakedVoxelNavigationChunk& Loaded : LoadedChunks)
+	{
+		if (std::none_of(AvailableStreamingChunkCoords.begin(), AvailableStreamingChunkCoords.end(),
+			[&Loaded](const FVoxelCoord& Coord) { return Coord == Loaded.Coord; }))
+		{
+			return false;
+		}
+
+		auto Existing = std::find_if(BakedChunks.begin(), BakedChunks.end(), 
+					[&Loaded](const FBakedVoxelNavigationChunk& Chunk) { return Chunk.Coord == Loaded.Coord; });
+		if (Existing != BakedChunks.end())
+		{
+			*Existing = Loaded;				// 기존에 이미 로드된 청크 다시 로드한 경우 청크 데이터 갱신
+		}
+		else
+		{
+			BakedChunks.push_back(Loaded);	// 없던 청크 로드한 경우 BakedChunks에 추가
+		}
+	}
+
+	std::sort(BakedChunks.begin(), BakedChunks.end(), [](const auto& A, const auto& B) { return IsCoordLess(A.Coord, B.Coord); });
+	
+	// 만약 로드한 청크로 abstract graph 형성에 실패했다면 기존 청크 데이터로 롤백
+	if (!BuildRuntimeGraphFromBakedChunks(true))
+	{
+		BakedChunks = std::move(PreviousChunks);
+		BuildRuntimeGraphFromBakedChunks(true);
+		return false;
+	}
+
+	// 통계 업데이트
+	BuildStats = FVoxelNavigationBuildStats();
+	BuildStats.NumBuiltL1Chunks = L1Chunks.size();
+	for (const FVoxelNavigationL1Chunk& Chunk : L1Chunks)
+	{
+		for (uint8 Cell : Chunk.Cells)
+		{
+			if (Cell != 0)	// 0x00 = 보행 불가능 복셀
+			{
+				++BuildStats.NumWalkableNodes;
+			}
+		}
+	}
+	BuildStats.NumAbstractNodes = Portals.size();
+	for (const FVoxelNavigationPortal& Portal : Portals)
+	{
+		BuildStats.NumAbstractEdges += Portal.Edges.size();
+	}
+	bBuilt = BuildStats.NumWalkableNodes > 0;
+	RefreshTrackedMemory();
+
+	return bBuilt;
+}
+
+bool FVoxelNavigationGrid::UnloadStreamingChunks(const TArray<FVoxelCoord>& ChunkCoords)
+{
+	if (!bStreamingNavigationInitialized || ChunkCoords.empty()) 
+		return ChunkCoords.empty();
+
+	// 좌표가 ChunkCoords에 걸린다면 리스트에서 제거
+	TArray<FBakedVoxelNavigationChunk> PreviousChunks = BakedChunks;
+	BakedChunks.erase(std::remove_if(BakedChunks.begin(), BakedChunks.end(), [&ChunkCoords](const FBakedVoxelNavigationChunk& Chunk)
+	{
+		return std::any_of(ChunkCoords.begin(), ChunkCoords.end(), [&Chunk](const FVoxelCoord& Coord) { return Coord == Chunk.Coord; });
+	}), BakedChunks.end());
+
+	// 업데이트된 리스트를 기반으로 HPA* Abstract graph 업데이트
+	if (!BuildRuntimeGraphFromBakedChunks(true))
+	{
+		BakedChunks = std::move(PreviousChunks);
+		BuildRuntimeGraphFromBakedChunks(true);
+		return false;
+	}
+
+	// 통계 업데이트
+	BuildStats.NumBuiltL1Chunks = L1Chunks.size();
+	BuildStats.NumWalkableNodes = 0;
+	for (const FVoxelNavigationL1Chunk& Chunk : L1Chunks)
+	{
+		for (uint8 Cell : Chunk.Cells)
+		{
+			BuildStats.NumWalkableNodes += Cell != 0;
+		}
+	}
+	BuildStats.NumAbstractNodes = Portals.size();
+	BuildStats.NumAbstractEdges = 0;
+	for (const FVoxelNavigationPortal& Portal : Portals)
+	{
+		BuildStats.NumAbstractEdges += Portal.Edges.size();
+	}
+	bBuilt = BuildStats.NumWalkableNodes > 0;
+	RefreshTrackedMemory();
+	return true;
+}
+
+void FVoxelNavigationGrid::ClearNavigationData()
+{
+	++NavigationDataGeneration;
+	bBuilt = false;
+	Nodes.clear();
+	XYToNodesLookup.clear();
+	L1Chunks.clear();
+	Portals.clear();
+	BakedChunks.clear();
+	NodeToChunkLookup.clear();
+	NodeToLocalCellIdxLookup.clear();
+	ChunkCellToNodeLookup.clear();
+	L1ChunkLookup.assign(L1ChunkCountX * L1ChunkCountY * L1ChunkCountZ, -1);
+	BuildStats = FVoxelNavigationBuildStats();
+	RefreshTrackedMemory();
+}
+
+void FVoxelNavigationGrid::GatherLoadedChunkCoords(TArray<FVoxelCoord>& OutCoords) const
+{
+	OutCoords.clear();
+	OutCoords.reserve(BakedChunks.size());
+	for (const FBakedVoxelNavigationChunk& Chunk : BakedChunks) OutCoords.push_back(Chunk.Coord);
+}
+
+void FVoxelNavigationGrid::GatherStreamingChunkCoordsInRadius(const FVector& Center, float Radius, TArray<FVoxelCoord>& OutCoords) const
+{
+	OutCoords.clear();
+	if (!bStreamingNavigationInitialized || Radius <= 0.0f) return;
+	const float RadiusSquared = Radius * Radius;
+	for (const FVoxelCoord& Coord : AvailableStreamingChunkCoords)
+	{
+		const FVector ChunkCenter = BoundsMin + FVector((Coord.X + 0.5f) * NavL1ChunkSize, (Coord.Y + 0.5f) * NavL1ChunkSize,
+			(Coord.Z + 0.5f) * NavL1ChunkSize);
+		const FVector Delta = ChunkCenter - Center;
+		if (Delta.Dot(Delta) <= RadiusSquared) OutCoords.push_back(Coord);
+	}
 }
 
 FVoxelNavigationPathResult FVoxelNavigationGrid::FindPath(
@@ -1213,7 +1515,7 @@ FVoxelNavigationPathResult FVoxelNavigationGrid::FindPath(
 	const auto StartTime = std::chrono::steady_clock::now();
 	FVoxelNavigationPathResult Result;
 
-	if (!bBuilt || !IsNavigationReadyFor(Start, Goal))
+	if (!bBuilt)
 	{
 		Result.Failure = FVoxelNavigationPathResult::EFailure::NoData;
 		Result.SearchTimeMs = ElapsedMilliseconds(StartTime);
