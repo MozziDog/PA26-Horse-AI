@@ -2,7 +2,6 @@
 
 #include "AI/Navigation/NavigationStreamingService.h"
 
-#include "AI/Navigation/VoxelNavigationGrid.h"
 #include "AI/Navigation/VoxelNavigationVolume.h"
 #include "Core/Logging/Log.h"
 
@@ -17,10 +16,10 @@ FNavigationStreamingService::~FNavigationStreamingService()
 
 bool FNavigationStreamingService::RequestLoad(
 	AVoxelNavigationVolume* Volume,
-	const FString& AssetPath,
+	std::shared_ptr<const FNavigationAssetCatalog> AssetCatalog,
 	const TArray<FVoxelCoord>& ChunkCoords)
 {
-	if (!Volume || AssetPath.empty() || ChunkCoords.empty())
+	if (!Volume || !AssetCatalog || !AssetCatalog->IsOpen() || ChunkCoords.empty())
 	{
 		return false;
 	}
@@ -35,10 +34,10 @@ bool FNavigationStreamingService::RequestLoad(
 	FPendingLoad Pending;
 	Pending.Volume = Volume;
 	Pending.NavigationDataGeneration = Volume->GetNavigationDataGeneration();
-	Pending.Future = std::async(std::launch::async, [AssetPath, ChunkCoords]()
+	Pending.Future = std::async(std::launch::async, [AssetCatalog = std::move(AssetCatalog), ChunkCoords]()
 	{
 		FLoadResult Result;
-		Result.bSuccess = FVoxelNavigationGrid::ReadNavigationAssetChunks(AssetPath, ChunkCoords, Result.Chunks);
+		Result.bSuccess = AssetCatalog->ReadChunks(ChunkCoords, Result.Chunks);
 		return Result;
 	});
 	PendingLoads.push_back(std::move(Pending));
@@ -76,10 +75,8 @@ void FNavigationStreamingService::Tick()
 			{
 				// 로드되는 도중에 순간이동 등으로 ClearNavigationData()가 요청된 경우.
 				// → 로드된 데이터 폐기
-				continue;
 			}
-
-			if(!Result.bSuccess || !Volume->PublishStreamingNavigationChunks(Result.Chunks))
+			else if(!Result.bSuccess || !Volume->PublishStreamingNavigationChunks(Result.Chunks))
 			{
 				UE_LOG("[VoxelNavigation] Streaming chunk publish failed for volume %s", Volume->GetName().c_str());
 			}
@@ -90,7 +87,7 @@ void FNavigationStreamingService::Tick()
 
 void FNavigationStreamingService::Reset()
 {
-	// std::future destruction joins std::async work.  This guarantees no worker
-	// retains a staged payload after the owner component has been destroyed.
+	// std::future 소멸자에서 async work thread Join하므로 
+	// PendingLoads.clear()로 소멸자 호출 유도 → 고아 스레드 방지
 	PendingLoads.clear();
 }

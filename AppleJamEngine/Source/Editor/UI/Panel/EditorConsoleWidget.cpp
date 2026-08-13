@@ -1,7 +1,7 @@
 ﻿#include "Editor/UI/Panel/EditorConsoleWidget.h"
 #include "Object/GarbageCollection.h"
 #include "Editor/EditorEngine.h"
-#include "Editor/Subsystem/NavigationBakeService.h"
+#include "AI/Navigation/NavigationBakeService.h"
 #include "Editor/Viewport/Level/LevelEditorViewportClient.h"
 #include "Editor/Viewport/EditorPreviewViewportClient.h"
 #include "Editor/Subsystem/OverlayStatSystem.h"

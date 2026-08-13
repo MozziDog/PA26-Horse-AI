@@ -7,10 +7,7 @@
 #include "Core/Types/CollisionTypes.h"
 #include "Debug/DrawDebugHelpers.h"
 #include "GameFramework/World.h"
-#include "Platform/Paths.h"
 #include "Serialization/Archive.h"
-
-#include <filesystem>
 
 void AVoxelNavigationVolume::InitDefaultComponents(const FVector& Extent)
 {
@@ -66,33 +63,27 @@ const FVoxelNavigationBuildSettings AVoxelNavigationVolume::GetNavigationBuildSe
 	return Settings;
 }
 
-bool AVoxelNavigationVolume::BakeNavigationAsset(const FString& OutputPath, const FString& SourceScenePath)
+bool AVoxelNavigationVolume::GetNavigationBakeInput(
+	FVector& OutCenter,
+	FVector& OutExtent,
+	FVoxelNavigationBuildSettings& OutSettings) const
 {
-	RebindComponents();
-	UWorld* World = GetWorld();
-	UBoxComponent* Box = VolumeBox.Get();
-	if (!World || !Box) return false;
+	const UBoxComponent* Box = VolumeBox.Get();
+	if (!Box) return false;
 	const FRotator VolumeRotation = GetActorRotation();
 	if (std::abs(VolumeRotation.Pitch) > 0.01f || std::abs(VolumeRotation.Yaw) > 0.01f || std::abs(VolumeRotation.Roll) > 0.01f)
 	{
-		UE_LOG("[VoxelNavigation] Bake rejected: Volume=%s must not be rotated.", GetName().c_str());
 		return false;
 	}
+	OutCenter = GetActorLocation();
+	OutExtent = Box->GetScaledBoxExtent();
+	OutSettings = GetNavigationBuildSettings();
+	return true;
+}
 
-	const std::filesystem::path AssetPath(FPaths::ToWide(OutputPath));
-	const FString ReferencePath = FPaths::ToUtf8((AssetPath.parent_path() /
-		std::filesystem::path(AssetPath.stem().wstring() + L".reference.json")).wstring());
-	const bool bSuccess = Grid.Build(World, GetActorLocation(), Box->GetScaledBoxExtent(), this->GetNavigationBuildSettings(), this) &&
-		Grid.SaveReferenceJson(ReferencePath) &&
-		Grid.SaveNavigationAsset(OutputPath, SourceScenePath);
-	if (bSuccess)
-	{
-		ReferenceDataPath = OutputPath;
-	}
-
-	// 디버그 / 통계 정보를 detail 패널 + 로그로 출력
-	// NOTE: reflection이 size_t(=uint64) 프로퍼티를 지원하지 않아 detail 패널 표기값은 '잘린 값'일 수 있음
-	const FVoxelNavigationBuildStats& Stats = Grid.GetBuildStats();
+void AVoxelNavigationVolume::ApplyNavigationBakeResult(const FString& AssetPath, const FVoxelNavigationBuildStats& Stats)
+{
+	ReferenceDataPath = AssetPath;
 	DebugSampledCells = static_cast<int32>(Stats.NumSampledCells);
 	DebugWalkableNodes = static_cast<int32>(Stats.NumWalkableNodes);
 	DebugDirectedEdges = static_cast<int32>(Stats.NumDirectedEdges);
@@ -105,21 +96,23 @@ bool AVoxelNavigationVolume::BakeNavigationAsset(const FString& OutputPath, cons
 	DebugRejectedClearance = static_cast<int32>(Stats.NumRejectedClearance);
 	DebugBuildTimeMs = Stats.BuildTimeMs;
 	DebugPeakMemoryMB = static_cast<float>(Stats.PeakMemoryBytes) / (1024.0f * 1024.0f);
+	DebugRuntimeMemoryMB = static_cast<float>(Stats.RuntimeMemoryBytes) / (1024.0f * 1024.0f);
+	DebugPeakBakeScratchMemoryMB = static_cast<float>(Stats.PeakBakeScratchMemoryBytes) / (1024.0f * 1024.0f);
 
-	UE_LOG("[VoxelNavigation] Bake Volume=%s Success=%d Output=%s Cells=%d RawNodes=%d Nodes=%d Eroded=%d RawEdges=%d L1=%d AbstractNodes=%d AbstractEdges=%d SlopeRejected=%d ClearanceRejected=%d TimeMs=%.3f PeakMemoryBytes=%llu",
-		GetName().c_str(), bSuccess ? 1 : 0, OutputPath.c_str(), DebugSampledCells, DebugRawWalkableNodes, DebugWalkableNodes,
-		DebugErodedNodes, DebugDirectedEdges, DebugBuiltL1Chunks, DebugAbstractNodes, DebugAbstractEdges,
-		DebugRejectedSlope, DebugRejectedClearance, DebugBuildTimeMs,
-		static_cast<unsigned long long>(Stats.PeakMemoryBytes));
-	return bSuccess;
 }
 
 bool AVoxelNavigationVolume::LoadNavigationAsset(const FString& InputPath)
 {
-	const bool bSuccess = Grid.LoadNavigationAsset(InputPath);
+	auto LoadedCatalog = std::make_shared<FNavigationAssetCatalog>();
+	TArray<FBakedVoxelNavigationChunk> LoadedChunks;
+	const bool bSuccess = LoadedCatalog->Open(InputPath) && LoadedCatalog->ValidateCompleteAsset() &&
+		LoadedCatalog->ReadAllChunks(LoadedChunks) &&
+		Grid.InitializeRuntime(LoadedCatalog->GetInfo().BoundsCenter, LoadedCatalog->GetInfo().BoundsExtent, LoadedCatalog->GetInfo().Settings) &&
+		Grid.AddLoadedChunks(LoadedChunks);
 	if (bSuccess)
 	{
 		ReferenceDataPath = InputPath;
+		NavigationAssetCatalog = std::move(LoadedCatalog);
 	}
 	return bSuccess;
 }
@@ -127,25 +120,33 @@ bool AVoxelNavigationVolume::LoadNavigationAsset(const FString& InputPath)
 bool AVoxelNavigationVolume::InitializeStreamingNavigation()
 {
 	if (ReferenceDataPath.empty()) return false;
-	if (Grid.IsStreamingNavigationInitialized()) return true;
-	FVoxelNavigationAssetInfo AssetInfo;
-	return FVoxelNavigationGrid::ReadNavigationAssetInfo(ReferenceDataPath, AssetInfo) &&
-		Grid.InitializeStreamingNavigation(AssetInfo);
+	if (IsStreamingNavigationInitialized()) return true;
+	auto LoadedCatalog = std::make_shared<FNavigationAssetCatalog>();
+	if (!LoadedCatalog->Open(ReferenceDataPath) || !LoadedCatalog->ValidateCompleteAsset()) return false;
+	const FVoxelNavigationAssetInfo& AssetInfo = LoadedCatalog->GetInfo();
+	if (!Grid.InitializeRuntime(AssetInfo.BoundsCenter, AssetInfo.BoundsExtent, AssetInfo.Settings)) return false;
+	NavigationAssetCatalog = std::move(LoadedCatalog);
+	return true;
 }
 
 bool AVoxelNavigationVolume::PublishStreamingNavigationChunks(const TArray<FBakedVoxelNavigationChunk>& LoadedChunks)
 {
-	return Grid.PublishStreamingChunks(LoadedChunks);
+	return Grid.AddLoadedChunks(LoadedChunks);
 }
 
 bool AVoxelNavigationVolume::UnloadStreamingNavigationChunks(const TArray<FVoxelCoord>& ChunkCoords)
 {
-	return Grid.UnloadStreamingChunks(ChunkCoords);
+	return Grid.RemoveLoadedChunks(ChunkCoords);
 }
 
 void AVoxelNavigationVolume::ClearNavigationData()
 {
 	Grid.ClearNavigationData();
+}
+
+FVector AVoxelNavigationVolume::GetNavigationChunkCenter(const FVoxelCoord& Coord) const
+{
+	return NavigationAssetCatalog ? NavigationAssetCatalog->GetChunkCenter(Coord) : FVector::ZeroVector;
 }
 
 bool AVoxelNavigationVolume::Contains(const FVector& Point) const
@@ -174,7 +175,8 @@ void AVoxelNavigationVolume::RebindComponents()
 void AVoxelNavigationVolume::DrawNavigationDebug() const
 {
 	UWorld* World = GetWorld();
-	if (!World || !Grid.IsBuilt()) return;
+	if (!World || !Grid.IsBuilt())
+		return;
 
 	if (bDrawWalkableNodes && MaxDebugNodes > 0)
 	{
@@ -186,6 +188,7 @@ void AVoxelNavigationVolume::DrawNavigationDebug() const
 				FVector(NavVoxelCellSize * 0.18f, NavVoxelCellSize * 0.18f, 0.03f), FColor::Green());
 		}
 	}
+
 	if (bDrawChunkBoundaries && MaxDebugChunks > 0)
 	{
 		TArray<TPair<FVector, FVector>> BoundaryLines;

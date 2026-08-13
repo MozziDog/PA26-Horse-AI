@@ -1,14 +1,18 @@
 ﻿#pragma once
 
-#include "AI/Navigation/VoxelNavigationTypes.h"
+#include "AI/Navigation/NavigationAssetCatalog.h"
 #include "Object/Ptr/WeakObjectPtr.h"
 
 #include <future>
+#include <memory>
 
 class AVoxelNavigationVolume;
 
-// Owns background payload reads only.  Runtime graph mutation is intentionally
-// deferred to Tick(), which is called by the Rider's game-thread component.
+// 파일 로드가 비동기라서 주기적으로 로드가 되었는지 Tick 호출 필요. 
+// 현재는 NavigationStreamingComponent에 의해 Tick 수행됨 
+// NOTE: NavigationStreamingComponent에서 Tick 호출되는 건 
+//      청크 스트리밍 서비스 소비자가 RiderCharacter밖에 없어서 그런 것.
+//		다수의 NavAgent가 존재하는 상황이라면 생명주기 수정 필요함.
 class FNavigationStreamingService
 {
 public:
@@ -17,7 +21,8 @@ public:
 	FNavigationStreamingService(const FNavigationStreamingService&) = delete;
 	FNavigationStreamingService& operator=(const FNavigationStreamingService&) = delete;
 
-	bool RequestLoad(AVoxelNavigationVolume* Volume, const FString& AssetPath, const TArray<FVoxelCoord>& ChunkCoords);
+	bool RequestLoad(AVoxelNavigationVolume* Volume, std::shared_ptr<const FNavigationAssetCatalog> AssetCatalog,
+		const TArray<FVoxelCoord>& ChunkCoords);
 	bool RequestUnload(AVoxelNavigationVolume* Volume, const TArray<FVoxelCoord>& ChunkCoords);
 	void Tick();
 	void Reset();

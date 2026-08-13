@@ -881,9 +881,6 @@
     <ClCompile Include="Source\Editor\Subsystem\AssetFactory.cpp">
       <Filter>Source\Editor\Subsystem</Filter>
     </ClCompile>
-    <ClCompile Include="Source\Editor\Subsystem\NavigationBakeService.cpp">
-      <Filter>Source\Editor\Subsystem</Filter>
-    </ClCompile>
     <ClCompile Include="Source\Editor\Subsystem\OverlayStatSystem.cpp">
       <Filter>Source\Editor\Subsystem</Filter>
     </ClCompile>
@@ -2302,6 +2299,15 @@
       <Filter>Intermediate\Generated</Filter>
     </ClCompile>
     <ClCompile Include="Source\Engine\AI\Navigation\NavigationStreamingService.cpp" />
+    <ClCompile Include="Source\Engine\AI\Navigation\NavigationAssetCatalog.cpp">
+      <Filter>Source\Engine\AI\Navigation</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Engine\AI\Navigation\NavigationBakeService.cpp">
+      <Filter>Source\Engine\AI\Navigation</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Engine\AI\Navigation\VoxelNavigationBakeBuilder.cpp">
+      <Filter>Source\Engine\AI\Navigation</Filter>
+    </ClCompile>
     <ClCompile Include="Source\Game\Rider\NavigationStreamingComponent.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -2345,9 +2351,6 @@
       <Filter>Source\Editor\Slate</Filter>
     </ClInclude>
     <ClInclude Include="Source\Editor\Subsystem\AssetFactory.h">
-      <Filter>Source\Editor\Subsystem</Filter>
-    </ClInclude>
-    <ClInclude Include="Source\Editor\Subsystem\NavigationBakeService.h">
       <Filter>Source\Editor\Subsystem</Filter>
     </ClInclude>
     <ClInclude Include="Source\Editor\Subsystem\OverlayStatSystem.h">
@@ -2531,6 +2534,15 @@
       <Filter>Source\Engine\AI\BT</Filter>
     </ClInclude>
     <ClInclude Include="Source\Engine\AI\Navigation\VoxelNavigationGrid.h">
+      <Filter>Source\Engine\AI\Navigation</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Engine\AI\Navigation\NavigationAssetCatalog.h">
+      <Filter>Source\Engine\AI\Navigation</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Engine\AI\Navigation\NavigationBakeService.h">
+      <Filter>Source\Engine\AI\Navigation</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Engine\AI\Navigation\VoxelNavigationBakeBuilder.h">
       <Filter>Source\Engine\AI\Navigation</Filter>
     </ClInclude>
     <ClInclude Include="Source\Engine\AI\Navigation\VoxelNavigationTypes.h">
@@ -6461,6 +6473,7 @@
       <Filter>ThirdParty\sol2\include\sol\utility</Filter>
     </ClInclude>
     <ClInclude Include="Source\Game\Rider\NavigationStreamingComponent.h" />
+    <ClInclude Include="Source\Engine\AI\Navigation\NavigationStreamingService.h" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="AppleJamEngine.rc" />

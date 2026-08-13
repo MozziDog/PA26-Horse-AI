@@ -198,7 +198,6 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClCompile Include="Source\Editor\Slate\SWindow.cpp" />
     <ClCompile Include="Source\Editor\Slate\SlateApplication.cpp" />
     <ClCompile Include="Source\Editor\Subsystem\AssetFactory.cpp" />
-    <ClCompile Include="Source\Editor\Subsystem\NavigationBakeService.cpp" />
     <ClCompile Include="Source\Editor\Subsystem\OverlayStatSystem.cpp" />
     <ClCompile Include="Source\Editor\UI\EditorDocumentTabManager.cpp" />
     <ClCompile Include="Source\Editor\UI\EditorMainPanel.cpp" />
@@ -255,6 +254,9 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClCompile Include="Source\Engine\AI\BT\BehaviorTreeDebug.cpp" />
     <ClCompile Include="Source\Engine\AI\BT\BuiltinTask.cpp" />
     <ClCompile Include="Source\Engine\AI\BT\HorseTask.cpp" />
+    <ClCompile Include="Source\Engine\AI\Navigation\NavigationAssetCatalog.cpp" />
+	<ClCompile Include="Source\Engine\AI\Navigation\NavigationBakeService.cpp" />
+    <ClCompile Include="Source\Engine\AI\Navigation\VoxelNavigationBakeBuilder.cpp" />
     <ClCompile Include="Source\Engine\AI\Navigation\NavigationStreamingService.cpp" />
     <ClCompile Include="Source\Game\Rider\RiderCharacter.cpp" />
     <ClCompile Include="Source\Game\Rider\NavigationStreamingComponent.cpp" />
@@ -731,7 +733,6 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClInclude Include="Source\Editor\Slate\SWindow.h" />
     <ClInclude Include="Source\Editor\Slate\SlateApplication.h" />
     <ClInclude Include="Source\Editor\Subsystem\AssetFactory.h" />
-    <ClInclude Include="Source\Editor\Subsystem\NavigationBakeService.h" />
     <ClInclude Include="Source\Editor\Subsystem\OverlayStatSystem.h" />
     <ClInclude Include="Source\Editor\UI\EditorDocumentTabManager.h" />
     <ClInclude Include="Source\Editor\UI\EditorMainPanel.h" />
@@ -786,12 +787,16 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClInclude Include="Source\Editor\Viewport\Asset\StaticMeshEditorViewportClient.h" />
     <ClInclude Include="Source\Editor\Viewport\Level\FLevelViewportLayout.h" />
     <ClInclude Include="Source\Editor\Viewport\Level\LevelEditorViewportClient.h" />
+    <ClInclude Include="Source\Engine\AI\Navigation\NavigationStreamingService.h" />
     <ClInclude Include="Source\Engine\pch.h" />
     <ClInclude Include="Source\Engine\AI\Blackboard.h" />
     <ClInclude Include="Source\Engine\AI\BT\BTBehaviorRegistry.h" />
     <ClInclude Include="Source\Engine\AI\BT\BTLuaBuilder.h" />
     <ClInclude Include="Source\Engine\AI\BT\BehaviorTree.h" />
     <ClInclude Include="Source\Engine\AI\BT\BehaviorTreeDebug.h" />
+    <ClInclude Include="Source\Engine\AI\Navigation\NavigationAssetCatalog.h" />
+	<ClInclude Include="Source\Engine\AI\Navigation\NavigationBakeService.h" />
+    <ClInclude Include="Source\Engine\AI\Navigation\VoxelNavigationBakeBuilder.h" />
     <ClInclude Include="Source\Engine\AI\Navigation\VoxelNavigationGrid.h" />
     <ClInclude Include="Source\Engine\AI\Navigation\VoxelNavigationTypes.h" />
     <ClInclude Include="Source\Engine\AI\Navigation\VoxelNavigationVolume.h" />

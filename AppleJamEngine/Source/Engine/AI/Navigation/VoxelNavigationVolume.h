@@ -1,8 +1,11 @@
 ﻿#pragma once
 
+#include "AI/Navigation/NavigationAssetCatalog.h"
 #include "AI/Navigation/VoxelNavigationGrid.h"
 #include "GameFramework/AActor.h"
 #include "Object/Ptr/WeakObjectPtr.h"
+
+#include <memory>
 
 #include "Source/Engine/AI/Navigation/VoxelNavigationVolume.generated.h"
 
@@ -21,21 +24,24 @@ public:
 	void PostDuplicate() override;
 	void OnPostLoad(FArchive& Ar) override;
 
-	// 에디터 타임 Bake & 런타임 Load, 런타임에는 Bake 수행 X
-	bool BakeNavigationAsset(const FString& OutputPath, const FString& SourceScenePath);
+	// Editor bake service reads these inputs and publishes its immutable result.
+	bool GetNavigationBakeInput(FVector& OutCenter, FVector& OutExtent, FVoxelNavigationBuildSettings& OutSettings) const;
+	void ApplyNavigationBakeResult(const FString& AssetPath, const FVoxelNavigationBuildStats& Stats);
 	bool LoadNavigationAsset(const FString& InputPath);
 	bool InitializeStreamingNavigation();
 	bool PublishStreamingNavigationChunks(const TArray<FBakedVoxelNavigationChunk>& LoadedChunks);
 	bool UnloadStreamingNavigationChunks(const TArray<FVoxelCoord>& ChunkCoords);
 	void ClearNavigationData();
-	bool IsStreamingNavigationInitialized() const { return Grid.IsStreamingNavigationInitialized(); }
+	bool IsStreamingNavigationInitialized() const { return Grid.IsRuntimeInitialized() && NavigationAssetCatalog && NavigationAssetCatalog->IsOpen(); }
 	uint64 GetNavigationDataGeneration() const { return Grid.GetNavigationDataGeneration(); }
-	const FString& GetNavigationAssetPath() const { return ReferenceDataPath; }
+	std::shared_ptr<const FNavigationAssetCatalog> GetNavigationAssetCatalog() const { return NavigationAssetCatalog; }
 	void GatherLoadedNavigationChunks(TArray<FVoxelCoord>& OutCoords) const { Grid.GatherLoadedChunkCoords(OutCoords); }
 	void GatherNavigationChunksInRadius(const FVector& Center, float Radius, TArray<FVoxelCoord>& OutCoords) const
 	{
-		Grid.GatherStreamingChunkCoordsInRadius(Center, Radius, OutCoords);
+		if (NavigationAssetCatalog) NavigationAssetCatalog->GatherChunkCoordsInRadius(Center, Radius, OutCoords);
+		else OutCoords.clear();
 	}
+	FVector GetNavigationChunkCenter(const FVoxelCoord& Coord) const;
 
 	bool Contains(const FVector& Point) const;
 	FVoxelNavigationPathResult FindPath(const FVector& Start, const FVector& Goal) const;
@@ -51,6 +57,7 @@ private:
 
 	TWeakObjectPtr<UBoxComponent> VolumeBox = nullptr;
 	FVoxelNavigationGrid Grid;
+	std::shared_ptr<FNavigationAssetCatalog> NavigationAssetCatalog;
 	UPROPERTY(Edit, Save, Category="Navigation|Baked Data", DisplayName="Navigation Asset Path")
 	FString ReferenceDataPath;
 
@@ -104,4 +111,8 @@ private:
 	float DebugBuildTimeMs = 0.0f;
 	UPROPERTY(Edit, ReadOnly, Transient, Category = "Navigation|Stats", DisplayName = "Peak Memory MB")
 	float DebugPeakMemoryMB = 0.0f;
+	UPROPERTY(Edit, ReadOnly, Transient, Category = "Navigation|Stats", DisplayName = "Runtime Memory MB")
+	float DebugRuntimeMemoryMB = 0.0f;
+	UPROPERTY(Edit, ReadOnly, Transient, Category = "Navigation|Stats", DisplayName = "Peak Bake Scratch Memory MB")
+	float DebugPeakBakeScratchMemoryMB = 0.0f;
 };

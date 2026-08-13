@@ -20,6 +20,12 @@ struct FVoxelCoord
 	{
 		return X == Other.X && Y == Other.Y && Z == Other.Z;
 	}
+
+	// 벡터가 아니라 좌표이므로 비교는 원점으로부터의 거리 사용하지 않고 단순 각각의 원소 비교로.
+	bool operator < (const FVoxelCoord& Other) const
+	{
+		return std::tie(X, Y, Z) < std::tie(Other.X, Other.Y, Other.Z);
+	}
 };
 
 // portal은 10x10 청크 기준 flattened coord를 사용하여 저장
@@ -42,6 +48,11 @@ struct FBakedVoxelNavigationIntraEdge
 	FBakedNavPortal PortalA = InvalidBakedNavPortal;
 	FBakedNavPortal PortalB = InvalidBakedNavPortal;
 	float Cost = 0.0f;
+
+	bool operator < (const FBakedVoxelNavigationIntraEdge Other) const
+	{
+		return std::tie(PortalA, PortalB, Cost) < std::tie(Other.PortalA, Other.PortalB, Other.Cost);
+	}
 };
 
 struct FBakedVoxelNavigationExternalLink
@@ -50,6 +61,12 @@ struct FBakedVoxelNavigationExternalLink
 	uint8 PackedNeighborChunkDelta = 0;
 	FBakedNavPortal NeighborPortalId = InvalidBakedNavPortal;
 	float Cost = 0.0f;
+
+	bool operator < (const FBakedVoxelNavigationExternalLink Other) const
+	{
+		return std::tie(LocalPortalId, PackedNeighborChunkDelta, NeighborPortalId, Cost) <
+			std::tie(Other.LocalPortalId, Other.PackedNeighborChunkDelta, Other.NeighborPortalId, Other.Cost);
+	}
 };
 
 struct FBakedVoxelNavigationChunk
@@ -83,6 +100,16 @@ struct FVoxelNavigationAssetInfo
 	TArray<FVoxelCoord> AvailableChunkCoords;
 };
 
+// Immutable bake output.  Asset serialization owns the transport format; the
+// runtime grid only receives its bounds/settings and individual chunk payloads.
+struct FVoxelNavigationBakedData
+{
+	FVector BoundsCenter = FVector::ZeroVector;
+	FVector BoundsExtent = FVector::ZeroVector;
+	FVoxelNavigationBuildSettings Settings;
+	TArray<FBakedVoxelNavigationChunk> Chunks;
+};
+
 struct FVoxelNavigationBuildStats
 {
 	size_t NumSampledCells = 0;
@@ -98,6 +125,11 @@ struct FVoxelNavigationBuildStats
 	size_t NumAbstractEdges = 0;
 	size_t NumSkippedCellsByL1Overlap = 0;
 	float BuildTimeMs = 0.0f;
+	// Persistent HPA* data retained after the bake has finished.
+	size_t RuntimeMemoryBytes = 0;
+	// Maximum memory used by sampling/erosion scratch buffers, excluding runtime data.
+	size_t PeakBakeScratchMemoryBytes = 0;
+	// Maximum combined runtime + bake scratch allocation during the bake.
 	size_t PeakMemoryBytes = 0;
 };
 

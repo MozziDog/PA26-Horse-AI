@@ -119,18 +119,12 @@ void UNavigationStreamingComponent::UpdateStreamingForVolume(AVoxelNavigationVol
 			LoadCoords.push_back(Desired);
 		}
 	}
-	StreamingService.RequestLoad(&Volume, Volume.GetNavigationAssetPath(), LoadCoords);
+	StreamingService.RequestLoad(&Volume, Volume.GetNavigationAssetCatalog(), LoadCoords);
 }
 
 float UNavigationStreamingComponent::GetChunkDistanceSquared( const AVoxelNavigationVolume& Volume, 
 																const FVoxelCoord& Coord, const FVector& ActorLocation) const
 {
-	const FVoxelNavigationGrid& Grid = Volume.GetGrid();
-	// 모든 NavVolume 좌표가 ChunkSize 그리드에 맞아 떨어진다는 보장 없음
-	const FVector BoundsMin = Grid.GetBoundsCenter() - Grid.GetBoundsExtent(); 
-	const FVector ChunkCenter = BoundsMin + FVector((Coord.X + 0.5f) * NavL1ChunkSize, 
-													(Coord.Y + 0.5f) * NavL1ChunkSize,
-													(Coord.Z + 0.5f) * NavL1ChunkSize);
-	const FVector Delta = ChunkCenter - ActorLocation;
+	const FVector Delta = Volume.GetNavigationChunkCenter(Coord) - ActorLocation;
 	return Delta.LengthSquared();
 }
