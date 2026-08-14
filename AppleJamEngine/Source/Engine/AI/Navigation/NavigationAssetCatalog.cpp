@@ -196,6 +196,8 @@ bool FNavigationAssetCatalog::Open(const FString& InAssetPath)
 		!std::isfinite(Info.Settings.MaxWalkableSlopeDegrees) || !std::isfinite(Info.Settings.MaxNeighborHeightDelta) ||
 		!std::isfinite(Info.Settings.GroundProbeInset) || !std::isfinite(Info.Settings.ClearanceOffset)) 
 		return false;
+
+	// 엔트리 채워넣기
 	Index.resize(ChunkCount);
 	Info.AvailableChunkCoords.reserve(ChunkCount);
 	for (FChunkIndexEntry& Entry : Index)

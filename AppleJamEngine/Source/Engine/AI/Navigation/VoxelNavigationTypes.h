@@ -180,6 +180,11 @@ struct FVoxelNavigationPathResult
 	EFailure Failure = EFailure::None;
 	float PathLength = 0.0f;
 	float SearchTimeMs = 0.0f;
+	float SmoothingTimeMs = 0.0f;
 	int32 NumExpandedNodes = 0;
+	int32 NumRawPoints = 0;
+	int32 NumSmoothedPoints = 0;
+	int32 NumVisibilityTests = 0;
+	TArray<FVector> RawPoints;
 	TArray<FVector> Points;
 };

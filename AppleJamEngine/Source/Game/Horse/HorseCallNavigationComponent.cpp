@@ -202,9 +202,10 @@ bool UHorseCallNavigationComponent::BeginPlan()
 	CurrentWaypoint = PathPoints.size() > 1 ? 1 : 0;
 	ProgressAnchor = OwnerHorse->GetActorLocation();
 	bPlanReady = true;
-	UE_LOG("[HorseCallNavigation] Planned Horse=%s Points=%d Partial=%d Length=%.3f SearchMs=%.3f Expanded=%d",
+	UE_LOG("[HorseCallNavigation] Planned Horse=%s Points=%d Partial=%d Length=%.3f SearchMs=%.3f Expanded=%d Raw=%d Smoothed=%d VisibilityTests=%d SmoothMs=%.3f",
 		OwnerHorse->GetName().c_str(), PathPoints.size(), Path.bPartial ? 1 : 0,
-		Path.PathLength, Path.SearchTimeMs, Path.NumExpandedNodes);
+		Path.PathLength, Path.SearchTimeMs, Path.NumExpandedNodes, Path.NumRawPoints,
+		Path.NumSmoothedPoints, Path.NumVisibilityTests, Path.SmoothingTimeMs);
 	return true;
 }
 

@@ -65,8 +65,14 @@ private:
 
 	// ─── 길찾기 관련 ───
 	FCellRef FindNearestCell(const FVector& Point, float MaxDistance = 0.0f) const;
+	FCellRef FindLoadedCellByGlobalXY(int GlobalX, int GlobalY) const;
+	bool GetGlobalCellXY(const FCellRef& Cell, int& OutGlobalX, int& OutGlobalY) const;
 	FVector GetCellPosition(const FCellRef& Cell) const;
 	bool IsCellWalkable(int ChunkIndex, int LocalCell) const;	// 해당 위치에 이미 다른 복셀이 있는지 여부 체크
+	bool HasLineOfSightSupercover(const FCellRef& Start, const FCellRef& Goal) const;
+	int FindFarthestInteriorPointFromXYSegment(const TArray<FCellRef>& Cells, int First, int Last) const;
+	void SmoothConcretePath(const TArray<FCellRef>& RawCells, TArray<FCellRef>& OutCells,
+		int32* OutVisibilityTests = nullptr) const;
 	float FindLocalPath(
 		const FCellRef& Start,
 		const FCellRef& Goal,

@@ -409,16 +409,60 @@ FVoxelNavigationPathResult FVoxelNavigationGrid::FindPath(
 	}
 
 	TArray<FCellRef> ConcreteCells;	// 최종 계산된 경로 노드 리스트 (마지막에 FVector로 변환되어서 반환됨)
+	auto FinalizeConcretePath = [this, &Result, Goal, GoalAcceptanceRadius, MaxPathLength](
+		const TArray<FCellRef>& RawCells, bool bForcePartial)
+	{
+		TArray<FCellRef> SmoothedCells;
+		Result.NumRawPoints = static_cast<int32>(RawCells.size());
+		const auto SmoothingStart = std::chrono::steady_clock::now();
+		{
+			SCOPE_STAT_CAT("VoxelNav.SmoothPath", "Navigation");
+			SmoothConcretePath(RawCells, SmoothedCells, &Result.NumVisibilityTests);
+		}
+		Result.SmoothingTimeMs = ElapsedMilliseconds(SmoothingStart);
+		Result.NumSmoothedPoints = static_cast<int32>(SmoothedCells.size());
+		if (SmoothedCells.empty())
+		{
+			Result.Failure = FVoxelNavigationPathResult::EFailure::NoPath;
+			return false;
+		}
+
+		Result.Points.clear();
+		Result.Points.reserve(SmoothedCells.size());
+		Result.RawPoints.clear();
+		Result.RawPoints.reserve(RawCells.size());
+		Result.PathLength = 0.0f;
+		for (const FCellRef& Cell : RawCells)
+		{
+			Result.RawPoints.push_back(GetCellPosition(Cell));
+		}
+		for (const FCellRef& Cell : SmoothedCells)
+		{
+			Result.Points.push_back(GetCellPosition(Cell));
+		}
+		for (size_t Index = 1; Index < Result.Points.size(); ++Index)
+		{
+			Result.PathLength += FVector::Distance(Result.Points[Index - 1], Result.Points[Index]);
+		}
+		if (MaxPathLength > 0.0f && Result.PathLength > MaxPathLength + Epsilon)
+		{
+			Result.Points.clear();
+			Result.PathLength = 0.0f;
+			Result.Failure = FVoxelNavigationPathResult::EFailure::NoPath;
+			return false;
+		}
+
+		Result.bSuccess = true;
+		Result.bPartial = bForcePartial || FVector::Distance(Result.Points.back(), Goal) > GoalAcceptanceRadius;
+		return true;
+	};
 	if (StartCell.ChunkIndex == GoalCell.ChunkIndex)	// 만약 목적지가 같은 청크 안에 있다면
 	{
 		const float DirectCost = FindLocalPath(StartCell, GoalCell, &ConcreteCells);
 		if (DirectCost < (std::numeric_limits<float>::max)() &&
 			(MaxPathLength <= 0.0f || DirectCost <= MaxPathLength))
 		{
-			for (const FCellRef& Cell : ConcreteCells) Result.Points.push_back(GetCellPosition(Cell));
-			Result.PathLength = DirectCost;
-			Result.bSuccess = true;
-			Result.bPartial = FVector::Distance(Result.Points.back(), Goal) > GoalAcceptanceRadius;
+			FinalizeConcretePath(ConcreteCells, false);
 			Result.SearchTimeMs = ElapsedMilliseconds(StartTime);
 			return Result;
 		}
@@ -523,13 +567,7 @@ FVoxelNavigationPathResult FVoxelNavigationGrid::FindPath(
 			Result.SearchTimeMs = ElapsedMilliseconds(StartTime);
 			return Result;
 		}
-		for (const FCellRef& Cell : ConcreteCells)
-		{
-			Result.Points.push_back(GetCellPosition(Cell));
-		}
-		Result.PathLength = PartialCost;
-		Result.bSuccess = true;
-		Result.bPartial = true;
+		FinalizeConcretePath(ConcreteCells, true);
 		Result.SearchTimeMs = ElapsedMilliseconds(StartTime);
 		return Result;
 	}
@@ -607,25 +645,7 @@ FVoxelNavigationPathResult FVoxelNavigationGrid::FindPath(
 	}
 	AppendSegment(Segment);
 
-	for (const FCellRef& Cell : ConcreteCells)
-	{
-		Result.Points.push_back(GetCellPosition(Cell));
-	}
-	for (size_t Index = 1; Index < Result.Points.size(); ++Index)
-	{
-		Result.PathLength += FVector::Distance(Result.Points[Index - 1], Result.Points[Index]);
-	}
-	if (MaxPathLength > 0.0f && Result.PathLength > MaxPathLength + Epsilon)
-	{
-		Result.Points.clear();
-		Result.PathLength = 0.0f;
-		Result.Failure = FVoxelNavigationPathResult::EFailure::NoPath;
-		Result.SearchTimeMs = ElapsedMilliseconds(StartTime);
-		return Result;
-	}
-
-	Result.bSuccess = true;
-	Result.bPartial = bAbstractPartial || FVector::Distance(Result.Points.back(), Goal) > GoalAcceptanceRadius;
+	FinalizeConcretePath(ConcreteCells, bAbstractPartial);
 	Result.SearchTimeMs = ElapsedMilliseconds(StartTime);
 	return Result;
 }
@@ -762,6 +782,204 @@ FCellRef FVoxelNavigationGrid::FindNearestCell(const FVector& Point, float MaxDi
 		FindNearestCellInChunk(ChunkIndex);
 	}
 	return BestCell;
+}
+
+FCellRef FVoxelNavigationGrid::FindLoadedCellByGlobalXY(int GlobalX, int GlobalY) const
+{
+	if (GlobalX < 0 || GlobalX >= CellCountX || GlobalY < 0 || GlobalY >= CellCountY)
+	{
+		return {};
+	}
+
+	const int ChunkX = GlobalX / NavL1ChunkCellsPerAxis;
+	const int ChunkY = GlobalY / NavL1ChunkCellsPerAxis;
+	const int LocalX = GlobalX % NavL1ChunkCellsPerAxis;
+	const int LocalY = GlobalY % NavL1ChunkCellsPerAxis;
+	const int LocalCell = LocalY * NavL1ChunkCellsPerAxis + LocalX;
+	for (int ChunkZ = 0; ChunkZ < static_cast<int>(L1ChunkCountZ); ++ChunkZ)
+	{
+		const int ChunkIndex = FindChunkIndexByCoord({ ChunkX, ChunkY, ChunkZ });
+		if (IsCellWalkable(ChunkIndex, LocalCell))
+		{
+			return { ChunkIndex, LocalCell };
+		}
+	}
+	return {};
+}
+
+bool FVoxelNavigationGrid::GetGlobalCellXY(const FCellRef& Cell, int& OutGlobalX, int& OutGlobalY) const
+{
+	if (!IsCellWalkable(Cell.ChunkIndex, Cell.LocalCell))
+	{
+		return false;
+	}
+
+	const FVoxelCoord& ChunkCoord = L1Chunks[Cell.ChunkIndex].Coord;
+	OutGlobalX = ChunkCoord.X * NavL1ChunkCellsPerAxis + Cell.LocalCell % NavL1ChunkCellsPerAxis;
+	OutGlobalY = ChunkCoord.Y * NavL1ChunkCellsPerAxis + Cell.LocalCell / NavL1ChunkCellsPerAxis;
+	return true;
+}
+
+bool FVoxelNavigationGrid::HasLineOfSightSupercover(const FCellRef& Start, const FCellRef& Goal) const
+{
+	int StartX = 0;
+	int StartY = 0;
+	int GoalX = 0;
+	int GoalY = 0;
+	if (!GetGlobalCellXY(Start, StartX, StartY) || !GetGlobalCellXY(Goal, GoalX, GoalY))
+	{
+		return false;
+	}
+
+	auto IsGlobalCellWalkable = [this](int GlobalX, int GlobalY)
+	{
+		return FindLoadedCellByGlobalXY(GlobalX, GlobalY).IsValid();
+	};
+	if (!IsGlobalCellWalkable(StartX, StartY))
+	{
+		return false;
+	}
+
+	int CurrentX = StartX;
+	int CurrentY = StartY;
+	const int DeltaX = GoalX - StartX;
+	const int DeltaY = GoalY - StartY;
+	const int StepX = DeltaX > 0 ? 1 : (DeltaX < 0 ? -1 : 0);
+	const int StepY = DeltaY > 0 ? 1 : (DeltaY < 0 ? -1 : 0);
+	const double Infinite = (std::numeric_limits<double>::infinity)();
+	const double TDeltaX = StepX != 0 ? 1.0 / std::abs(DeltaX) : Infinite;
+	const double TDeltaY = StepY != 0 ? 1.0 / std::abs(DeltaY) : Infinite;
+	double TMaxX = StepX != 0 ? 0.5 / std::abs(DeltaX) : Infinite;
+	double TMaxY = StepY != 0 ? 0.5 / std::abs(DeltaY) : Infinite;
+
+	while (CurrentX != GoalX || CurrentY != GoalY)
+	{
+		if (TMaxX + 1.e-9 < TMaxY)
+		{
+			CurrentX += StepX;
+			TMaxX += TDeltaX;
+			if (!IsGlobalCellWalkable(CurrentX, CurrentY)) return false;
+		}
+		else if (TMaxY + 1.e-9 < TMaxX)
+		{
+			CurrentY += StepY;
+			TMaxY += TDeltaY;
+			if (!IsGlobalCellWalkable(CurrentX, CurrentY)) return false;
+		}
+		else
+		{
+			// A line through a grid corner touches both side cells as well as the diagonal cell.
+			if (!IsGlobalCellWalkable(CurrentX + StepX, CurrentY) ||
+				!IsGlobalCellWalkable(CurrentX, CurrentY + StepY))
+			{
+				return false;
+			}
+			CurrentX += StepX;
+			CurrentY += StepY;
+			TMaxX += TDeltaX;
+			TMaxY += TDeltaY;
+			if (!IsGlobalCellWalkable(CurrentX, CurrentY)) return false;
+		}
+	}
+	return true;
+}
+
+int FVoxelNavigationGrid::FindFarthestInteriorPointFromXYSegment(
+	const TArray<FCellRef>& Cells, int First, int Last) const
+{
+	if (First < 0 || Last >= static_cast<int>(Cells.size()) || Last <= First + 1)
+	{
+		return -1;
+	}
+
+	const FVector Start = GetCellPosition(Cells[First]);
+	const FVector End = GetCellPosition(Cells[Last]);
+	const float SegmentX = End.X - Start.X;
+	const float SegmentY = End.Y - Start.Y;
+	const float SegmentLengthSquared = SegmentX * SegmentX + SegmentY * SegmentY;
+	int FarthestIndex = -1;
+	float FarthestDistanceSquared = -1.0f;
+	for (int Index = First + 1; Index < Last; ++Index)
+	{
+		const FVector Point = GetCellPosition(Cells[Index]);
+		float DistanceSquared = 0.0f;
+		if (SegmentLengthSquared <= Epsilon)
+		{
+			const float DX = Point.X - Start.X;
+			const float DY = Point.Y - Start.Y;
+			DistanceSquared = DX * DX + DY * DY;
+		}
+		else
+		{
+			const float AreaTwice = SegmentX * (Start.Y - Point.Y) - (Start.X - Point.X) * SegmentY;
+			DistanceSquared = AreaTwice * AreaTwice / SegmentLengthSquared;
+		}
+
+		if (DistanceSquared > FarthestDistanceSquared)
+		{
+			FarthestDistanceSquared = DistanceSquared;
+			FarthestIndex = Index;
+		}
+	}
+	return FarthestIndex;
+}
+
+void FVoxelNavigationGrid::SmoothConcretePath(
+	const TArray<FCellRef>& RawCells, TArray<FCellRef>& OutCells, int32* OutVisibilityTests) const
+{
+	OutCells.clear();
+	if (OutVisibilityTests)
+	{
+		*OutVisibilityTests = 0;
+	}
+	if (RawCells.empty())
+	{
+		return;
+	}
+
+	auto AppendUnique = [&OutCells](const FCellRef& Cell)
+	{
+		if (OutCells.empty() || !(OutCells.back() == Cell))
+		{
+			OutCells.push_back(Cell);
+		}
+	};
+	struct FRange
+	{
+		int First = 0;
+		int Last = 0;
+	};
+
+	AppendUnique(RawCells.front());
+	TArray<FRange> PendingRanges;
+	PendingRanges.push_back({ 0, static_cast<int>(RawCells.size()) - 1 });
+	while (!PendingRanges.empty())
+	{
+		const FRange Range = PendingRanges.back();
+		PendingRanges.pop_back();
+		if (Range.Last <= Range.First + 1)
+		{
+			AppendUnique(RawCells[Range.Last]);
+			continue;
+		}
+		if (OutVisibilityTests)
+		{
+			++*OutVisibilityTests;
+		}
+		if (HasLineOfSightSupercover(RawCells[Range.First], RawCells[Range.Last]))
+		{
+			AppendUnique(RawCells[Range.Last]);
+			continue;
+		}
+
+		int Mid = FindFarthestInteriorPointFromXYSegment(RawCells, Range.First, Range.Last);
+		if (Mid <= Range.First || Mid >= Range.Last)
+		{
+			Mid = Range.First + (Range.Last - Range.First) / 2;
+		}
+		PendingRanges.push_back({ Mid, Range.Last });
+		PendingRanges.push_back({ Range.First, Mid });
+	}
 }
 
 FVector FVoxelNavigationGrid::GetCellPosition(const FCellRef& Cell) const

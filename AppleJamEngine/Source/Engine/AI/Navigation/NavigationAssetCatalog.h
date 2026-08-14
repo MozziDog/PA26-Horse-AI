@@ -32,5 +32,5 @@ private:
 
 	FString AssetPath;
 	FVoxelNavigationAssetInfo Info;
-	TArray<FChunkIndexEntry> Index;
+	TArray<FChunkIndexEntry> Index;	// 청크 좌표 → 청크 내 바이트 위치/길이 lookup
 };

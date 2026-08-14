@@ -35,7 +35,7 @@ void AVoxelNavigationVolume::BeginPlay()
 void AVoxelNavigationVolume::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
-	if (bDrawWalkableNodes || bDrawChunkBoundaries)
+	if (bDrawWalkableNodes || bDrawChunkBoundaries || bDrawRawPath)
 	{
 		DrawNavigationDebug();
 	}
@@ -119,12 +119,20 @@ bool AVoxelNavigationVolume::LoadNavigationAsset(const FString& InputPath)
 
 bool AVoxelNavigationVolume::InitializeStreamingNavigation()
 {
-	if (ReferenceDataPath.empty()) return false;
-	if (IsStreamingNavigationInitialized()) return true;
-	auto LoadedCatalog = std::make_shared<FNavigationAssetCatalog>();
-	if (!LoadedCatalog->Open(ReferenceDataPath) || !LoadedCatalog->ValidateCompleteAsset()) return false;
+	if (ReferenceDataPath.empty()) 
+		return false;
+
+	if (IsStreamingNavigationInitialized()) 
+		return true;
+
+	std::shared_ptr<FNavigationAssetCatalog> LoadedCatalog = std::make_shared<FNavigationAssetCatalog>();
+	if (!LoadedCatalog->Open(ReferenceDataPath) || !LoadedCatalog->ValidateCompleteAsset()) 
+		return false;
+
 	const FVoxelNavigationAssetInfo& AssetInfo = LoadedCatalog->GetInfo();
-	if (!Grid.InitializeRuntime(AssetInfo.BoundsCenter, AssetInfo.BoundsExtent, AssetInfo.Settings)) return false;
+	if (!Grid.InitializeRuntime(AssetInfo.BoundsCenter, AssetInfo.BoundsExtent, AssetInfo.Settings)) 
+		return false;
+
 	NavigationAssetCatalog = std::move(LoadedCatalog);
 	return true;
 }
@@ -164,7 +172,9 @@ bool AVoxelNavigationVolume::Contains(const FVector& Point) const
 
 FVoxelNavigationPathResult AVoxelNavigationVolume::FindPath(const FVector& Start, const FVector& Goal) const
 {
-	return Grid.FindPath(Start, Goal, GoalAcceptanceRadius, MaxStartSnapDistance, MaxPathLength);
+	FVoxelNavigationPathResult Result = Grid.FindPath(Start, Goal, GoalAcceptanceRadius, MaxStartSnapDistance, MaxPathLength);
+	LastRawPathPoints = Result.RawPoints;
+	return Result;
 }
 
 void AVoxelNavigationVolume::RebindComponents()
@@ -197,5 +207,18 @@ void AVoxelNavigationVolume::DrawNavigationDebug() const
 		{
 			DrawDebugLine(World, Line.first, Line.second, FColor(240, 0, 255)); // 보라색
 		}
+	}
+
+	auto DrawPath = [World](const TArray<FVector>& Points, const FColor& Color)
+	{
+		for (size_t Index = 1; Index < Points.size(); ++Index)
+		{
+			DrawDebugLine(World, Points[Index - 1] + FVector::UpVector * 0.08f,
+				Points[Index] + FVector::UpVector * 0.08f, Color, 0.025f);
+		}
+	};
+	if (bDrawRawPath)
+	{
+		DrawPath(LastRawPathPoints, FColor(255, 80, 0)); // 주황색
 	}
 }

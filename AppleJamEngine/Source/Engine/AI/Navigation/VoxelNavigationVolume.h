@@ -80,6 +80,8 @@ private:
 	bool bDrawWalkableNodes = false;
 	UPROPERTY(Edit, Save, Category="Navigation|Debug", DisplayName="Draw Chunk Boundaries")
 	bool bDrawChunkBoundaries = false;
+	UPROPERTY(Edit, Save, Category="Navigation|Debug", DisplayName="Draw Raw Path")
+	bool bDrawRawPath = false;
 	UPROPERTY(Edit, Save, Category="Navigation|Debug", DisplayName="Max Debug Nodes", Min=0, Max=100000)
 	int32 MaxDebugNodes = 4000;
 	UPROPERTY(Edit, Save, Category="Navigation|Debug", DisplayName="Max Debug Chunks", Min=0, Max=100000)
@@ -115,4 +117,6 @@ private:
 	float DebugRuntimeMemoryMB = 0.0f;
 	UPROPERTY(Edit, ReadOnly, Transient, Category = "Navigation|Stats", DisplayName = "Peak Bake Scratch Memory MB")
 	float DebugPeakBakeScratchMemoryMB = 0.0f;
+
+	mutable TArray<FVector> LastRawPathPoints;
 };
