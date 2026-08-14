@@ -884,46 +884,6 @@ bool FVoxelNavigationGrid::HasLineOfSightSupercover(const FCellRef& Start, const
 	return true;
 }
 
-int FVoxelNavigationGrid::FindFarthestInteriorPointFromXYSegment(
-	const TArray<FCellRef>& Cells, int First, int Last) const
-{
-	if (First < 0 || Last >= static_cast<int>(Cells.size()) || Last <= First + 1)
-	{
-		return -1;
-	}
-
-	const FVector Start = GetCellPosition(Cells[First]);
-	const FVector End = GetCellPosition(Cells[Last]);
-	const float SegmentX = End.X - Start.X;
-	const float SegmentY = End.Y - Start.Y;
-	const float SegmentLengthSquared = SegmentX * SegmentX + SegmentY * SegmentY;
-	int FarthestIndex = -1;
-	float FarthestDistanceSquared = -1.0f;
-	for (int Index = First + 1; Index < Last; ++Index)
-	{
-		const FVector Point = GetCellPosition(Cells[Index]);
-		float DistanceSquared = 0.0f;
-		if (SegmentLengthSquared <= Epsilon)
-		{
-			const float DX = Point.X - Start.X;
-			const float DY = Point.Y - Start.Y;
-			DistanceSquared = DX * DX + DY * DY;
-		}
-		else
-		{
-			const float AreaTwice = SegmentX * (Start.Y - Point.Y) - (Start.X - Point.X) * SegmentY;
-			DistanceSquared = AreaTwice * AreaTwice / SegmentLengthSquared;
-		}
-
-		if (DistanceSquared > FarthestDistanceSquared)
-		{
-			FarthestDistanceSquared = DistanceSquared;
-			FarthestIndex = Index;
-		}
-	}
-	return FarthestIndex;
-}
-
 void FVoxelNavigationGrid::SmoothConcretePath(
 	const TArray<FCellRef>& RawCells, TArray<FCellRef>& OutCells, int32* OutVisibilityTests) const
 {
@@ -944,41 +904,26 @@ void FVoxelNavigationGrid::SmoothConcretePath(
 			OutCells.push_back(Cell);
 		}
 	};
-	struct FRange
-	{
-		int First = 0;
-		int Last = 0;
-	};
-
 	AppendUnique(RawCells.front());
-	TArray<FRange> PendingRanges;
-	PendingRanges.push_back({ 0, static_cast<int>(RawCells.size()) - 1 });
-	while (!PendingRanges.empty())
+	const int LastIndex = static_cast<int>(RawCells.size()) - 1;
+	for (int CurrentIndex = 0; CurrentIndex < LastIndex;)
 	{
-		const FRange Range = PendingRanges.back();
-		PendingRanges.pop_back();
-		if (Range.Last <= Range.First + 1)
+		// Test the farthest candidate first: the first visible cell is the greedy next waypoint.
+		int NextIndex = CurrentIndex + 1;
+		for (int CandidateIndex = LastIndex; CandidateIndex > CurrentIndex + 1; --CandidateIndex)
 		{
-			AppendUnique(RawCells[Range.Last]);
-			continue;
+			if (OutVisibilityTests)
+			{
+				++*OutVisibilityTests;
+			}
+			if (HasLineOfSightSupercover(RawCells[CurrentIndex], RawCells[CandidateIndex]))
+			{
+				NextIndex = CandidateIndex;
+				break;
+			}
 		}
-		if (OutVisibilityTests)
-		{
-			++*OutVisibilityTests;
-		}
-		if (HasLineOfSightSupercover(RawCells[Range.First], RawCells[Range.Last]))
-		{
-			AppendUnique(RawCells[Range.Last]);
-			continue;
-		}
-
-		int Mid = FindFarthestInteriorPointFromXYSegment(RawCells, Range.First, Range.Last);
-		if (Mid <= Range.First || Mid >= Range.Last)
-		{
-			Mid = Range.First + (Range.Last - Range.First) / 2;
-		}
-		PendingRanges.push_back({ Mid, Range.Last });
-		PendingRanges.push_back({ Range.First, Mid });
+		AppendUnique(RawCells[NextIndex]);
+		CurrentIndex = NextIndex;
 	}
 }
 

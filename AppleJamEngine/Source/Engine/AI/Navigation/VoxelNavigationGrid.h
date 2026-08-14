@@ -70,7 +70,6 @@ private:
 	FVector GetCellPosition(const FCellRef& Cell) const;
 	bool IsCellWalkable(int ChunkIndex, int LocalCell) const;	// 해당 위치에 이미 다른 복셀이 있는지 여부 체크
 	bool HasLineOfSightSupercover(const FCellRef& Start, const FCellRef& Goal) const;
-	int FindFarthestInteriorPointFromXYSegment(const TArray<FCellRef>& Cells, int First, int Last) const;
 	void SmoothConcretePath(const TArray<FCellRef>& RawCells, TArray<FCellRef>& OutCells,
 		int32* OutVisibilityTests = nullptr) const;
 	float FindLocalPath(
