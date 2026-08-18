@@ -179,7 +179,7 @@ protected:
 	float GallopSpeed = 16.6f;
 
 	UPROPERTY(Edit, Save, Category="Locomotion|Gait", DisplayName="Gait Up Cooldown", Min=0.0f, Max=5.0f, Speed=0.01f)
-	float GaitUpCooldown = 0.6f; 	// 가속 쿨타임(초 단위)
+	float GaitUpCooldown = 1.0f; 	// 가속 쿨타임(sec)
 
 	// ── 평행이동(strafe) ────────────────────────────────────────────────────────────────────────────────
 	UPROPERTY(Edit, Save, Category="Locomotion|Strafe", DisplayName="Strafe Enter Max Speed", Min=0.0f, Max=5.0f, Speed=0.01f)
