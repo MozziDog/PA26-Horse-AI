@@ -243,7 +243,9 @@ bool FVoxelNavigationBakeGrid::Build(
 	constexpr uint32 LayerMask = ObjectTypeBit(ECollisionChannel::WorldStatic);
 	const float SlopeCos = std::cos(Settings.MaxWalkableSlopeDegrees * FMath::DegToRad);
 	const float ProbeMargin = std::clamp(Settings.GroundProbeInset, 0.001f, NavVoxelCellSize * 0.25f);
-	const FCollisionShape ClearanceShape = FCollisionShape::MakeCapsule(Settings.AgentRadius, Settings.AgentHeight * 0.5f);
+	// 이후 침식 필터가 적용될 것을 고려하여 Capsule overlap 검사는 NavVoxelCellSize의 절반만큼 감소한 값을 사용
+	const float AgentRadius = std::max(Settings.AgentRadius - NavVoxelCellSize * 0.5f, NavVoxelCellSize * 0.5f);
+	const FCollisionShape ClearanceShape = FCollisionShape::MakeCapsule(AgentRadius, Settings.AgentHeight * 0.5f);
 
 	// L1 청크 단위로 1차 검사 (broad phase): 약간의 여유분 추가해서 보수적으로 검사 수행
 	TArray<bool> L1TestResult(L1ChunkCountX * L1ChunkCountY * L1ChunkCountZ, false);
