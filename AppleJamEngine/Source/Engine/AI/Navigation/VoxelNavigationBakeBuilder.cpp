@@ -316,12 +316,12 @@ bool FVoxelNavigationBakeGrid::Build(
 					const float CellCenterY = BoundsMin.Y + ((Y + 0.5f) * NavVoxelCellSize);
 					const float SlabBottom = BoundsMin.Z + (Z * NavVoxelCellSize);
 					const float SlabTop = SlabBottom + NavVoxelCellSize;
-					const FVector RayStart(CellCenterX, CellCenterY, SlabTop - ProbeMargin);
+					const FVector RayStart(CellCenterX, CellCenterY, SlabTop);
 
 					// 지면 존재 여부 검사
 					FHitResult GroundHit;
 					if (!World->PhysicsRaycastByObjectTypes(
-						RayStart, FVector::DownVector, NavVoxelCellSize - ProbeMargin + Epsilon,
+						RayStart, FVector::DownVector, NavVoxelCellSize + Epsilon,
 						GroundHit, LayerMask, QueryOwner))
 					{
 						++BuildStats.NumNoGroundCells;
