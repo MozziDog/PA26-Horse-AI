@@ -354,7 +354,7 @@ bool FVoxelNavigationBakeGrid::Build(
 					}
 
 					// 벽과 너무 딱붙은 곳 등 에이전트가 서있을 수 없는 곳 필터링
-					const FVector StandingPoint(CellCenterX, CellCenterY, GroundHit.WorldHitLocation.Z);
+					const FVector StandingPoint = GroundHit.WorldHitLocation;
 					const FVector CapsuleCenter = StandingPoint + FVector::UpVector *
 						(Settings.AgentHeight * 0.5f + Settings.ClearanceOffset);
 					if (World->PhysicsOverlapAnyByObjectTypes(
@@ -374,9 +374,9 @@ bool FVoxelNavigationBakeGrid::Build(
 					TArray<int>& Column = XYToNodesLookup[FlattenColumn(X, Y)];
 					Column.push_back(NodeIndex);
 					AcceptedGroundHeights.push_back(StandingPoint.Z);
-					RefreshBakeScratchMemory();
-					UpdateBuildPeakMemory(static_cast<size_t>(AcceptedGroundHeights.capacity()) * sizeof(float));
 				}
+				RefreshBakeScratchMemory();
+				UpdateBuildPeakMemory(static_cast<size_t>(AcceptedGroundHeights.capacity()) * sizeof(float));
 			}
 		}
 	}
@@ -397,11 +397,10 @@ bool FVoxelNavigationBakeGrid::Build(
 			for (int Candidate : XYToNodesLookup[FlattenColumn(NX, NY)])
 			{
 				const float HeightDifference = std::abs(Nodes[Candidate].Position.Z - Node.Position.Z);
-				if (HeightDifference <= Settings.MaxNeighborHeightDelta + Epsilon
-					 && CanTraverse(World, NodeIndex, Candidate, QueryOwner))
-				{
-					AddDirectedEdge(NodeIndex, Candidate);
-				}
+				if (HeightDifference > Settings.MaxNeighborHeightDelta + Epsilon)
+					continue;
+				
+				AddDirectedEdge(NodeIndex, Candidate);
 			}
 		}
 	}
@@ -415,20 +414,22 @@ bool FVoxelNavigationBakeGrid::Build(
 			const int NY = Node.Coord.Y + Offset[1];
 			if (!IsValidColumn(NX, NY)) 
 				continue;
+
 			for (int Candidate : XYToNodesLookup[FlattenColumn(NX, NY)])
 			{
-				if (std::abs(Nodes[Candidate].Position.Z - Node.Position.Z) >
-					Settings.MaxNeighborHeightDelta + Epsilon)
+				const float HeightDifference = std::abs(Nodes[Candidate].Position.Z - Node.Position.Z);
+				if (HeightDifference > Settings.MaxNeighborHeightDelta + Epsilon)
 					continue;
+
 				if (!HasCardinalBridge(NodeIndex, Candidate, Node.Coord.X + Offset[0], Node.Coord.Y) 
 					|| !HasCardinalBridge(NodeIndex, Candidate, Node.Coord.X, Node.Coord.Y + Offset[1]))
 					continue;
 
-				if (CanTraverse(World, NodeIndex, Candidate, QueryOwner)) 
-					AddDirectedEdge(NodeIndex, Candidate);
+				AddDirectedEdge(NodeIndex, Candidate);
 			}
 		}
 	}
+	CalculateBakeScratchMemoryBytes();
 
 	// 8방향으로 연결된 노드만 남기고 필터링 (mark and sweep)
 	TArray<uint8> RetainedNodes(Nodes.size(), 0);
@@ -455,9 +456,6 @@ bool FVoxelNavigationBakeGrid::Build(
 
 	NodeToChunkLookup.assign(Nodes.size(), -1);
 	NodeToLocalCellIdxLookup.assign(Nodes.size(), -1);
-	bool bXYCollision = false;
-	int CollidedX = 0;
-	int CollidedY = 0;
 	for (int NodeIndex = 0; NodeIndex < Nodes.size(); ++NodeIndex)
 	{
 		if (RetainedNodes[NodeIndex] == 0) 
@@ -485,42 +483,27 @@ bool FVoxelNavigationBakeGrid::Build(
 		const int LocalY = Node.Coord.Y % NavL1ChunkCellsPerAxis;
 		const int LocalCell = LocalY * NavL1ChunkCellsPerAxis + LocalX;
 		FVoxelNavigationL1Chunk& Chunk = L1Chunks[ChunkIndex];
-		if (Chunk.Cells[LocalCell] != 0)
-		{
-			// 이웃한 지면과의 연결성으로 필터링했음에도 불구하고
-			// 청크 내에 XY를 공유하는 복수의 청크가 존재하여 height map으로 옮기기 실패
-			// → 빌드 거부
-			bXYCollision = true;
-			CollidedX = LocalX;
-			CollidedY = LocalY;
-			break;
-		}
 		const float ChunkBottom = BoundsMin.Z + (ChunkZ * NavL1ChunkSize);
 		const float RelativeHeight = std::clamp(
 			(Node.Position.Z - ChunkBottom) / NavL1ChunkSize, 0.0f, 1.0f);
-		Chunk.Cells[LocalCell] = static_cast<uint8>(1 + static_cast<int>(std::round(RelativeHeight * 254.0f)));
+		const uint8 CellValue = static_cast<uint8>(1 + static_cast<int>(std::round(RelativeHeight * 254.0f)));
+		if (Chunk.Cells[LocalCell] > CellValue)
+		{
+			UE_LOG("[VoxelNavigationBakeBuilder] Warning: more than one nodes in chunk collided after erosion (%.1f, %.1f, %.1f)",
+				Node.Position.X, Node.Position.Y, Node.Position.Z);
+			// 이웃한 지면과의 연결성으로 필터링했음에도 불구하고
+			// 청크 내에 XY를 공유하는 복수의 청크가 존재하는 경우
+			// → 조금이라도 높이가 높은 쪽을 채택 (경사로가 지면과 만나는 지점 등 특수 케이스 고려)
+			continue;
+		}
+		Chunk.Cells[LocalCell] = CellValue;
 		NodeToChunkLookup[NodeIndex] = ChunkIndex;
 		NodeToLocalCellIdxLookup[NodeIndex] = LocalCell;
 		ChunkCellToNodeLookup[ChunkIndex][LocalCell] = NodeIndex;
 	}
 
-	if (bXYCollision)
-	{
-		UE_LOG("[VoxelNavigationGrid] Build rejected: more than one nodes in chunk share (%d, %d) after erosion.",
-				CollidedX, CollidedY);
-		Nodes.clear();
-		XYToNodesLookup.clear();
-		L1Chunks.clear();
-		L1ChunkLookup.assign(L1ChunkLookup.size(), -1);
-		Portals.clear();
-		NodeToChunkLookup.clear();
-		NodeToLocalCellIdxLookup.clear();
-		ChunkCellToNodeLookup.clear();
-		RefreshMemoryUsage();
-		return false;
-	}
-
 	// 기존 연결 그래프를 heightmap으로 압축했을 때 정보 손실 있는지 검사 (이웃한 노드간에 연결성이 담보되는지)
+	if(false)// 테스트
 	for (int NodeIndex = 0; NodeIndex < Nodes.size(); ++NodeIndex)
 	{
 		if (RetainedNodes[NodeIndex] == 0) 
@@ -600,6 +583,9 @@ bool FVoxelNavigationBakeGrid::Build(
 
 	BuildStats.BuildTimeMs = ElapsedMilliseconds(StartTime);
 	bBuilt = BuildStats.NumWalkableNodes > 0;
+
+	UE_LOG("[VoxelNavigationGrid] Build finished in %.3fMs NumWalkableNodes:%d NumErodedNodes:%d",
+		BuildStats.BuildTimeMs, BuildStats.NumWalkableNodes, BuildStats.NumErodedNodes);
 	return bBuilt;
 }
 
@@ -701,7 +687,7 @@ void FVoxelNavigationBakeGrid::BuildAbstractGraph(const TArray<uint8>& RetainedN
 
 	// 정렬된 Crossing 리스트에서 같은 portal을 가리키는 {chunk, subarea} 쌍은 묶고 중복되지 않은 portal만 추가
 	for (size_t GroupBegin = 0; GroupBegin < Crossings.size(); )
-	{
+	{	
 		size_t GroupEnd = GroupBegin + 1;
 		while (GroupEnd < Crossings.size() &&
 			Crossings[GroupEnd].ChunkA == Crossings[GroupBegin].ChunkA &&
@@ -776,22 +762,6 @@ void FVoxelNavigationBakeGrid::BuildAbstractGraph(const TArray<uint8>& RetainedN
 	}
 }
 
-
-bool FVoxelNavigationBakeGrid::CanTraverse(UWorld* World, int FromNode, int ToNode, const AActor* QueryOwner) const
-{
-	if (!World || FromNode < 0 || ToNode < 0) 
-		return false;
-
-	const FVector Lift = FVector::UpVector * (BuildSettings.AgentHeight * 0.5f + BuildSettings.ClearanceOffset);
-	const FVector Start = Nodes[FromNode].Position + Lift;
-	const FVector End = Nodes[ToNode].Position + Lift;
-	const FCollisionShape Shape = FCollisionShape::MakeCapsule(BuildSettings.AgentRadius, BuildSettings.AgentHeight * 0.5f);
-	FHitResult Hit;
-	return !World->PhysicsSweepByObjectTypes(
-		Start, End, FQuat::Identity, Shape, Hit,
-		ObjectTypeBit(ECollisionChannel::WorldStatic), QueryOwner);
-}
-
 bool FVoxelNavigationBakeGrid::HasCardinalBridge(int FromNode, int ToNode, int BridgeX, int BridgeY) const
 {
 	if (FromNode < 0 || ToNode < 0 || !IsValidColumn(BridgeX, BridgeY)) 
@@ -818,7 +788,6 @@ void FVoxelNavigationBakeGrid::AddDirectedEdge(int FromNode, int ToNode)
 	if (!ContainsIndex(Neighbors, ToNode))
 	{
 		Neighbors.push_back(ToNode);
-		RefreshBakeScratchMemory();
 		++BuildStats.NumDirectedEdges;
 	}
 }

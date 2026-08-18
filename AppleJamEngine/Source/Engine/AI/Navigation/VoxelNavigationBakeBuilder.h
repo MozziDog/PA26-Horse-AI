@@ -41,7 +41,6 @@ private:
 	bool IsValidColumn(int X, int Y) const;
 	void BuildAbstractGraph(const TArray<uint8>& RetainedNodes);
 	bool BuildBakedChunksFromRuntimeGraph();
-	bool CanTraverse(UWorld* World, int FromNode, int ToNode, const AActor* QueryOwner) const;
 	bool HasCardinalBridge(int FromNode, int ToNode, int BridgeX, int BridgeY) const;
 	void AddDirectedEdge(int FromNode, int ToNode);
 	void RefreshMemoryUsage();
