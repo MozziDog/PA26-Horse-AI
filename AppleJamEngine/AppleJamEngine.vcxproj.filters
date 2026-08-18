@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <Filter Include="Intermediate">
@@ -414,6 +414,9 @@
     </Filter>
     <Filter Include="Source\Game\Horse">
       <UniqueIdentifier>{5fe4ef6e-9abd-0fef-80d3-d0cdc73c49fa}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source\Game\Monster">
+      <UniqueIdentifier>{81E64E04-9F0B-4B92-A06E-5CD668ED885D}</UniqueIdentifier>
     </Filter>
     <Filter Include="Source\Game\Lua">
       <UniqueIdentifier>{ddcba6a3-b876-cfec-7f99-d7afa0539550}</UniqueIdentifier>
@@ -2240,6 +2243,9 @@
     <ClCompile Include="Source\Game\Horse\ObstacleFanSensorComponent.cpp">
       <Filter>Source\Game\Horse</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Game\Monster\MonsterFollowComponent.cpp">
+      <Filter>Source\Game\Monster</Filter>
+    </ClCompile>
     <ClCompile Include="Source\Game\Lua\GameLuaBindings.cpp">
       <Filter>Source\Game\Lua</Filter>
     </ClCompile>
@@ -4032,6 +4038,9 @@
     </ClInclude>
     <ClInclude Include="Source\Game\Horse\ObstacleFanSensorComponent.h">
       <Filter>Source\Game\Horse</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Game\Monster\MonsterFollowComponent.h">
+      <Filter>Source\Game\Monster</Filter>
     </ClInclude>
     <ClInclude Include="Source\Game\Lua\GameLuaBindings.h">
       <Filter>Source\Game\Lua</Filter>
