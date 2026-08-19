@@ -176,9 +176,10 @@ void FPhysXPhysicsRuntime::Shutdown()
     Bodies.clear();
     BodyGenerations.clear();
 
-    ActorCompounds.clear();
+    RootComponentCompounds.clear();
     ComponentToBody.clear();
     ComponentToShape.clear();
+    ComponentToCompoundRoot.clear();
     PendingContinuousForces.clear();
 
     CommandQueue.Clear();
@@ -505,7 +506,13 @@ void FPhysXPhysicsRuntime::RegisterComponent_Internal(const FPhysicsBodyCreatePa
         return;
     }
 
-    FActorCompoundBody* Compound = FindCompoundByActorId(Payload.BodyOwner.ActorId);
+    const uint32 RootComponentId = Payload.BodyOwner.ComponentId;
+    if (RootComponentId == 0)
+    {
+        return;
+    }
+
+    FActorCompoundBody* Compound = FindCompoundByRootComponentId(RootComponentId);
 
     if (!Compound)
     {
@@ -524,8 +531,8 @@ void FPhysXPhysicsRuntime::RegisterComponent_Internal(const FPhysicsBodyCreatePa
         NewCompound.RootGeneration  = Payload.BodyOwner.ComponentGeneration;
         NewCompound.Body            = BodyHandle;
 
-        ActorCompounds[Payload.BodyOwner.ActorId] = NewCompound;
-        Compound                                  = &ActorCompounds[Payload.BodyOwner.ActorId];
+        RootComponentCompounds[RootComponentId] = NewCompound;
+        Compound                                = &RootComponentCompounds[RootComponentId];
     }
     else if (Payload.BodyOwner.ComponentId == Compound->RootComponentId)
     {
@@ -566,6 +573,7 @@ void FPhysXPhysicsRuntime::RegisterComponent_Internal(const FPhysicsBodyCreatePa
 
     ComponentToBody[Payload.ShapeOwner.ComponentId]  = Compound->Body;
     ComponentToShape[Payload.ShapeOwner.ComponentId] = ShapeHandle;
+    ComponentToCompoundRoot[Payload.ShapeOwner.ComponentId] = RootComponentId;
 
     if (FBodyInstance* Body = ResolveBody(Compound->Body))
     {
@@ -605,10 +613,15 @@ void FPhysXPhysicsRuntime::UnregisterComponent_Internal(const FPhysicsObjectKey&
     }
 
     const FPhysicsBodyHandle BodyHandle = BodyIt->second;
+    const auto RootIt = ComponentToCompoundRoot.find(Object.ComponentId);
+    const uint32 RootComponentId = RootIt != ComponentToCompoundRoot.end()
+        ? RootIt->second
+        : Object.ComponentId;
     DetachShape(ShapeIt->second);
     ComponentToBody.erase(Object.ComponentId);
+    ComponentToCompoundRoot.erase(Object.ComponentId);
 
-    FActorCompoundBody* Compound = FindCompoundByActorId(Object.ActorId);
+    FActorCompoundBody* Compound = FindCompoundByRootComponentId(RootComponentId);
     if (!Compound)
     {
         DestroyRigidBody_Internal(BodyHandle);
@@ -622,8 +635,8 @@ void FPhysXPhysicsRuntime::UnregisterComponent_Internal(const FPhysicsObjectKey&
 
     if (Compound->Components.empty())
     {
+        RootComponentCompounds.erase(RootComponentId);
         DestroyRigidBody_Internal(BodyHandle);
-        ActorCompounds.erase(Object.ActorId);
     }
 }
 
@@ -756,6 +769,7 @@ void FPhysXPhysicsRuntime::DestroyRigidBody_Internal(FPhysicsBodyHandle BodyHand
     {
         if (It->second == BodyHandle)
         {
+            ComponentToCompoundRoot.erase(It->first);
             It = ComponentToBody.erase(It);
         }
         else
@@ -2520,25 +2534,25 @@ void FPhysXPhysicsRuntime::UpdateStats()
 
 }
 
-FActorCompoundBody* FPhysXPhysicsRuntime::FindCompoundByActorId(uint32 ActorId)
+FActorCompoundBody* FPhysXPhysicsRuntime::FindCompoundByRootComponentId(uint32 RootComponentId)
 {
-    if (ActorId == 0)
+    if (RootComponentId == 0)
     {
         return nullptr;
     }
 
-    auto It = ActorCompounds.find(ActorId);
-    return It != ActorCompounds.end() ? &It->second : nullptr;
+    auto It = RootComponentCompounds.find(RootComponentId);
+    return It != RootComponentCompounds.end() ? &It->second : nullptr;
 }
 
-const FActorCompoundBody* FPhysXPhysicsRuntime::FindCompoundByActorId(uint32 ActorId) const
+const FActorCompoundBody* FPhysXPhysicsRuntime::FindCompoundByRootComponentId(uint32 RootComponentId) const
 {
-    if (ActorId == 0)
+    if (RootComponentId == 0)
     {
         return nullptr;
     }
 
-    auto It = ActorCompounds.find(ActorId);
-    return It != ActorCompounds.end() ? &It->second : nullptr;
+    auto It = RootComponentCompounds.find(RootComponentId);
+    return It != RootComponentCompounds.end() ? &It->second : nullptr;
 }
 

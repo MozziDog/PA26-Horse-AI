@@ -279,6 +279,27 @@ namespace
         return Result;
     }
 
+    UPrimitiveComponent* ResolvePhysicsRootComponent_GameThread(UPrimitiveComponent* Comp)
+    {
+        if (!Comp)
+        {
+            return nullptr;
+        }
+
+        AActor* OwnerActor = Comp->GetOwner();
+        if (OwnerActor)
+        {
+            if (UPrimitiveComponent* RootPrimitive = Cast<UPrimitiveComponent>(OwnerActor->GetRootComponent()))
+            {
+                return RootPrimitive;
+            }
+        }
+
+        // A scene-component root has no physical body of its own. Its primitive
+        // children must therefore each become independent body roots.
+        return Comp;
+    }
+
     FTransform MakeRelativeTransformFromWorld_GameThread(
         const FVector&       ChildWorldLocation,
         const FQuat&         ChildWorldRotation,
@@ -1380,7 +1401,7 @@ void FPhysXPhysicsScene::Shutdown()
     Runtime.Shutdown();
 
     GameThreadBindings.clear();
-    GameThreadActorBodies.clear();
+    GameThreadRootBodies.clear();
 
     if (DefaultMaterial)
     {
@@ -1480,19 +1501,30 @@ void FPhysXPhysicsScene::UnregisterComponent(UPrimitiveComponent* Comp)
     Binding.bPendingDestroy = true;
     Binding.bPendingCreate  = false;
 
-    bool bActorStillHasLiveBinding = false;
+    UPrimitiveComponent* PhysicsRoot = ResolvePhysicsRootComponent_GameThread(Comp);
+    const uint32 PhysicsRootComponentId = PhysicsRoot ? PhysicsRoot->GetUUID() : 0;
+    bool bRootStillHasLiveBinding = false;
     for (const auto& Pair : GameThreadBindings)
     {
         const FPhysicsComponentBinding& Other = Pair.second;
-        if (Other.ActorId == Binding.ActorId && !Other.bPendingDestroy)
+        if (Other.bPendingDestroy)
         {
-            bActorStillHasLiveBinding = true;
+            continue;
+        }
+
+        UPrimitiveComponent* OtherComponent = Cast<UPrimitiveComponent>(
+            UObjectManager::Get().FindByUUID(Other.ComponentId)
+        );
+        UPrimitiveComponent* OtherRoot = ResolvePhysicsRootComponent_GameThread(OtherComponent);
+        if (OtherRoot && OtherRoot->GetUUID() == PhysicsRootComponentId)
+        {
+            bRootStillHasLiveBinding = true;
             break;
         }
     }
-    if (!bActorStillHasLiveBinding)
+    if (!bRootStillHasLiveBinding && PhysicsRootComponentId != 0)
     {
-        GameThreadActorBodies.erase(Binding.ActorId);
+        GameThreadRootBodies.erase(PhysicsRootComponentId);
     }
 }
 
@@ -1505,22 +1537,24 @@ void FPhysXPhysicsScene::RebuildBody(UPrimitiveComponent* Comp)
 
 	bQuerySceneDirty = true;
 
-    AActor*      OwnerActor = Comp->GetOwner();
-    const uint32 ActorId    = OwnerActor ? OwnerActor->GetUUID() : 0;
+    UPrimitiveComponent* PhysicsRoot = ResolvePhysicsRootComponent_GameThread(Comp);
+    const uint32 PhysicsRootComponentId = PhysicsRoot ? PhysicsRoot->GetUUID() : 0;
 
     TArray<UPrimitiveComponent*> ComponentsToRebuild;
-    if (ActorId != 0)
+    if (PhysicsRootComponentId != 0)
     {
         for (const auto& Pair : GameThreadBindings)
         {
             const FPhysicsComponentBinding& Binding = Pair.second;
-            if (Binding.ActorId != ActorId || Binding.bPendingDestroy)
+            if (Binding.bPendingDestroy)
             {
                 continue;
             }
 
             UPrimitiveComponent* BoundComponent = Cast<UPrimitiveComponent>(UObjectManager::Get().FindByUUID(Binding.ComponentId));
-            if (IsValid(BoundComponent) && BoundComponent->IsCollisionEnabled())
+            UPrimitiveComponent* BoundRoot = ResolvePhysicsRootComponent_GameThread(BoundComponent);
+            if (IsValid(BoundComponent) && BoundRoot &&
+                BoundRoot->GetUUID() == PhysicsRootComponentId && BoundComponent->IsCollisionEnabled())
             {
                 ComponentsToRebuild.push_back(BoundComponent);
             }
@@ -1531,6 +1565,20 @@ void FPhysXPhysicsScene::RebuildBody(UPrimitiveComponent* Comp)
     {
         ComponentsToRebuild.push_back(Comp);
     }
+
+    std::sort(
+        ComponentsToRebuild.begin(),
+        ComponentsToRebuild.end(),
+        [PhysicsRootComponentId](const UPrimitiveComponent* A, const UPrimitiveComponent* B)
+        {
+            const bool bAIsRoot = A && A->GetUUID() == PhysicsRootComponentId;
+            const bool bBIsRoot = B && B->GetUUID() == PhysicsRootComponentId;
+            if (bAIsRoot != bBIsRoot)
+            {
+                return bAIsRoot;
+            }
+            return A && B ? A->GetUUID() < B->GetUUID() : A != nullptr;
+        });
 
     for (UPrimitiveComponent* RebuildComp : ComponentsToRebuild)
     {
@@ -1553,9 +1601,9 @@ void FPhysXPhysicsScene::RebuildBody(UPrimitiveComponent* Comp)
         Binding.bPendingCreate  = false;
     }
 
-    if (ActorId != 0)
+    if (PhysicsRootComponentId != 0)
     {
-        GameThreadActorBodies.erase(ActorId);
+        GameThreadRootBodies.erase(PhysicsRootComponentId);
     }
 
     for (UPrimitiveComponent* RebuildComp : ComponentsToRebuild)
@@ -1807,25 +1855,26 @@ FPhysicsBodyCreatePayload FPhysXPhysicsScene::BuildRegisterPayload_GameThread(
         return Payload;
     }
 
-    UPrimitiveComponent* RootPrim = Cast<UPrimitiveComponent>(OwnerActor->GetRootComponent());
+    UPrimitiveComponent* RootPrim = ResolvePhysicsRootComponent_GameThread(Comp);
     if (!RootPrim)
     {
-        RootPrim = Comp;
+        return Payload;
     }
 
     FPhysicsComponentBinding& RootBinding = TouchBinding_GameThread(RootPrim);
     const uint32              ActorId     = OwnerActor->GetUUID();
+    const uint32              RootComponentId = RootPrim->GetUUID();
 
     FPhysicsBodyHandle BodyHandle;
-    auto               ActorBodyIt = GameThreadActorBodies.find(ActorId);
-    if (ActorBodyIt != GameThreadActorBodies.end() && ActorBodyIt->second.IsValid())
+    auto               RootBodyIt = GameThreadRootBodies.find(RootComponentId);
+    if (RootBodyIt != GameThreadRootBodies.end() && RootBodyIt->second.IsValid())
     {
-        BodyHandle = ActorBodyIt->second;
+        BodyHandle = RootBodyIt->second;
     }
     else
     {
-        BodyHandle                     = Runtime.ReserveBodyHandle_GameThread();
-        GameThreadActorBodies[ActorId] = BodyHandle;
+        BodyHandle                           = Runtime.ReserveBodyHandle_GameThread();
+        GameThreadRootBodies[RootComponentId] = BodyHandle;
     }
 
     const FPhysicsShapeHandle ShapeHandle = Runtime.ReserveShapeHandle_GameThread();
@@ -2175,6 +2224,7 @@ void FPhysXPhysicsScene::StopPhysicsThreadAndJoin()
 
 void FPhysXPhysicsScene::EnqueueEngineTransformSync_GameThread()
 {
+    TSet<uint32> SyncedRootComponentIds;
     for (const auto& Pair : GameThreadBindings)
     {
         const FPhysicsComponentBinding& Binding = Pair.second;
@@ -2196,9 +2246,21 @@ void FPhysXPhysicsScene::EnqueueEngineTransformSync_GameThread()
             continue;
         }
 
+        UPrimitiveComponent* PhysicsRoot = ResolvePhysicsRootComponent_GameThread(Component);
+        if (!IsValid(PhysicsRoot))
+        {
+            continue;
+        }
+
+        const uint32 RootComponentId = PhysicsRoot->GetUUID();
+        if (!SyncedRootComponentIds.insert(RootComponentId).second)
+        {
+            continue;
+        }
+
         Runtime.SetBodyTransform(
             Binding.Body,
-            GetComponentWorldTransform_GameThread(Component),
+            GetComponentWorldTransform_GameThread(PhysicsRoot),
             EPhysicsTeleportMode::None
         );
     }

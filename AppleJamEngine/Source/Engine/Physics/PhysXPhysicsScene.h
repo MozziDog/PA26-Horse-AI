@@ -179,7 +179,9 @@ private:
 	void FlushQueryState_GameThread();
 
     TMap<uint32, FPhysicsComponentBinding> GameThreadBindings;
-    TMap<uint32, FPhysicsBodyHandle>       GameThreadActorBodies;
+    // Keyed by the resolved primitive body root, not by actor. Scene-root actors can
+    // therefore own several independent component bodies.
+    TMap<uint32, FPhysicsBodyHandle>       GameThreadRootBodies;
 
 	UWorld* World = nullptr;
 

@@ -241,8 +241,8 @@ private:
     void BuildWorldSnapshot_Internal();
     void BuildDebugSnapshot_Internal();
 
-    FActorCompoundBody*       FindCompoundByActorId(uint32 ActorId);
-    const FActorCompoundBody* FindCompoundByActorId(uint32 ActorId) const;
+    FActorCompoundBody*       FindCompoundByRootComponentId(uint32 RootComponentId);
+    const FActorCompoundBody* FindCompoundByRootComponentId(uint32 RootComponentId) const;
 
 private:
     UWorld* World = nullptr;
@@ -264,9 +264,12 @@ private:
     TArray<uint32>                               ConstraintGenerations;
 
     // UObject raw pointer를 보관하지 않는다. Game Thread에서 복사한 UUID/handle만 runtime map의 key/value로 사용한다.
-    TMap<uint32, FActorCompoundBody>  ActorCompounds;
+    // One compound body per resolved primitive root. Multiple primitive roots under
+    // an actor with a USceneComponent root must remain independent bodies.
+    TMap<uint32, FActorCompoundBody>  RootComponentCompounds;
     TMap<uint32, FPhysicsBodyHandle>  ComponentToBody;
     TMap<uint32, FPhysicsShapeHandle> ComponentToShape;
+    TMap<uint32, uint32>              ComponentToCompoundRoot;
 
     FPhysicsCommandQueue CommandQueue;
 
