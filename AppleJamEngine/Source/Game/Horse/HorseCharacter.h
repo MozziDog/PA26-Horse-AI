@@ -36,6 +36,8 @@ public:
 
 	UFUNCTION(Pure, Catergory="Character|Components")
 	UHorseMovementComponent* GetHorseMovement() const { return MovementComponent; }
+	UFUNCTION(Pure, Category="Horse|Locomotion")
+	int32 GetCurrentGait() const;
 
 	UFUNCTION(Callable, Category = "Horse|Rider")
 	void SetRiderMounted(bool bInRiderMounted);

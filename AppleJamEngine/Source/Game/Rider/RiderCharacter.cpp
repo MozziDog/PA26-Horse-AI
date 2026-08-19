@@ -1,12 +1,15 @@
 ﻿#include "pch.h"
 #include "RiderCharacter.h"
 
+#include "Animation/Graph/AnimGraphManager.h"
+#include "Animation/Graph/AnimGraphInstance.h"
 #include "Component/Shape/CapsuleComponent.h"
 #include "Component/Primitive/SkeletalMeshComponent.h"
 #include "Component/Input/InputComponent.h"
 #include "Component/ParentConstraintComponent.h"
 #include "Component/Camera/SpringArmComponent.h"
 #include "Component/Camera/CameraComponent.h"
+#include "Component/Script/LuaScriptComponent.h"
 #include "Game/Horse/HorseCharacter.h"
 #include "Game/Rider/NavigationStreamingComponent.h"
 #include "GameFramework/GameMode/PlayerController.h"
@@ -26,7 +29,23 @@ ARiderCharacter::ARiderCharacter()
 void ARiderCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 {
 	Super::InitDefaultComponents(SkeletalMeshFileName);
-	Mesh->SetRelativeLocation(FVector(0.0f, 0.0f, -0.9f));
+	Mesh->SetRelativeLocation(FVector(0.0f, 0.0f, -0.9f)); // 메시 pivot이 발 끝이라 half height 만큼 내림
+
+	// 애니메이션 세팅
+	Mesh->SetAnimationMode(EAnimationMode::AnimationCustom);
+	Mesh->SetAnimInstanceClass(UAnimGraphInstance::StaticClass());
+	UAnimGraphInstance* AnimGraphInstance = Cast<UAnimGraphInstance>(Mesh->GetAnimInstance());
+	if (AnimGraphInstance)
+	{
+		AnimGraphInstance->DefaultSequencePath = "Content/Mesh/HorseRider/Rider_Unmounted_Idle.uasset";
+		FString AnimGraphPath = "Content/Mesh/HorseRider/RiderAnimGraph.uasset";
+		UAnimGraphAsset* Asset = FAnimGraphManager::Get().Load(AnimGraphPath);
+		AnimGraphInstance->SetGraphAsset(Asset);
+		AnimGraphInstance->GraphAssetPath = AnimGraphPath;
+		Mesh->InitializeAnimation();
+	}
+	ULuaScriptComponent* LuaAnimComp = AddComponent<ULuaScriptComponent>();
+	LuaAnimComp->SetScriptFile("RiderAnim.lua");
 
 	ParentConstraintComponent = AddComponent<UParentConstraintComponent>();
 	NavigationStreamingComp = AddComponent<UNavigationStreamingComponent>();
@@ -141,6 +160,7 @@ bool ARiderCharacter::Mount()
 		PlayerController->SetViewTargetWithBlend(Horse, MountCameraTransitionTime, 
 												EViewTargetBlendFunction::VTBlend_EaseInOut);
 	}
+
 	return true;
 }
 
@@ -176,6 +196,7 @@ bool ARiderCharacter::Unmount()
 		PlayerController->SetViewTargetWithBlend(this, MountCameraTransitionTime, 
 												EViewTargetBlendFunction::VTBlend_EaseInOut);
 	}
+
 	return true;
 }
 

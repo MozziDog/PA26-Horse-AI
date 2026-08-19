@@ -136,6 +136,7 @@ void AHorseCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 	MeshComponent = AddComponent<USkeletalMeshComponent>();
 	MeshComponent->AttachToComponent(RootSceneComponent);
 	MeshComponent->SetRelativeLocation(FVector(-0.5f, 0.0f, -StandHeight));
+	MeshComponent->SetRelativeScale(FVector(1.08f, 1.08f, 1.08f));
 
 	ID3D11Device* Device = GEngine->GetRenderer().GetFD3DDevice().GetDevice();
 	if (!SkeletalMeshFileName.empty())
@@ -266,6 +267,11 @@ void AHorseCharacter::SetSteeringInput(float Value)
 void AHorseCharacter::RequestGiddyup() { if (LocomotionComponent) LocomotionComponent->RequestGiddyup(); }
 void AHorseCharacter::RequestSlowDown() { if (LocomotionComponent) LocomotionComponent->RequestSlowDown(); }
 void AHorseCharacter::RequestStop() { if (LocomotionComponent) LocomotionComponent->RequestStop(); }
+
+int32 AHorseCharacter::GetCurrentGait() const
+{
+	return LocomotionComponent ? static_cast<int32>(LocomotionComponent->GetGait()) : static_cast<int32>(EHorseGait::Stop);
+}
 
 void AHorseCharacter::SetRiderMounted(bool bInRiderMounted)
 {

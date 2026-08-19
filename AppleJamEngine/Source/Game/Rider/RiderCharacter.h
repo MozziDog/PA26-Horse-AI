@@ -10,6 +10,8 @@ class UParentConstraintComponent;
 class USpringArmComponent;
 class UCameraComponent;
 class UNavigationStreamingComponent;
+class UAnimGraphInstance;
+class ULuaScriptComponent;
 
 // Player-controlled walking character.
 // While mounted it sends commands to AHorseCharacter.
@@ -45,9 +47,9 @@ protected:
 
 private:
 	UPROPERTY(Edit, Save, Category="Rider|Mount", DisplayName="Mount Location Offset", Type=Vec3, Speed=0.01f)
-	FVector MountLocationOffset = FVector(0.0f, 0.0f, 1.25f);
+	FVector MountLocationOffset = FVector(0.18f, 0.0f, 1.9f);
 	UPROPERTY(Edit, Save, Category="Rider|Mount", DisplayName="Mount Rotation Offset", Type=Rotator, Speed=0.1f)
-	FRotator MountRotationOffset = FRotator::ZeroRotator;
+	FRotator MountRotationOffset = FRotator(FVector(0.0, 7.0f, 0.0f)); // pitch만 7도
 	UPROPERTY(Edit, Save, Category="Rider|Mount", DisplayName="Mount Camera Transition", Min=0.0f, Max=2.0f, Speed=0.1f)
 	float MountCameraTransitionTime = 0.35f;
 
