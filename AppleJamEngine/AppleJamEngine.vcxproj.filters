@@ -2252,6 +2252,15 @@
     <ClCompile Include="Source\Game\Rider\RiderCharacter.cpp">
       <Filter>Source\Game\Rider</Filter>
     </ClCompile>
+    <ClCompile Include="Source\Game\Rider\MountTriggerComponent.cpp">
+      <Filter>Source\Game\Rider</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Game\Rider\AnimNotify_HorseMountFinish.cpp">
+      <Filter>Source\Game\Rider</Filter>
+    </ClCompile>
+    <ClCompile Include="Source\Game\Rider\AnimNotify_HorseUnmountFinish.cpp">
+      <Filter>Source\Game\Rider</Filter>
+    </ClCompile>
     <ClCompile Include="Source\ObjViewer\ObjViewerEngine.cpp">
       <Filter>Source\ObjViewer</Filter>
     </ClCompile>
@@ -4046,6 +4055,15 @@
       <Filter>Source\Game\Lua</Filter>
     </ClInclude>
     <ClInclude Include="Source\Game\Rider\RiderCharacter.h">
+      <Filter>Source\Game\Rider</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Game\Rider\MountTriggerComponent.h">
+      <Filter>Source\Game\Rider</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Game\Rider\AnimNotify_HorseMountFinish.h">
+      <Filter>Source\Game\Rider</Filter>
+    </ClInclude>
+    <ClInclude Include="Source\Game\Rider\AnimNotify_HorseUnmountFinish.h">
       <Filter>Source\Game\Rider</Filter>
     </ClInclude>
     <ClInclude Include="Source\ObjViewer\ObjViewerEngine.h">

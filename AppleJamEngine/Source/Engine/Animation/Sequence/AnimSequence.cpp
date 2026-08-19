@@ -1045,6 +1045,43 @@ namespace
     }
 }
 
+bool UAnimSequence::TryGetRawRootMotionTransformAtTime(float TimeSeconds, FTransform& OutTransform) const
+{
+    OutTransform = FTransform();
+
+    if (!DataModel || RootMotionBoneName.empty() ||
+        DataModel->PlayLength <= 0.0f || DataModel->NumFrames <= 0)
+    {
+        return false;
+    }
+
+    const FRawAnimSequenceTrack* Raw = nullptr;
+    for (const FBoneAnimationTrack& Track : DataModel->BoneAnimationTracks)
+    {
+        if (Track.BoneName == RootMotionBoneName)
+        {
+            Raw = &Track.InternalTrackData;
+            break;
+        }
+    }
+    if (!Raw)
+    {
+        return false;
+    }
+
+    FVector Location;
+    FQuat Rotation;
+    SampleTrackPosRot(
+        *Raw,
+        std::clamp(TimeSeconds, 0.0f, DataModel->PlayLength),
+        DataModel->PlayLength,
+        DataModel->NumFrames,
+        Location,
+        Rotation);
+    OutTransform = FTransform(Location, Rotation, FVector(1.0f, 1.0f, 1.0f));
+    return true;
+}
+
 FTransform UAnimSequence::ExtractRootMotion(float PrevTime, float CurTime, bool bLoop) const
 {
     FTransform Delta;  // Identity 기본

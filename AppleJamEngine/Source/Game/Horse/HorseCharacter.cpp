@@ -24,6 +24,7 @@
 #include "JumpObstacleSensorComponent.h"
 #include "CliffFanSensorComponent.h"
 #include "Game/Horse/HorseConstants.h"
+#include "Game/Rider/MountTriggerComponent.h"
 #include "Mesh/MeshManager.h"
 #include "Runtime/Engine.h"
 
@@ -131,6 +132,29 @@ void AHorseCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 	StepBlockComponent->SetCollisionObjectType(ECollisionChannel::Pawn);
 	StepBlockComponent->SetKinematic(true);
 	StepBlockComponent->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+
+	// 왼쪽/오른쪽/뒤쪽으로 각각 탑승을 위한 MountTrigger 추가
+	auto AddMountTrigger = [this](EMountDirection Direction, const FVector& Location)
+	{
+		UMountTriggerComponent* Trigger = AddComponent<UMountTriggerComponent>();
+		if (!Trigger)
+		{
+			return;
+		}
+
+		Trigger->AttachToComponent(RootSceneComponent);
+		Trigger->SetMountDirection(Direction);
+		Trigger->SetRelativeLocation(Location);
+		Trigger->SetBoxExtent(FVector(0.65f, 0.50f, 1.00f));
+		Trigger->SetCollisionObjectType(ECollisionChannel::Trigger);
+		Trigger->SetCollisionResponseToAllChannels(ECollisionResponse::Overlap);
+		Trigger->SetGenerateOverlapEvents(true);
+		Trigger->SetSimulatePhysics(false);
+		Trigger->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	};
+	AddMountTrigger(EMountDirection::Left,  FVector(0.0f, -1.10f, 1.00f));
+	AddMountTrigger(EMountDirection::Right, FVector(0.0f,  1.10f, 1.00f));
+	AddMountTrigger(EMountDirection::Back,  FVector(-1.35f, 0.0f, 1.00f));
 
 	// SkeletalMesh. 발바닥이 지면에 닿도록 StandHeight 만큼 아래로 offset 부여
 	MeshComponent = AddComponent<USkeletalMeshComponent>();

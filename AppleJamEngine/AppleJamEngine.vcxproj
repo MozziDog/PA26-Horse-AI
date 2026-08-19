@@ -259,6 +259,9 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
     <ClCompile Include="Source\Engine\AI\Navigation\VoxelNavigationBakeBuilder.cpp" />
     <ClCompile Include="Source\Engine\AI\Navigation\NavigationStreamingService.cpp" />
     <ClCompile Include="Source\Game\Rider\RiderCharacter.cpp" />
+    <ClCompile Include="Source\Game\Rider\MountTriggerComponent.cpp" />
+    <ClCompile Include="Source\Game\Rider\AnimNotify_HorseMountFinish.cpp" />
+    <ClCompile Include="Source\Game\Rider\AnimNotify_HorseUnmountFinish.cpp" />
     <ClCompile Include="Source\Game\Rider\NavigationStreamingComponent.cpp" />
     <ClCompile Include="Source\Engine\AI\Navigation\VoxelNavigationGrid.cpp" />
     <ClCompile Include="Source\Engine\AI\Navigation\VoxelNavigationVolume.cpp" />
@@ -1298,6 +1301,9 @@ xcopy /Y "$(ProjectDir)ThirdParty\fbx\lib\x64\release\libfbxsdk.dll" "$(OutDir)"
 	<ClInclude Include="Source\Game\Monster\MonsterFollowComponent.h" />
     <ClInclude Include="Source\Game\Lua\GameLuaBindings.h" />
     <ClInclude Include="Source\Game\Rider\NavigationStreamingComponent.h" />
+    <ClInclude Include="Source\Game\Rider\MountTriggerComponent.h" />
+    <ClInclude Include="Source\Game\Rider\AnimNotify_HorseMountFinish.h" />
+    <ClInclude Include="Source\Game\Rider\AnimNotify_HorseUnmountFinish.h" />
     <ClInclude Include="Source\Game\Rider\RiderCharacter.h" />
     <ClInclude Include="Source\ObjViewer\ObjViewerEngine.h" />
     <ClInclude Include="Source\ObjViewer\ObjViewerPanel.h" />

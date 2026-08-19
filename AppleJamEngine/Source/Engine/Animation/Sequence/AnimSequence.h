@@ -143,6 +143,11 @@ public:
     //   delta 는 anim 의 본 local 좌표계 → 호출자가 actor world 로 변환해야 함.
     FTransform ExtractRootMotion(float PrevTime, float CurTime, bool bLoop) const;
 
+	// Root motion은 Off지만 특정 시점에 애니메이션 Transform과 Actor Transform 동기화하고 싶을 때 사용
+	// NOTE: root trasnform delta는 Root Motion Bone이 지정되어야만 계산할 수 있음.
+	//		root motion을 적용하지 않는다고 하더라도 잠시 켜고 root bone 세팅 후에 다시 끄는 등의 처리 필요. 
+    bool TryGetRawRootMotionTransformAtTime(float TimeSeconds, FTransform& OutTransform) const;
+
     // ─────────────────────────────────────────────────────────────
     // Mock factories (A 의 FBX 임포트 전 시각 검증용 — 임시 데이터).
     // 두 팩토리 모두 UAnimDataModel 을 새로 만들고 SetDataModel 로 묶어 반환.
