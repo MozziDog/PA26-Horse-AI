@@ -59,12 +59,15 @@ void URoadSensorComponent::TickComponent(float DeltaTime, ELevelTick TickType, F
 	}
 
 	// Debug draw
-	DrawDebugSphere(World, GetWorldLocation(), 0.3f, 16, FColor::Green());
-	if (Result.bValid)
+	if (bDrawDebug)
 	{
-		DrawDebugSphere(World, Result.Position, 0.1f, 16, FColor::Red());
-		DrawDebugLine(World, Owner->GetActorLocation(), Result.Position, FColor::Red());
-		DrawDebugLine(World, GetWorldLocation(), Result.Position, FColor::Green());
+		DrawDebugSphere(World, GetWorldLocation(), 0.3f, 16, FColor::Green());
+		if (Result.bValid)
+		{
+			DrawDebugSphere(World, Result.Position, 0.1f, 16, FColor::Red());
+			DrawDebugLine(World, Owner->GetActorLocation(), Result.Position, FColor::Red());
+			DrawDebugLine(World, GetWorldLocation(), Result.Position, FColor::Green());
+		}
 	}
 }
 

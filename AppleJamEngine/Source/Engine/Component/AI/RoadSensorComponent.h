@@ -30,6 +30,9 @@ private:
 
 	UPROPERTY(Edit, Save, Category = "AI|Sensor")
 	FName DistBlackboardKey = HorseBBKeys::RoadDist; // (float)도로까지의 거리. 멀면 도로추종 중단
+
+	UPROPERTY(Edit, Save, Category = "Debug")
+	bool bDrawDebug = true;
 	
 	// ─── 런타임 캐시 ───
 	TWeakObjectPtr<UWorld> World;	// Debug draw용
