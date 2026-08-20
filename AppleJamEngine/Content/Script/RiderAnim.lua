@@ -155,18 +155,8 @@ local function is_walking_unmounted(is_mounted)
         return false
     end
 
-    if movement.GetSpeed ~= nil then
-        return movement:GetSpeed() > MIN_WALKSPEED
-    end
-
-    if movement.GetVelocity ~= nil then
-        local velocity = movement:GetVelocity()
-        if velocity ~= nil then
-            return velocity.X * velocity.X + velocity.Y * velocity.Y > MIN_WALKSPEED * MIN_WALKSPEED
-        end
-    end
-
-    return false
+    local velocity = call_reflected(movement, "GetVelocity() const")
+    return velocity:Length() > MIN_WALKSPEED
 end
 
 local function update_anim_graph()

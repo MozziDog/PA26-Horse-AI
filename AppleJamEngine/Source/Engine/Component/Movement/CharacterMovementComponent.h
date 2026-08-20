@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "PawnMovementComponent.h"
 #include "Core/Types/CollisionTypes.h"   // FHitResult
@@ -48,7 +48,7 @@ public:
 	// legacy name 유지. Character 가 control rotation 을 덮어쓰기 전에 query 해서 충돌을 피한다.
 	UFUNCTION(Pure, Category="CharacterMovement|RootMotion")
 	bool HasYawDrivenByRootMotion() const { return bAppliedRootMotionRotationThisFrame; }
-
+	UFUNCTION(Pure, Category="CharacterMovement")
 	const FVector& GetVelocity() const { return Velocity; }
 	UFUNCTION(Pure, Category="CharacterMovement")
 	FVector        GetVelocityValue() const { return Velocity; }
