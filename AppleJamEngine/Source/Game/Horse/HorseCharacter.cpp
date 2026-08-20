@@ -192,6 +192,7 @@ void AHorseCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 	}
 
 	// Guidance Layer: 어떠한 방향으로 나아갈지 결정
+	// 탑승 상태 여부에 따라 둘 중 하나만 활성화.
 	UserGuidanceComponent = AddComponent<UHorseUserGuidanceComponent>();
 	CallNavigationComponent = AddComponent<UHorseCallNavigationComponent>();
 

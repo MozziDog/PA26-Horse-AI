@@ -271,10 +271,12 @@ void UHorseLocomotionComponent::UpdateContextSteering(FBlackboard& BB, const AAc
 
 	if (GetGait() == EHorseGait::Stop)
 	{
-		// DesiredGait=Stop에서도 guidance가 있으면 안전 steering 결과를 향해 제자리 회전한다.
-		if (Influence.bGuidance && Field.BestIdx >= 0 && Field.Score[Field.BestIdx] > -FLT_MAX)
+		// DesiredGait=Stop이면서 동시에 Guidance가 있다 → 제자리 회전 상황
+		// 제자리 회전 상황에서는 danger slot 여부를 무시하기 위해 
+		// ApplySeering을 통한 간접 조향 대신 직접 Input Vector 전달
+		if (Influence.bGuidance)
 		{
-			ApplySteering(Owner, Forward, Field, DeltaTime);
+			Movement->AddInputVector(Influence.GuidanceDir, 0.01f);
 		}
 		return;
 	}
