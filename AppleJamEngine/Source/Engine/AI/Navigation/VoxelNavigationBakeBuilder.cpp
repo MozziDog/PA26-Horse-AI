@@ -212,7 +212,9 @@ bool FVoxelNavigationBakeGrid::Build(
 	ChunkCellToNodeLookup.clear();
 	BuildStats = FVoxelNavigationBuildStats();
 	BuildSettings = Settings;
-	RefreshMemoryUsage();
+	RefreshRuntimeMemory();
+	ResetBakeScratchMemory();
+	UpdateBuildPeakMemory();
 
 	if (!World)
 	{
@@ -235,9 +237,14 @@ bool FVoxelNavigationBakeGrid::Build(
 	L1ChunkCountX = (CellCountX + NavL1ChunkCellsPerAxis - 1) / NavL1ChunkCellsPerAxis;
 	L1ChunkCountY = (CellCountY + NavL1ChunkCellsPerAxis - 1) / NavL1ChunkCellsPerAxis;
 	L1ChunkCountZ = (CellCountZ + NavL1ChunkCellsPerAxis - 1) / NavL1ChunkCellsPerAxis;
+
+	const size_t PrevXYLookupCapacity = XYToNodesLookup.capacity();
 	XYToNodesLookup.resize(static_cast<size_t>(CellCountX) * static_cast<size_t>(CellCountY));
+	TrackBakeScratchMemoryCapacity(PrevXYLookupCapacity, XYToNodesLookup.capacity(),sizeof(TArray<int>));
+
 	L1ChunkLookup.assign(L1ChunkCountX * L1ChunkCountY * L1ChunkCountZ, -1);
-	RefreshMemoryUsage();
+	RefreshRuntimeMemory();
+	UpdateBuildPeakMemory();
 
 	// NOTE: Navigation 빌드시에는 WorldStatic만 고려
 	constexpr uint32 LayerMask = ObjectTypeBit(ECollisionChannel::WorldStatic);
@@ -371,17 +378,29 @@ bool FVoxelNavigationBakeGrid::Build(
 					Node.Coord = { X, Y, Z };
 					Node.Position = StandingPoint;
 					Node.GroundNormal = GroundNormal;
+					Node.Neighbors.reserve(8);
 					const int NodeIndex = static_cast<int>(Nodes.size());
-					Nodes.push_back(Node);
+
+					// 메모리 추적 때문에 일괄 순회하지 않도록 원소 하나 추가할 때마다 capacity 추적
+					const size_t PrevNodesCapacity = Nodes.capacity();
+					Nodes.push_back(std::move(Node));
+					TrackBakeScratchMemoryCapacity(PrevNodesCapacity, Nodes.capacity(), sizeof(FVoxelNavigationNode));
+					
+					BakeScratchMemoryBytes += Nodes.back().Neighbors.capacity() * sizeof(int);
+					
 					TArray<int>& Column = XYToNodesLookup[FlattenColumn(X, Y)];
+					const size_t PrevColumnCapacity = Column.capacity();
 					Column.push_back(NodeIndex);
+					TrackBakeScratchMemoryCapacity(PrevColumnCapacity, Column.capacity(), sizeof(int));
+
 					AcceptedGroundHeights.push_back(StandingPoint.Z);
 				}
-				RefreshBakeScratchMemory();
-				UpdateBuildPeakMemory(static_cast<size_t>(AcceptedGroundHeights.capacity()) * sizeof(float));
+				UpdateBuildPeakMemory(L1TestResult.capacity() * sizeof(uint8)
+									+ AcceptedGroundHeights.capacity() * sizeof(float));
 			}
 		}
 	}
+	TArray<bool>().swap(L1TestResult);
 	BuildStats.NumRawWalkableNodes = Nodes.size();
 
 	// 하나의 복셀(X,Y)에서 이웃한 복셀로 이동가능한지 체크 (경사 및 단차 검사)
@@ -431,7 +450,7 @@ bool FVoxelNavigationBakeGrid::Build(
 			}
 		}
 	}
-	CalculateBakeScratchMemoryBytes();
+	UpdateBuildPeakMemory();
 
 	// 8방향으로 연결된 노드만 남기고 필터링 (mark and sweep)
 	TArray<uint8> RetainedNodes(Nodes.size(), 0);
@@ -456,8 +475,18 @@ bool FVoxelNavigationBakeGrid::Build(
 		RetainedNodes[NodeIndex] = (DirectionMask == FullNeighborMask ? 1 : 0);
 	}
 
+	const size_t PreviousNodeToChunkLookupCapacity = NodeToChunkLookup.capacity();
 	NodeToChunkLookup.assign(Nodes.size(), -1);
+	TrackBakeScratchMemoryCapacity(
+		PreviousNodeToChunkLookupCapacity,
+		NodeToChunkLookup.capacity(),
+		sizeof(int));
+	const size_t PreviousNodeToLocalCellIdxLookupCapacity = NodeToLocalCellIdxLookup.capacity();
 	NodeToLocalCellIdxLookup.assign(Nodes.size(), -1);
+	TrackBakeScratchMemoryCapacity(
+		PreviousNodeToLocalCellIdxLookupCapacity,
+		NodeToLocalCellIdxLookup.capacity(),
+		sizeof(int));
 	for (int NodeIndex = 0; NodeIndex < Nodes.size(); ++NodeIndex)
 	{
 		if (RetainedNodes[NodeIndex] == 0) 
@@ -477,7 +506,12 @@ bool FVoxelNavigationBakeGrid::Build(
 			L1Chunks.push_back(Chunk);
 			TStaticArray<int, NavL1ChunkCellCount> CellToNode;
 			CellToNode.fill(-1);
+			const size_t PreviousChunkCellToNodeLookupCapacity = ChunkCellToNodeLookup.capacity();
 			ChunkCellToNodeLookup.push_back(CellToNode);
+			TrackBakeScratchMemoryCapacity(
+				PreviousChunkCellToNodeLookupCapacity,
+				ChunkCellToNodeLookup.capacity(),
+				sizeof(TStaticArray<int, NavL1ChunkCellCount>));
 			L1ChunkLookup[FlatChunk] = ChunkIndex;
 		}
 
@@ -540,7 +574,9 @@ bool FVoxelNavigationBakeGrid::Build(
 				NodeToChunkLookup.clear();
 				NodeToLocalCellIdxLookup.clear();
 				ChunkCellToNodeLookup.clear();
-				RefreshMemoryUsage();
+				RefreshRuntimeMemory();
+				ResetBakeScratchMemory();
+				UpdateBuildPeakMemory();
 				return false;
 			}
 		}
@@ -554,7 +590,7 @@ bool FVoxelNavigationBakeGrid::Build(
 	}
 	BuildStats.NumErodedNodes = BuildStats.NumRawWalkableNodes - BuildStats.NumWalkableNodes;
 	BuildStats.NumBuiltL1Chunks = L1Chunks.size();
-	RefreshMemoryUsage();
+	RefreshRuntimeMemory();
 	UpdateBuildPeakMemory(RetainedNodes.capacity() * sizeof(uint8));
 
 	// HPA* 계층 구성
@@ -573,7 +609,8 @@ bool FVoxelNavigationBakeGrid::Build(
 	{
 		BuildStats.NumAbstractEdges += Portal.Edges.size();
 	}
-	RefreshMemoryUsage();
+	RefreshRuntimeMemory();
+	UpdateBuildPeakMemory(RetainedNodes.capacity() * sizeof(uint8));
 
 	// 계산 과정에 썼던 임시 배열들 정리
 	TArray<FVoxelNavigationNode>().swap(Nodes);
@@ -581,7 +618,9 @@ bool FVoxelNavigationBakeGrid::Build(
 	TArray<int>().swap(NodeToChunkLookup);
 	TArray<int>().swap(NodeToLocalCellIdxLookup);
 	TArray<TStaticArray<int, NavL1ChunkCellCount>>().swap(ChunkCellToNodeLookup);
-	RefreshMemoryUsage();
+	ResetBakeScratchMemory();
+	RefreshRuntimeMemory();
+	UpdateBuildPeakMemory(RetainedNodes.capacity() * sizeof(uint8));
 
 	BuildStats.BuildTimeMs = ElapsedMilliseconds(StartTime);
 	bBuilt = BuildStats.NumWalkableNodes > 0;
@@ -789,40 +828,33 @@ void FVoxelNavigationBakeGrid::AddDirectedEdge(int FromNode, int ToNode)
 	TArray<int>& Neighbors = Nodes[FromNode].Neighbors;
 	if (!ContainsIndex(Neighbors, ToNode))
 	{
+		const size_t PreviousNeighborCapacity = Neighbors.capacity();
 		Neighbors.push_back(ToNode);
+		TrackBakeScratchMemoryCapacity(PreviousNeighborCapacity, Neighbors.capacity(), sizeof(int));
 		++BuildStats.NumDirectedEdges;
 	}
 }
 
-void FVoxelNavigationBakeGrid::RefreshMemoryUsage()
+void FVoxelNavigationBakeGrid::ResetBakeScratchMemory()
 {
-	RefreshRuntimeMemory();
-	RefreshBakeScratchMemory();
+	BakeScratchMemoryBytes =
+		Nodes.capacity() * sizeof(FVoxelNavigationNode) +
+		XYToNodesLookup.capacity() * sizeof(TArray<int>) +
+		NodeToChunkLookup.capacity() * sizeof(int) +
+		NodeToLocalCellIdxLookup.capacity() * sizeof(int) +
+		ChunkCellToNodeLookup.capacity() * sizeof(TStaticArray<int, NavL1ChunkCellCount>);
 }
 
-void FVoxelNavigationBakeGrid::RefreshBakeScratchMemory()
+void FVoxelNavigationBakeGrid::TrackBakeScratchMemoryCapacity(size_t PreviousCapacity, size_t CurrentCapacity, size_t ElementSize)
 {
-	BakeScratchMemoryBytes = CalculateBakeScratchMemoryBytes();
-	UpdateBuildPeakMemory();
-}
-
-size_t FVoxelNavigationBakeGrid::CalculateBakeScratchMemoryBytes() const
-{
-	size_t TotalBytes = 0;
-	TotalBytes += Nodes.capacity() * sizeof(FVoxelNavigationNode);
-	TotalBytes += XYToNodesLookup.capacity() * sizeof(TArray<int>);
-	TotalBytes += NodeToChunkLookup.capacity() * sizeof(int);
-	TotalBytes += NodeToLocalCellIdxLookup.capacity() * sizeof(int);
-	TotalBytes += ChunkCellToNodeLookup.capacity() * sizeof(TStaticArray<int, NavL1ChunkCellCount>);
-	for (const FVoxelNavigationNode& Node : Nodes)
+	if (CurrentCapacity >= PreviousCapacity)
 	{
-		TotalBytes += Node.Neighbors.capacity() * sizeof(int);
+		BakeScratchMemoryBytes += (CurrentCapacity - PreviousCapacity) * ElementSize;
 	}
-	for (const TArray<int>& Column : XYToNodesLookup)
+	else
 	{
-		TotalBytes += Column.capacity() * sizeof(int);
+		BakeScratchMemoryBytes -= (PreviousCapacity - CurrentCapacity) * ElementSize;
 	}
-	return TotalBytes;
 }
 
 void FVoxelNavigationBakeGrid::UpdateBuildPeakMemory(uint64 AdditionalTemporaryBytes)

@@ -43,9 +43,10 @@ private:
 	bool BuildBakedChunksFromRuntimeGraph();
 	bool HasCardinalBridge(int FromNode, int ToNode, int BridgeX, int BridgeY) const;
 	void AddDirectedEdge(int FromNode, int ToNode);
-	void RefreshMemoryUsage();
-	void RefreshBakeScratchMemory();
-	size_t CalculateBakeScratchMemoryBytes() const;
+	// ───빌드 중 메모리 사용량 추적───
+	void ResetBakeScratchMemory();
+	// 메모리 추적 때문에 일괄 순회하지 않도록 원소 하나 추가할 때마다 capacity 추적, ElementSize 곱해서 총 사용량에 증감
+	void TrackBakeScratchMemoryCapacity(size_t PreviousCapacity, size_t CurrentCapacity, size_t ElementSize);
 	void UpdateBuildPeakMemory(uint64 AdditionalTemporaryBytes = 0);
 
 	FVoxelNavigationBuildStats BuildStats;
