@@ -36,6 +36,9 @@ public:
 
 	UFUNCTION(Pure, Catergory="Character|Components")
 	UHorseMovementComponent* GetHorseMovement() const { return MovementComponent; }
+	UFUNCTION(Pure, Catergory = "Character|Components")
+	USkeletalMeshComponent* GetSkeletalMesh() const { return MeshComponent; }
+
 	UFUNCTION(Pure, Category="Horse|Locomotion")
 	int32 GetCurrentGait() const;
 

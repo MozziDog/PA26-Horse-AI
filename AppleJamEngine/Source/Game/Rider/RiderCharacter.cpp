@@ -198,7 +198,7 @@ void ARiderCharacter::OnMountFinishNotify()
 	// Mount 동작 마무리
 	AHorseCharacter* Horse = PendingHorse.Get();
 	if (!Horse || !ParentConstraintComponent || !Horse->GetRootComponent() ||
-		!ParentConstraintComponent->AttachTo(Horse->GetRootComponent(), FName::None, false))
+		!ParentConstraintComponent->AttachTo(Horse->GetSkeletalMesh(), FName("Saddle"), false))
 	{
 		ResetMountTransition();
 		return;
