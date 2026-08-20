@@ -562,6 +562,14 @@ bool UCharacterMovementComponent::MoveAlongFloor(const FVector& Delta, FHitResul
 		return true;
 	}
 
+	// Hit 위치가 이동방향과 반대쪽이면 무시 (등 뒤의 장애물이 걸린 경우)
+	FVector ToHitLocation = Hit.WorldHitLocation - Start;
+	if (ToHitLocation.Dot(Delta) < 0)
+	{
+		Updated->SetWorldLocation(Start + Delta);
+		return true;
+	}
+
 	const FVector MoveDir = Delta.Normalized();
 	const float SafeDistance = (std::max)(0.0f, Hit.Distance - SweepPullbackDistance);
 	Updated->SetWorldLocation(Start + MoveDir * SafeDistance);
