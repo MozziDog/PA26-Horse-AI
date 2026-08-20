@@ -63,6 +63,8 @@ private:
 	FVector MountLocationOffset = FVector(0.18f, 0.0f, 1.9f);
 	UPROPERTY(Edit, Save, Category="Rider|Mount", DisplayName="Mount Rotation Offset", Type=Rotator, Speed=0.1f)
 	FRotator MountRotationOffset = FRotator(FVector(0.0, 7.0f, 0.0f)); // pitch만 7도
+	UPROPERTY(Edit, Save, Category="Rider|Mount", DisplayName="Mount/Unmount Start Height Offset", Min=-2.0f, Max=2.0f, Speed=0.01f)
+	float MountStartHeightOffset = 0.2f;
 	UPROPERTY(Edit, Save, Category="Rider|Mount", DisplayName="Mount Camera Transition", Min=0.0f, Max=2.0f, Speed=0.1f)
 	float MountCameraTransitionTime = 0.35f;
 	UPROPERTY(Edit, Save, Category="Rider|Mount|Montage", DisplayName="Left Montage")

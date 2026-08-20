@@ -387,7 +387,7 @@ void ARiderCharacter::SnapToUnmountStart(AHorseCharacter* Horse, const UAnimMont
 	// Saddle가 Horse actor pivot 바로 위에 있다는 전제로 actor XY와 회전을 유지하고 Z만 가져온다.
 	// Unmount curve의 첫 root pose(Z = 말 높이)가 지면 기준 Rider root 위에서 정확히 seat 위치가 된다.
 	FVector StartLocation = Horse->GetActorLocation();
-	StartLocation.Z = SaddleWorldZ + MountLocationOffset.Z;
+	StartLocation.Z = SaddleWorldZ + MountLocationOffset.Z + MountStartHeightOffset;
 
 	FTransform UnmountStartRoot;
 	if (GetMontageSectionRootTransform(Montage, FName("Unmount"), 0.0f, UnmountStartRoot))
