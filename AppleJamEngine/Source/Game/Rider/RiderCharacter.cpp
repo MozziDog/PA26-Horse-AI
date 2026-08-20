@@ -61,8 +61,8 @@ void ARiderCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 	// 3인칭 카메라 체인 — Capsule → SpringArm → Camera. lag 적용해 부드럽게 따라옴.
 	SpringArm = AddComponent<USpringArmComponent>();
 	SpringArm->AttachToComponent(CapsuleComponent);
-	SpringArm->TargetArmLength = 10.0f;
-	SpringArm->SocketOffset = FVector(0.0f, 0.0f, 3.0f);
+	SpringArm->TargetArmLength = 5.0f;
+	SpringArm->SocketOffset = FVector(0.0f, 0.0f, 1.5f);
 	SpringArm->bEnableCameraLag = true;
 	SpringArm->bEnableCameraRotationLag = true;
 

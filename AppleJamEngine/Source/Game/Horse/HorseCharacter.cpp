@@ -115,7 +115,7 @@ void AHorseCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 	CollisionComponent->SetRelativeLocation(FVector(0.0f, 0.0f, -StandHeight + 1.2f));
 	// 앞쪽으로 눕힘. 쿼터니언-오일러각 변환 문제로 (0, 90, 0) 대신 (90, 0, 90) 사용
 	CollisionComponent->SetRelativeRotation(FQuat::FromRotator(FRotator(0.0, 90.0, 90.0)));
-	CollisionComponent->SetCapsuleSize(0.3f, 0.8f);
+	CollisionComponent->SetCapsuleSize(0.4f, 0.8f);
 	CollisionComponent->SetCollisionObjectType(ECollisionChannel::Pawn);
 	CollisionComponent->SetKinematic(true);
 	CollisionComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
@@ -202,7 +202,7 @@ void AHorseCharacter::InitDefaultComponents(const FString& SkeletalMeshFileName)
 	if(ObstacleFanSensorComponent)
 	{
 		ObstacleFanSensorComponent->AttachToComponent(RootSceneComponent);
-		ObstacleFanSensorComponent->SetRelativeLocation(FVector(0.0f, 0.0f, -StandHeight + 1.2f));
+		ObstacleFanSensorComponent->SetRelativeLocation(FVector(0.75f, 0.0f, -StandHeight + 1.2f));
 	}
 	JumpObstacleSensorComponent = AddComponent<UJumpObstacleSensorComponent>();
 	if (JumpObstacleSensorComponent)

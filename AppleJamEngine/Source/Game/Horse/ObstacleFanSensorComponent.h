@@ -49,7 +49,8 @@ private:
 	float ProbeRange = 6.0f;      // m — 각 sweep 최대 이동거리. 미탐지 시 clearance 로 기록되는 값.
 
 	UPROPERTY(Edit, Save, Category="Sensor", DisplayName="Body Half Width", Min=0.0f, Max=3.0f, Speed=0.02f)
-	float BodyHalfWidth = 0.3f;   // m — box 좌우/전후 half extent. 기존 sphere와 같은 전방 clearance 여유를 유지한다.
+	float BodyHalfWidth = 0.2f;   // m — sweep box의 XY방향 extent. 너무 작으면 장애물 인식력이 떨어지고 
+								  // 너무 크면 말이 벽에 옆으로 붙었을 때 반대방향 센서까지 걸려버림
 
 	UPROPERTY(Edit, Save, Category="Sensor", DisplayName="Body Half Height", Min=0.0f, Max=3.0f, Speed=0.02f)
 	float BodyHalfHeight = 0.7f;  // m — component 기본 높이(지면+1.2m) 기준 box 하단이 약 0.2m가 된다.
