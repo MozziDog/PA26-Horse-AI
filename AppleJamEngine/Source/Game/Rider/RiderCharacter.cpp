@@ -283,6 +283,7 @@ bool ARiderCharacter::DoMount(AHorseCharacter* Horse, UAnimMontage* Montage, EMo
 	PendingHorse = Horse;
 	PendingMountDirection = Direction;
 	CharacterMovement->StopMovementImmediately(); // 누적된 input vector 정리, CMC로 인한 yaw 회전 방지
+	CharacterMovement->SetComponentTickEnabled(false); // 탑승 위치 보정 중 floor stick / gravity 방지
 	SnapToMountStart(Horse, Montage);
 	AnimInstance->PlayMontage(Montage, FName("Mount"));
 	return true;
@@ -301,6 +302,7 @@ bool ARiderCharacter::DoUnmount(AHorseCharacter* Horse, UAnimMontage* Montage)
 	PendingHorse = Horse;
 	PendingMontage = Montage;
 	CharacterMovement->StopMovementImmediately(); // 누적된 input vector 정리, CMC로 인한 yaw 회전 방지
+	CharacterMovement->SetComponentTickEnabled(false); // 하차 위치 보정 중 floor stick / gravity 방지
 	SnapToUnmountStart(Horse, Montage);
 	AnimInstance->PlayMontage(Montage, FName("Unmount"));
 	return true;
@@ -333,19 +335,23 @@ bool ARiderCharacter::GetMontageSectionRootTransform(
 
 void ARiderCharacter::SnapToMountStart(AHorseCharacter* Horse, const UAnimMontage* Montage)
 {
-	USceneComponent* HorseRoot = Horse ? Horse->GetRootComponent() : nullptr;
+	USkeletalMeshComponent* HorseMesh = Horse ? Horse->GetSkeletalMesh() : nullptr;
 	USceneComponent* RiderRoot = GetRootComponent();
-	if (!HorseRoot || !RiderRoot)
+	if (!HorseMesh || !RiderRoot)
 	{
 		return;
 	}
 
-	// Mounted Idle의 actor root pose를 기준점으로 사용한다. Mount curve의 마지막 Z를
-	// 빼면 animation 종료 시의 visual Z와 constraint가 적용된 뒤의 visual Z가 일치한다.
-	const FMatrix MountedRootWorld =
-		FTransform(MountLocationOffset, MountRotationOffset, FVector(1.0f, 1.0f, 1.0f)).ToMatrix()
-		* HorseRoot->GetWorldMatrix();
-	FVector StartLocation = MountedRootWorld.GetLocation();
+	const FName SaddleSocketName("Saddle");
+	const float SaddleWorldZ = HorseMesh->HasSocket(SaddleSocketName)
+		? HorseMesh->GetSocketWorldLocation(SaddleSocketName).Z
+		: HorseMesh->GetWorldLocation().Z;
+
+	// Socket은 bone space 축을 가지므로 위치 보정의 기준 축으로 사용하지 않는다.
+	// Saddle가 Horse actor pivot 바로 위에 있다는 전제로 actor XY와 회전을 유지하고 Z만 가져온다.
+	// Mount curve의 마지막 Z를 빼면 animation 종료 시의 visual Z와 constraint가 적용된 뒤의 visual Z가 일치한다.
+	FVector StartLocation = Horse->GetActorLocation();
+	StartLocation.Z = SaddleWorldZ + MountLocationOffset.Z + MountStartHeightOffset;
 
 	const FCompositeSection* MountSection = Montage ? Montage->FindSection(FName("Mount")) : nullptr;
 	FTransform MountEndRoot;
@@ -360,24 +366,28 @@ void ARiderCharacter::SnapToMountStart(AHorseCharacter* Horse, const UAnimMontag
 	}
 
 	RiderRoot->SetWorldLocation(StartLocation);
-	RiderRoot->SetWorldRotation(HorseRoot->GetWorldRotation());
+	RiderRoot->SetWorldRotation(Horse->GetActorRotation());
 }
 
 void ARiderCharacter::SnapToUnmountStart(AHorseCharacter* Horse, const UAnimMontage* Montage)
 {
-	USceneComponent* HorseRoot = Horse ? Horse->GetRootComponent() : nullptr;
+	USkeletalMeshComponent* HorseMesh = Horse ? Horse->GetSkeletalMesh() : nullptr;
 	USceneComponent* RiderRoot = GetRootComponent();
-	if (!HorseRoot || !RiderRoot || !ParentConstraintComponent)
+	if (!HorseMesh || !RiderRoot || !ParentConstraintComponent)
 	{
 		return;
 	}
 
-	// Mount 완료 시 constraint가 넣었던 위치 보정을 반대로 적용한다. Unmount curve의
-	// 첫 root pose(Z = 말 높이)가 지면 기준 Rider root 위에서 정확히 seat 위치가 된다.
-	const FMatrix MountedRootWorld =
-		FTransform(MountLocationOffset, MountRotationOffset, FVector(1.0f, 1.0f, 1.0f)).ToMatrix()
-		* HorseRoot->GetWorldMatrix();
-	FVector StartLocation = MountedRootWorld.GetLocation();
+	const FName SaddleSocketName("Saddle");
+	const float SaddleWorldZ = HorseMesh->HasSocket(SaddleSocketName)
+		? HorseMesh->GetSocketWorldLocation(SaddleSocketName).Z
+		: HorseMesh->GetWorldLocation().Z;
+
+	// Socket은 bone space 축을 가지므로 위치 보정의 기준 축으로 사용하지 않는다.
+	// Saddle가 Horse actor pivot 바로 위에 있다는 전제로 actor XY와 회전을 유지하고 Z만 가져온다.
+	// Unmount curve의 첫 root pose(Z = 말 높이)가 지면 기준 Rider root 위에서 정확히 seat 위치가 된다.
+	FVector StartLocation = Horse->GetActorLocation();
+	StartLocation.Z = SaddleWorldZ + MountLocationOffset.Z;
 
 	FTransform UnmountStartRoot;
 	if (GetMontageSectionRootTransform(Montage, FName("Unmount"), 0.0f, UnmountStartRoot))
@@ -391,7 +401,7 @@ void ARiderCharacter::SnapToUnmountStart(AHorseCharacter* Horse, const UAnimMont
 
 	ParentConstraintComponent->Detach();
 	RiderRoot->SetWorldLocation(StartLocation);
-	RiderRoot->SetWorldRotation(HorseRoot->GetWorldRotation());
+	RiderRoot->SetWorldRotation(Horse->GetActorRotation());
 }
 
 void ARiderCharacter::SnapToUnmountEnd(AHorseCharacter* Horse, const UAnimMontage* Montage)
@@ -427,6 +437,7 @@ void ARiderCharacter::SnapToUnmountEnd(AHorseCharacter* Horse, const UAnimMontag
 
 void ARiderCharacter::ResetMountTransition()
 {
+	CharacterMovement->SetComponentTickEnabled(true);
 	bMountTransitionInProgress = false;
 	PendingHorse.Reset();
 	PendingMontage.Reset();
